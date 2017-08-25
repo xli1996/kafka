@@ -415,21 +415,20 @@ class WorkerSinkTask extends WorkerTask {
                     this, msg.topic(), msg.partition(), msg.offset(), msg.timestamp());
             SchemaAndValue keyAndSchema = keyConverter.toConnectData(msg.topic(), msg.key());
             SchemaAndValue valueAndSchema = valueConverter.toConnectData(msg.topic(), msg.value());
-            Long timestamp = ConnectUtils.checkAndConvertTimestamp(msg.timestamp());
             SinkRecord record = new SinkRecord(msg.topic(), msg.partition(),
                     keyAndSchema.schema(), keyAndSchema.value(),
                     valueAndSchema.schema(), valueAndSchema.value(),
                     msg.offset(),
-                    timestamp,
+                    (msg.timestampType() == TimestampType.NO_TIMESTAMP_TYPE) ? null : msg.timestamp(),
                     msg.timestampType());
             log.trace("{} Applying transformations to record in topic '{}' partition {} at offset {} and timestamp {} with key {} and value {}",
-                    this, msg.topic(), msg.partition(), msg.offset(), timestamp, keyAndSchema.value(), valueAndSchema.value());
+                    this, msg.topic(), msg.partition(), msg.offset(), msg.timestamp(), keyAndSchema.value(), valueAndSchema.value());
             record = transformationChain.apply(record);
             if (record != null) {
                 messageBatch.add(record);
             } else {
                 log.trace("{} Transformations returned null, so dropping record in topic '{}' partition {} at offset {} and timestamp {} with key {} and value {}",
-                        this, msg.topic(), msg.partition(), msg.offset(), timestamp, keyAndSchema.value(), valueAndSchema.value());
+                        this, msg.topic(), msg.partition(), msg.offset(), msg.timestamp(), keyAndSchema.value(), valueAndSchema.value());
             }
         }
     }

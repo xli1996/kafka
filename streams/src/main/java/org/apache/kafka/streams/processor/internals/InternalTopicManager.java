@@ -31,23 +31,31 @@ import java.util.concurrent.TimeUnit;
 
 public class InternalTopicManager {
 
-    private static final Logger log = LoggerFactory.getLogger(InternalTopicManager.class);
+    static final Long WINDOW_CHANGE_LOG_ADDITIONAL_RETENTION_DEFAULT = TimeUnit.MILLISECONDS.convert(1, TimeUnit.DAYS);
+
     public static final String CLEANUP_POLICY_PROP = "cleanup.policy";
     public static final String RETENTION_MS = "retention.ms";
-    public static final Long WINDOW_CHANGE_LOG_ADDITIONAL_RETENTION_DEFAULT = TimeUnit.MILLISECONDS.convert(1, TimeUnit.DAYS);
     private static final int MAX_TOPIC_READY_TRY = 5;
+
+    private static final Logger log = LoggerFactory.getLogger(InternalTopicManager.class);
+
     private final Time time;
+    private final String logPrefix;
     private final long windowChangeLogAdditionalRetention;
 
     private final int replicationFactor;
     private final StreamsKafkaClient streamsKafkaClient;
 
-    public InternalTopicManager(final StreamsKafkaClient streamsKafkaClient, final int replicationFactor,
-                                final long windowChangeLogAdditionalRetention, final Time time) {
+    public InternalTopicManager(final StreamsKafkaClient streamsKafkaClient,
+                                final int replicationFactor,
+                                final long windowChangeLogAdditionalRetention,
+                                final Time time) {
         this.streamsKafkaClient = streamsKafkaClient;
         this.replicationFactor = replicationFactor;
         this.windowChangeLogAdditionalRetention = windowChangeLogAdditionalRetention;
         this.time = time;
+
+        this.logPrefix = String.format("stream-thread [%s] ", Thread.currentThread().getName());
     }
 
     /**
@@ -74,7 +82,7 @@ public class InternalTopicManager {
                 }
                 return;
             } catch (StreamsException ex) {
-                log.warn("Could not create internal topics: " + ex.getMessage() + " Retry #" + i);
+                log.warn(logPrefix + "Could not create internal topics: " + ex.getMessage() + " Retry #" + i);
             }
             // backoff
             time.sleep(100L);
@@ -94,7 +102,7 @@ public class InternalTopicManager {
 
                 return existingTopicPartitions;
             } catch (StreamsException ex) {
-                log.warn("Could not get number of partitions: " + ex.getMessage() + " Retry #" + i);
+                log.warn(logPrefix + "Could not get number of partitions: " + ex.getMessage() + " Retry #" + i);
             }
             // backoff
             time.sleep(100L);
@@ -106,7 +114,7 @@ public class InternalTopicManager {
         try {
             streamsKafkaClient.close();
         } catch (IOException e) {
-            log.warn("Could not close StreamsKafkaClient.");
+            log.warn(logPrefix + "Could not close StreamsKafkaClient.");
         }
     }
 

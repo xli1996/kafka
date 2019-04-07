@@ -99,6 +99,7 @@ public class SenderTest {
     private static final double EPS = 0.0001;
     private static final int MAX_BLOCK_TIMEOUT = 1000;
     private static final int REQUEST_TIMEOUT = 1000;
+    private static final int BATCH_EXPIRY_TIMEOUT = 1000;
 
     private TopicPartition tp0 = new TopicPartition("test", 0);
     private TopicPartition tp1 = new TopicPartition("test", 1);
@@ -292,7 +293,7 @@ public class SenderTest {
         metrics = new Metrics(new MetricConfig().tags(clientTags));
         SenderMetricsRegistry metricsRegistry = new SenderMetricsRegistry(metrics);
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, false, MAX_REQUEST_SIZE, ACKS_ALL,
-                1, metricsRegistry, time, REQUEST_TIMEOUT, 50, null, apiVersions);
+                1, metricsRegistry, time, REQUEST_TIMEOUT, 50, null, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         // Append a message so that topic metrics are created
         accumulator.append(tp0, 0L, "key".getBytes(), "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT);
@@ -320,7 +321,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
         try {
             Sender sender = new Sender(logContext, client, metadata, this.accumulator, false, MAX_REQUEST_SIZE, ACKS_ALL,
-                    maxRetries, senderMetrics, time, REQUEST_TIMEOUT, 50, null, apiVersions);
+                    maxRetries, senderMetrics, time, REQUEST_TIMEOUT, 50, null, apiVersions, BATCH_EXPIRY_TIMEOUT);
             // do a successful retry
             Future<RecordMetadata> future = accumulator.append(tp0, 0L, "key".getBytes(), "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
             sender.run(time.milliseconds()); // connect
@@ -369,7 +370,7 @@ public class SenderTest {
 
         try {
             Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                    senderMetrics, time, REQUEST_TIMEOUT, 50, null, apiVersions);
+                    senderMetrics, time, REQUEST_TIMEOUT, 50, null, apiVersions, BATCH_EXPIRY_TIMEOUT);
             // Create a two broker cluster, with partition 0 on broker 0 and partition 1 on broker 1
             Cluster cluster1 = TestUtils.clusterWith(2, "test", 2);
             metadata.update(cluster1, Collections.<String>emptySet(), time.milliseconds());
@@ -1123,7 +1124,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> failedResponse = accumulator.append(tp0, time.milliseconds(), "key".getBytes(),
                 "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
@@ -1167,7 +1168,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, 10,
-            senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+            senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> failedResponse = accumulator.append(tp0, time.milliseconds(), "key".getBytes(),
             "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
@@ -1206,7 +1207,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, 10,
-            senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+            senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> failedResponse = accumulator.append(tp0, time.milliseconds(), "key".getBytes(),
             "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
@@ -1243,7 +1244,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> failedResponse = accumulator.append(tp0, time.milliseconds(), "key".getBytes(),
                 "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
@@ -1738,7 +1739,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> responseFuture = accumulator.append(tp0, time.milliseconds(), "key".getBytes(), "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
         client.prepareResponse(new MockClient.RequestMatcher() {
@@ -1782,7 +1783,7 @@ public class SenderTest {
         Metrics m = new Metrics();
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> responseFuture = accumulator.append(tp0, time.milliseconds(), "key".getBytes(), "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
         sender.run(time.milliseconds());  // connect.
@@ -1822,7 +1823,7 @@ public class SenderTest {
         SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
 
         Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                senderMetrics, time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions, BATCH_EXPIRY_TIMEOUT);
 
         Future<RecordMetadata> responseFuture = accumulator.append(tp0, time.milliseconds(), "key".getBytes(), "value".getBytes(), null, null, MAX_BLOCK_TIMEOUT).future;
         sender.run(time.milliseconds());  // connect.
@@ -1876,7 +1877,7 @@ public class SenderTest {
                     new ApiVersions(), txnManager);
             SenderMetricsRegistry senderMetrics = new SenderMetricsRegistry(m);
             Sender sender = new Sender(logContext, client, metadata, this.accumulator, true, MAX_REQUEST_SIZE, ACKS_ALL, maxRetries,
-                    senderMetrics, time, REQUEST_TIMEOUT, 1000L, txnManager, new ApiVersions());
+                    senderMetrics, time, REQUEST_TIMEOUT, 1000L, txnManager, new ApiVersions(), BATCH_EXPIRY_TIMEOUT);
             // Create a two broker cluster, with partition 0 on broker 0 and partition 1 on broker 1
             Cluster cluster1 = TestUtils.clusterWith(2, topic, 2);
             metadata.update(cluster1, Collections.<String>emptySet(), time.milliseconds());
@@ -2015,7 +2016,8 @@ public class SenderTest {
         this.senderMetricsRegistry = new SenderMetricsRegistry(this.metrics);
 
         this.sender = new Sender(logContext, this.client, this.metadata, this.accumulator, false, MAX_REQUEST_SIZE, ACKS_ALL,
-                Integer.MAX_VALUE, this.senderMetricsRegistry, this.time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions);
+                Integer.MAX_VALUE, this.senderMetricsRegistry, this.time, REQUEST_TIMEOUT, 50, transactionManager, apiVersions,
+                BATCH_EXPIRY_TIMEOUT);
         this.metadata.update(this.cluster, Collections.<String>emptySet(), time.milliseconds());
     }
 

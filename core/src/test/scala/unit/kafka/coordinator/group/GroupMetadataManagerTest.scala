@@ -34,7 +34,6 @@ import org.junit.Assert.{assertEquals, assertFalse, assertTrue, assertNull}
 import org.junit.{Before, Test}
 import java.nio.ByteBuffer
 import java.util.Collections
-import java.util.Optional
 
 import com.yammer.metrics.Metrics
 import com.yammer.metrics.core.Gauge

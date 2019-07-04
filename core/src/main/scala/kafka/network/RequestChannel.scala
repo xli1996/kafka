@@ -189,6 +189,7 @@ object RequestChannel extends Logging {
 
         val builder = new StringBuilder(256)
         builder.append("Completed request:").append(requestDesc(detailsEnabled))
+          .append(",processor:").append(processor)
           .append(",response:").append(responseString)
           .append(" from connection ").append(context.connectionId)
           .append(";totalTime:").append(totalTimeMs)

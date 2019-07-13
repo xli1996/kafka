@@ -46,7 +46,6 @@ import JavaConverters._
 import scala.collection.mutable.{ArrayBuffer, Buffer}
 import scala.util.control.{ControlThrowable, NonFatal}
 import Processor._
-import com.typesafe.scalalogging.Logger
 
 /**
  * An NIO socket server. The threading model is
@@ -520,9 +519,6 @@ private[kafka] class Processor(val id: Int,
                                logContext: LogContext,
                                connectionQueueSize: Int = ConnectionQueueSize) extends AbstractServerThread(connectionQuotas) with KafkaMetricsGroup {
 
-  private val requestLogger = Logger("kafka.request.logger")
-  def isRequestLoggingEnabled: Boolean = requestLogger.underlying.isDebugEnabled
-
   private object ConnectionId {
     def fromString(s: String): Option[ConnectionId] = s.split("-") match {
       case Array(local, remote, index) => BrokerEndPoint.parseHostPort(local).flatMap { case (localHost, localPort) =>
@@ -590,42 +586,19 @@ private[kafka] class Processor(val id: Int,
   // closed, connection ids are not reused while requests from the closed connection are being processed.
   private var nextConnectionIndex = 0
 
-  def measureTimeMs(f: () => Unit): Long = {
-    if (isRequestLoggingEnabled) {
-      val startTime = time.hiResClockMs()
-      f()
-      val endTime = time.hiResClockMs()
-      endTime - startTime
-    } else {
-      0
-    }
-  }
-
   override def run() {
     startupComplete()
     try {
       while (isRunning) {
         try {
           // setup any new connections that have been queued up
-          val configureNewConnectionsTime: Long = measureTimeMs { configureNewConnections }
+          configureNewConnections()
           // register any new responses for writing
-          val processNewResponsesTime: Long = measureTimeMs { processNewResponses }
-          val pollTime: Long = measureTimeMs { poll }
-          val processCompletedReceivesTime: Long = measureTimeMs { processCompletedReceives }
-          val processCompletedSendsTime: Long = measureTimeMs { processCompletedSends }
-          val processDiconnectedTime: Long = measureTimeMs { processDisconnected }
-
-          if (isRequestLoggingEnabled) {
-            val builder = new mutable.StringBuilder(256)
-              .append(",processorId:").append(id)
-              .append(",configureNewConnectionsTime:").append(configureNewConnectionsTime)
-              .append(",processNewResponseTime:").append(processNewResponsesTime)
-              .append(",pollTime:").append(pollTime)
-              .append(",processCompletedReceivesTime:").append(processCompletedReceivesTime)
-              .append(",processCompletedSendsTime:").append(processCompletedSendsTime)
-              .append(",processDisconnectedTime:").append(processDiconnectedTime)
-            requestLogger.debug(builder.toString())
-          }
+          processNewResponses()
+          poll()
+          processCompletedReceives()
+          processCompletedSends()
+          processDisconnected()
         } catch {
           // We catch all the throwables here to prevent the processor thread from exiting. We do this because
           // letting a processor exit might cause a bigger impact on the broker. This behavior might need to be
@@ -824,8 +797,6 @@ private[kafka] class Processor(val id: Int,
     while (connectionsProcessed < connectionQueueSize && !newConnections.isEmpty) {
       val channel = newConnections.poll()
       try {
-        if (isRequestLoggingEnabled)
-          requestLogger.debug(s"Processor $id listening to new connection from ${channel.socket.getRemoteSocketAddress}")
         debug(s"Processor $id listening to new connection from ${channel.socket.getRemoteSocketAddress}")
         selector.register(connectionId(channel.socket), channel)
         connectionsProcessed += 1

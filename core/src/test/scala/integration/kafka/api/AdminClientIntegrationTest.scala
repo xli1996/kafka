@@ -2023,26 +2023,25 @@ class AdminClientIntegrationTest extends IntegrationTestHarness with Logging {
   def describeBrokerLoggers(): Config =
     client.describeConfigs(Collections.singletonList(brokerLoggerConfigResource)).values.get(brokerLoggerConfigResource).get()
 
+
   /**
     * Due to the fact that log4j is not re-initialized across tests, changing a logger's log level persists across test classes.
     * We need to clean up the changes done while testing.
     */
   def teardownBrokerLoggers(): Unit = {
-    if (changedBrokerLoggers.nonEmpty) {
-      val validLoggers = describeBrokerLoggers().entries().asScala.filterNot(_.name().equals(Log4jController.ROOT_LOGGER)).map(_.name).toSet
-      val unsetBrokerLoggersEntries = changedBrokerLoggers
-        .intersect(validLoggers)
-        .map { logger => new AlterConfigOp(new ConfigEntry(logger, ""), AlterConfigOp.OpType.DELETE) }
-        .asJavaCollection
+    alterBrokerLoggers(List(
+      new AlterConfigOp(new ConfigEntry(Log4jController.ROOT_LOGGER, LogLevelConfig.FATAL_LOG_LEVEL), AlterConfigOp.OpType.SET)
+    ).asJavaCollection)
+    val loggersToReset = describeBrokerLoggers().entries().asScala.filterNot { a =>
+      a.value() != LogLevelConfig.FATAL_LOG_LEVEL || a.name().equals(Log4jController.ROOT_LOGGER)
+    }.map(_.name).toSet
+    logger.info(s"$loggersToReset")
+    val unsetBrokerLoggersEntries = loggersToReset
+      .map { logger => new AlterConfigOp(new ConfigEntry(logger, ""), AlterConfigOp.OpType.DELETE) }
+      .asJavaCollection
 
-      // ensure that we first reset the root logger to an arbitrary log level. Note that we cannot reset it to its original value
-      alterBrokerLoggers(List(
-        new AlterConfigOp(new ConfigEntry(Log4jController.ROOT_LOGGER, LogLevelConfig.FATAL_LOG_LEVEL), AlterConfigOp.OpType.SET)
-      ).asJavaCollection)
-      alterBrokerLoggers(unsetBrokerLoggersEntries)
-
-      changedBrokerLoggers.clear()
-    }
+    alterBrokerLoggers(unsetBrokerLoggersEntries)
+    changedBrokerLoggers.clear()
   }
 }
 

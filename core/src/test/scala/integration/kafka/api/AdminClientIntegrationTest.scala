@@ -2035,7 +2035,8 @@ class AdminClientIntegrationTest extends IntegrationTestHarness with Logging {
     val loggersToReset = describeBrokerLoggers().entries().asScala.filterNot { a =>
       a.value() != LogLevelConfig.FATAL_LOG_LEVEL || a.name().equals(Log4jController.ROOT_LOGGER)
     }.map(_.name).toSet
-    logger.info(s"$loggersToReset")
+    logger.error(s"Loggers to reset - ${loggersToReset.size}:")
+    logger.error(s"${loggersToReset.mkString(",")}")
     val unsetBrokerLoggersEntries = loggersToReset
       .map { logger => new AlterConfigOp(new ConfigEntry(logger, ""), AlterConfigOp.OpType.DELETE) }
       .asJavaCollection

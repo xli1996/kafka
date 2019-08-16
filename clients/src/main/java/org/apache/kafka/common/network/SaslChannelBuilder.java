@@ -45,11 +45,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 import javax.security.auth.Subject;
 
 public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurable {
     private static final Logger log = LoggerFactory.getLogger(SaslChannelBuilder.class);
+    private static final Logger requestLogger = LoggerFactory.getLogger("kafka.request.logger");
 
     private final SecurityProtocol securityProtocol;
     private final ListenerName listenerName;
@@ -149,14 +151,19 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
     }
 
     @Override
-    public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool) throws KafkaException {
+    public KafkaChannel buildChannel(final String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool) throws KafkaException {
         try {
             SocketChannel socketChannel = (SocketChannel) key.channel();
             Socket socket = socketChannel.socket();
-            TransportLayer transportLayer = buildTransportLayer(id, key, socketChannel);
+            final TransportLayer transportLayer = buildTransportLayer(id, key, socketChannel);
             Authenticator authenticator;
             if (mode == Mode.SERVER) {
-                authenticator = buildServerAuthenticator(configs, id, transportLayer, subjects);
+                authenticator = logSlow(new Callable<Authenticator>() {
+                    @Override
+                    public Authenticator call() throws Exception {
+                        return buildServerAuthenticator(configs, id, transportLayer, subjects);
+                    }
+                }, "building server authenticator");
             } else {
                 LoginManager loginManager = loginManagers.get(clientSaslMechanism);
                 authenticator = buildClientAuthenticator(configs, id, socket.getInetAddress().getHostName(),
@@ -176,10 +183,37 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
         loginManagers.clear();
     }
 
-    private TransportLayer buildTransportLayer(String id, SelectionKey key, SocketChannel socketChannel) throws IOException {
+    public static <U> U logSlow(Callable<U> fn, String msg) throws IOException {
+        long before = System.nanoTime();
+        U result = null;
+        try {
+            result = fn.call();
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+        long after = System.nanoTime();
+        long totalMs = (after - before) / 1_000_000;
+        if (totalMs > 0) {
+            requestLogger.debug(String.format("%s took %d milliseconds", msg, totalMs));
+        }
+        return result;
+    }
+
+    private TransportLayer buildTransportLayer(final String id, final SelectionKey key, final SocketChannel socketChannel) throws IOException {
         if (this.securityProtocol == SecurityProtocol.SASL_SSL) {
-            return SslTransportLayer.create(id, key,
-                sslFactory.createSslEngine(socketChannel.socket().getInetAddress().getHostName(), socketChannel.socket().getPort()));
+            final String hostname = logSlow(new Callable<String>() {
+                @Override
+                public String call() throws Exception {
+                    return socketChannel.socket().getInetAddress().getHostName();
+                }
+            }, "SSLTransport DNS lookup");
+            return logSlow(new Callable<SslTransportLayer>() {
+                               @Override
+                               public SslTransportLayer call() throws Exception {
+                                   return SslTransportLayer.create(id, key, sslFactory.createSslEngine(hostname, socketChannel.socket().getPort()));
+                               }
+                           },
+                    "SSLTransportLayer instantiation");
         } else {
             return new PlaintextTransportLayer(key);
         }

@@ -45,7 +45,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
 
 import javax.security.auth.Subject;
 
@@ -151,19 +150,21 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
     }
 
     @Override
-    public KafkaChannel buildChannel(final String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool) throws KafkaException {
+    public KafkaChannel buildChannel(String id, SelectionKey key, int maxReceiveSize, MemoryPool memoryPool) throws KafkaException {
         try {
             SocketChannel socketChannel = (SocketChannel) key.channel();
             Socket socket = socketChannel.socket();
             final TransportLayer transportLayer = buildTransportLayer(id, key, socketChannel);
             Authenticator authenticator;
             if (mode == Mode.SERVER) {
-                authenticator = logSlow(new Callable<Authenticator>() {
-                    @Override
-                    public Authenticator call() throws Exception {
-                        return buildServerAuthenticator(configs, id, transportLayer, subjects);
-                    }
-                }, "building server authenticator");
+                long before = System.nanoTime();
+                authenticator = buildServerAuthenticator(configs, id, transportLayer, subjects);
+                long after = System.nanoTime();
+                long totalMs = (after - before) / 1_000_000;
+                if (totalMs > 0) {
+                    requestLogger.debug(String.format("building SASL server authenticator took %d milliseconds", totalMs));
+                }
+
             } else {
                 LoginManager loginManager = loginManagers.get(clientSaslMechanism);
                 authenticator = buildClientAuthenticator(configs, id, socket.getInetAddress().getHostName(),
@@ -183,37 +184,24 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
         loginManagers.clear();
     }
 
-    public static <U> U logSlow(Callable<U> fn, String msg) throws IOException {
-        long before = System.nanoTime();
-        U result = null;
-        try {
-            result = fn.call();
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
-        long after = System.nanoTime();
-        long totalMs = (after - before) / 1_000_000;
-        if (totalMs > 0) {
-            requestLogger.debug(String.format("%s took %d milliseconds", msg, totalMs));
-        }
-        return result;
-    }
-
-    private TransportLayer buildTransportLayer(final String id, final SelectionKey key, final SocketChannel socketChannel) throws IOException {
+    private TransportLayer buildTransportLayer(String id, SelectionKey key, SocketChannel socketChannel) throws IOException {
         if (this.securityProtocol == SecurityProtocol.SASL_SSL) {
-            final String hostname = logSlow(new Callable<String>() {
-                @Override
-                public String call() throws Exception {
-                    return socketChannel.socket().getInetAddress().getHostName();
-                }
-            }, "SSLTransport DNS lookup");
-            return logSlow(new Callable<SslTransportLayer>() {
-                               @Override
-                               public SslTransportLayer call() throws Exception {
-                                   return SslTransportLayer.create(id, key, sslFactory.createSslEngine(hostname, socketChannel.socket().getPort()));
-                               }
-                           },
-                    "SSLTransportLayer instantiation");
+            long before = System.nanoTime();
+            String hostname = socketChannel.socket().getInetAddress().getHostName();
+            long after = System.nanoTime();
+            long totalMs = (after - before) / 1_000_000;
+            if (totalMs > 0) {
+                requestLogger.debug(String.format("%s took %d milliseconds", totalMs));
+            }
+
+            before = System.nanoTime();
+            SslTransportLayer sslTransportLayer = SslTransportLayer.create(id, key, sslFactory.createSslEngine(hostname, socketChannel.socket().getPort()));
+            after = System.nanoTime();
+            totalMs = (after - before) / 1_000_000;
+            if (totalMs > 0) {
+                requestLogger.debug(String.format("SSLTransportLayer instantiation took %d milliseconds", totalMs));
+            }
+            return sslTransportLayer;
         } else {
             return new PlaintextTransportLayer(key);
         }

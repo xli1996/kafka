@@ -191,12 +191,13 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
             long after = System.nanoTime();
             long totalMs = (after - before) / 1_000_000;
             if (totalMs > 0) {
-                requestLogger.debug(String.format("%s took %d milliseconds", totalMs));
+                requestLogger.debug(String.format("Getting SSLTransport hostname took %d milliseconds", totalMs));
             }
 
-            before = System.nanoTime();
+            before = after;
             SslTransportLayer sslTransportLayer = SslTransportLayer.create(id, key, sslFactory.createSslEngine(hostname, socketChannel.socket().getPort()));
             after = System.nanoTime();
+
             totalMs = (after - before) / 1_000_000;
             if (totalMs > 0) {
                 requestLogger.debug(String.format("SSLTransportLayer instantiation took %d milliseconds", totalMs));

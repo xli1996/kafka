@@ -154,7 +154,7 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
         try {
             SocketChannel socketChannel = (SocketChannel) key.channel();
             Socket socket = socketChannel.socket();
-            final TransportLayer transportLayer = buildTransportLayer(id, key, socketChannel);
+            TransportLayer transportLayer = buildTransportLayer(id, key, socketChannel);
             Authenticator authenticator;
             if (mode == Mode.SERVER) {
                 long before = System.nanoTime();

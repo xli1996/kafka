@@ -220,6 +220,11 @@ public class ProducerConfig extends AbstractConfig {
             "The default is <code>null</code>, which means transactions cannot be used. " +
             "Note that transactions requires a cluster of at least three brokers by default what is the recommended setting for production; for development you can change this, by adjusting broker setting `transaction.state.log.replication.factor`.";
 
+
+    /** <code> batch.expiry.ms  </code> */
+    public static final String BATCH_EXPIRY_MS = "confluent.batch.expiry.ms";
+    public static final String BATCH_EXPIRY_MS_DOC = "How long the batch should stay in the accumulator and unacknowledged before being expired.";
+
     static {
         CONFIG = new ConfigDef().define(BOOTSTRAP_SERVERS_CONFIG, Type.LIST, Importance.HIGH, CommonClientConfigs.BOOTSTRAP_SERVERS_DOC)
                                 .define(BUFFER_MEMORY_CONFIG, Type.LONG, 32 * 1024 * 1024L, atLeast(0L), Importance.HIGH, BUFFER_MEMORY_DOC)
@@ -327,7 +332,11 @@ public class ProducerConfig extends AbstractConfig {
                                         null,
                                         new ConfigDef.NonEmptyString(),
                                         Importance.LOW,
-                                        TRANSACTIONAL_ID_DOC);
+                                        TRANSACTIONAL_ID_DOC)
+                                .defineInternal(BATCH_EXPIRY_MS,
+                                        Type.LONG,
+                                        30 * 1000,
+                                        Importance.LOW);
     }
 
     @Override

@@ -35,7 +35,7 @@ import org.apache.kafka.connect.source.SourceTask;
 import org.apache.kafka.connect.source.SourceTaskContext;
 import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.HeaderConverter;
-import org.apache.kafka.connect.storage.OffsetStorageReader;
+import org.apache.kafka.connect.storage.OffsetStorageReaderImpl;
 import org.apache.kafka.connect.storage.OffsetStorageWriter;
 import org.apache.kafka.connect.util.Callback;
 import org.apache.kafka.connect.util.ConnectorTaskId;
@@ -104,7 +104,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     @Mock private HeaderConverter headerConverter;
     @Mock private TransformationChain<SourceRecord> transformationChain;
     @Mock private KafkaProducer<byte[], byte[]> producer;
-    @Mock private OffsetStorageReader offsetReader;
+    @Mock private OffsetStorageReaderImpl offsetReader;
     @Mock private OffsetStorageWriter offsetWriter;
     @Mock private ClusterConfigState clusterConfigState;
     private WorkerSourceTask workerTask;
@@ -179,6 +179,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
+        offsetReader.prematurelyCompleteRequests();
+        EasyMock.expectLastCall();
+
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -222,6 +225,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
+        EasyMock.expectLastCall();
+
+        offsetReader.prematurelyCompleteRequests();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -273,6 +279,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         transformationChain.close();
         EasyMock.expectLastCall();
 
+        offsetReader.prematurelyCompleteRequests();
+        EasyMock.expectLastCall();
+
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -322,6 +331,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         transformationChain.close();
         EasyMock.expectLastCall();
 
+        offsetReader.prematurelyCompleteRequests();
+        EasyMock.expectLastCall();
+
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -364,6 +376,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
+        EasyMock.expectLastCall();
+
+        offsetReader.prematurelyCompleteRequests();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -409,6 +424,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
+        EasyMock.expectLastCall();
+
+        offsetReader.prematurelyCompleteRequests();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -599,6 +617,9 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
+        EasyMock.expectLastCall();
+
+        offsetReader.prematurelyCompleteRequests();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();

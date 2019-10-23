@@ -16,7 +16,6 @@
  */
 package org.apache.kafka.streams.processor.internals;
 
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.MockConsumer;
@@ -79,6 +78,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.time.Duration.ofMillis;
 import static java.util.Arrays.asList;
@@ -160,9 +160,8 @@ public class StandbyTaskTest {
     private final byte[] recordValue = intSerializer.serialize(null, 10);
     private final byte[] recordKey = intSerializer.serialize(null, 1);
 
-    private final String threadName = "threadName";
     private final StreamsMetricsImpl streamsMetrics =
-        new StreamsMetricsImpl(new Metrics(), threadName, StreamsConfig.METRICS_LATEST);
+        new StreamsMetricsImpl(new Metrics(), applicationId, StreamsMetricsImpl.METRICS_LATEST);
 
     @Before
     public void setup() throws Exception {
@@ -309,7 +308,7 @@ public class StandbyTaskTest {
 
         final TopicPartition topicPartition = new TopicPartition(changelogName, 1);
 
-        final List<TopicPartition> partitions = Collections.singletonList(topicPartition);
+        final Set<TopicPartition> partitions = Collections.singleton(topicPartition);
 
         consumer.assign(partitions);
 
@@ -410,7 +409,7 @@ public class StandbyTaskTest {
         final String changelogName = applicationId + "-" + storeName + "-changelog";
 
         final TopicPartition topicPartition = new TopicPartition(changelogName, 1);
-        final List<TopicPartition> partitions = Collections.singletonList(topicPartition);
+        final Set<TopicPartition> partitions = Collections.singleton(topicPartition);
 
         final InternalTopologyBuilder internalTopologyBuilder = new InternalTopologyBuilder().setApplicationId(applicationId);
 

@@ -1537,7 +1537,7 @@ public class KafkaAdminClient extends AdminClient {
         }
         final long now = time.milliseconds();
         Call call = new Call("describeTopics", calcDeadlineMs(now, options.timeoutMs()),
-            new ControllerNodeProvider()) {
+            new LeastLoadedNodeProvider()) {
 
             private boolean supportsDisablingTopicCreation = true;
 
@@ -3270,7 +3270,7 @@ public class KafkaAdminClient extends AdminClient {
 
                         ReassignablePartition reassignablePartition = new ReassignablePartition()
                                 .setPartitionIndex(partitionIndex)
-                                .setReplicas(reassignment.map(NewPartitionReassignment::targetBrokers).orElse(null));
+                                .setReplicas(reassignment.map(NewPartitionReassignment::targetReplicas).orElse(null));
                         reassignablePartitions.add(reassignablePartition);
                     }
 

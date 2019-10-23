@@ -14,28 +14,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.common.security;
-
-import org.apache.kafka.common.Configurable;
-
-import java.security.Provider;
-import java.util.Map;
+package org.apache.kafka.test;
 
 /**
- * An interface for generating security providers.
+ * Like a {@link Runnable} that allows exceptions to be thrown or a {@link java.util.concurrent.Callable}
+ * that does not return a value.
  */
-public interface SecurityProviderCreator extends Configurable {
-
-    /**
-     * Configure method is used to configure the generator to create the Security Provider
-     * @param config configuration parameters for initialising security provider
-     */
-    default void configure(Map<String, ?> config) {
-
-    }
-
-    /**
-     * Generate the security provider configured
-     */
-    Provider getProvider();
+public interface ValuelessCallable {
+    void call() throws Exception;
 }

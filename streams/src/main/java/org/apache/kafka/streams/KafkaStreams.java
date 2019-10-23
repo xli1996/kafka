@@ -60,6 +60,7 @@ import org.apache.kafka.streams.state.QueryableStoreType;
 import org.apache.kafka.streams.state.StreamsMetadata;
 import org.apache.kafka.streams.state.internals.GlobalStateStoreProvider;
 import org.apache.kafka.streams.state.internals.QueryableStoreProvider;
+import org.apache.kafka.streams.state.internals.RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter;
 import org.apache.kafka.streams.state.internals.StateStoreProvider;
 import org.apache.kafka.streams.state.internals.StreamThreadStateStoreProvider;
 import org.apache.kafka.streams.state.internals.metrics.RocksDBMetricsRecordingTrigger;
@@ -675,8 +676,7 @@ public class KafkaStreams implements AutoCloseable {
                 Collections.singletonMap(StreamsConfig.CLIENT_ID_CONFIG, clientId));
         reporters.add(new JmxReporter(JMX_PREFIX));
         metrics = new Metrics(metricConfig, reporters, time);
-        streamsMetrics =
-            new StreamsMetricsImpl(metrics, clientId, config.getString(StreamsConfig.BUILT_IN_METRICS_VERSION_CONFIG));
+        streamsMetrics = new StreamsMetricsImpl(metrics, clientId, StreamsMetricsImpl.METRICS_0100_TO_23);
         streamsMetrics.setRocksDBMetricsRecordingTrigger(rocksDBMetricsRecordingTrigger);
         ClientMetrics.addVersionMetric(streamsMetrics);
         ClientMetrics.addCommitIdMetric(streamsMetrics);
@@ -774,6 +774,7 @@ public class KafkaStreams implements AutoCloseable {
             return thread;
         });
 
+        maybeWarnAboutCodeInRocksDBConfigSetter(log, config);
         rocksDBMetricsRecordingService = maybeCreateRocksDBMetricsRecordingService(clientId, config);
     }
 
@@ -787,6 +788,13 @@ public class KafkaStreams implements AutoCloseable {
             });
         }
         return null;
+    }
+
+    private static void maybeWarnAboutCodeInRocksDBConfigSetter(final Logger log,
+                                                                final StreamsConfig config) {
+        if (config.getClass(StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG) != null) {
+            RocksDBGenericOptionsToDbOptionsColumnFamilyOptionsAdapter.logWarning(log);
+        }
     }
 
     private static HostInfo parseHostInfo(final String endPoint) {

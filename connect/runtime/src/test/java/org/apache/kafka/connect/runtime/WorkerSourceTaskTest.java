@@ -179,9 +179,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         statusListener.onShutdown(taskId);
         EasyMock.expectLastCall();
 
-        offsetReader.close();
-        EasyMock.expectLastCall();
-
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -225,9 +222,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
-        EasyMock.expectLastCall();
-
-        offsetReader.close();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -279,9 +273,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         transformationChain.close();
         EasyMock.expectLastCall();
 
-        offsetReader.close();
-        EasyMock.expectLastCall();
-
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -331,9 +322,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         transformationChain.close();
         EasyMock.expectLastCall();
 
-        offsetReader.close();
-        EasyMock.expectLastCall();
-
         PowerMock.replayAll();
 
         workerTask.initialize(TASK_CONFIG);
@@ -376,9 +364,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
-        EasyMock.expectLastCall();
-
-        offsetReader.close();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -424,9 +409,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
-        EasyMock.expectLastCall();
-
-        offsetReader.close();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();
@@ -617,9 +599,6 @@ public class WorkerSourceTaskTest extends ThreadedTest {
         EasyMock.expectLastCall();
 
         transformationChain.close();
-        EasyMock.expectLastCall();
-
-        offsetReader.close();
         EasyMock.expectLastCall();
 
         PowerMock.replayAll();

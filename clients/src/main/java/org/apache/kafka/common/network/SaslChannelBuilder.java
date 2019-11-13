@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
@@ -186,19 +187,22 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
 
     private TransportLayer buildTransportLayer(String id, SelectionKey key, SocketChannel socketChannel) throws IOException {
         if (this.securityProtocol == SecurityProtocol.SASL_SSL) {
-            long before = System.nanoTime();
-            String hostname = socketChannel.socket().getInetAddress().getHostName();
-            long after = System.nanoTime();
-            long totalMs = (after - before) / 1_000_000;
-            if (totalMs > 0) {
-                requestLogger.debug(String.format("Getting SSLTransport hostname took %d milliseconds", totalMs));
+            long beforeInetAddress = System.nanoTime();
+            InetAddress inetAddress = socketChannel.socket().getInetAddress();
+            long afterInetAddress = System.nanoTime();
+            long beforeGetHostname = afterInetAddress;
+            String hostname = inetAddress.getHostName();
+            long afterGetHostname = System.nanoTime();
+            long inetAddressTime = (beforeInetAddress - afterInetAddress) / 1_000_000;
+            long getHostnameTime = (beforeGetHostname - afterGetHostname) / 1_000_000;
+            if (inetAddressTime > 0 || getHostnameTime > 0) {
+                requestLogger.debug(String.format("Getting SSLTransport for InetAddr %s hostname %s took %d ms, getting InetAddress took %d ms", inetAddress, hostname, getHostnameTime, inetAddressTime));
             }
 
-            before = after;
+            long before = afterGetHostname;
             SslTransportLayer sslTransportLayer = SslTransportLayer.create(id, key, sslFactory.createSslEngine(hostname, socketChannel.socket().getPort()));
-            after = System.nanoTime();
-
-            totalMs = (after - before) / 1_000_000;
+            long after = System.nanoTime();
+            long totalMs = (after - before) / 1_000_000;
             if (totalMs > 0) {
                 requestLogger.debug(String.format("SSLTransportLayer instantiation took %d milliseconds", totalMs));
             }

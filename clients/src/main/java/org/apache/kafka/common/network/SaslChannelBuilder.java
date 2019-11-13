@@ -196,7 +196,7 @@ public class SaslChannelBuilder implements ChannelBuilder, ListenerReconfigurabl
             long inetAddressTime = (beforeInetAddress - afterInetAddress) / 1_000_000;
             long getHostnameTime = (beforeGetHostname - afterGetHostname) / 1_000_000;
             if (inetAddressTime > 0 || getHostnameTime > 0) {
-                requestLogger.debug(String.format("Getting SSLTransport for InetAddr %s hostname took %d ms, getting InetAddress took %d ms", inetAddress, getHostnameTime, inetAddressTime));
+                requestLogger.debug(String.format("Getting SSLTransport for InetAddr %s hostname %s took %d ms, getting InetAddress took %d ms", inetAddress, hostname, getHostnameTime, inetAddressTime));
             }
 
             long before = afterGetHostname;

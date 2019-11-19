@@ -13,6 +13,7 @@ def config = jobConfig {
 def job = {
     // https://github.com/confluentinc/common-tools/blob/master/confluent/config/dev/versions.json
     def kafkaMuckrakeVersionMap = [
+            "2.4": "5.4.x",
             "2.3": "5.3.x",
             "trunk": "master",
             "master": "master"

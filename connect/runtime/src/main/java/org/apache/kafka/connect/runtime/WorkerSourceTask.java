@@ -49,7 +49,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * WorkerTask that uses a SourceTask to ingest data into Kafka.
@@ -69,7 +68,6 @@ class WorkerSourceTask extends WorkerTask {
     private final OffsetStorageWriter offsetWriter;
     private final Time time;
     private final SourceTaskMetricsGroup sourceTaskMetricsGroup;
-    private final AtomicReference<Exception> producerSendException;
 
     private List<SourceRecord> toSend;
     private boolean lastSendFailed; // Whether the last send failed *synchronously*, i.e. never made it into the producer's RecordAccumulator
@@ -119,7 +117,6 @@ class WorkerSourceTask extends WorkerTask {
         this.flushing = false;
         this.stopRequestedLatch = new CountDownLatch(1);
         this.sourceTaskMetricsGroup = new SourceTaskMetricsGroup(id, connectMetrics);
-        this.producerSendException = new AtomicReference<>();
     }
 
     @Override
@@ -201,12 +198,10 @@ class WorkerSourceTask extends WorkerTask {
                     continue;
                 }
 
-                maybeThrowProducerSendException();
-
                 if (toSend == null) {
                     log.trace("{} Nothing to send to Kafka. Polling source for additional records", this);
                     long start = time.milliseconds();
-                    toSend = poll();
+                    toSend = task.poll();
                     if (toSend != null) {
                         recordPollReturned(toSend.size(), time.milliseconds() - start);
                     }
@@ -228,25 +223,6 @@ class WorkerSourceTask extends WorkerTask {
         }
     }
 
-    private void maybeThrowProducerSendException() {
-        if (producerSendException.get() != null) {
-            throw new ConnectException(
-                "Unrecoverable exception from producer send callback",
-                producerSendException.get()
-            );
-        }
-    }
-
-    protected List<SourceRecord> poll() throws InterruptedException {
-        try {
-            return task.poll();
-        } catch (RetriableException | org.apache.kafka.common.errors.RetriableException e) {
-            log.warn("{} failed to poll records from SourceTask. Will retry operation.", this, e);
-            // Do nothing. Let the framework poll whenever it's ready.
-            return null;
-        }
-    }
-
     /**
      * Try to send a batch of records. If a send fails and is retriable, this saves the remainder of the batch so it can
      * be retried after backing off. If a send fails and is not retriable, this will throw a ConnectException.
@@ -257,7 +233,6 @@ class WorkerSourceTask extends WorkerTask {
         recordBatch(toSend.size());
         final SourceRecordWriteCounter counter = new SourceRecordWriteCounter(toSend.size(), sourceTaskMetricsGroup);
         for (final SourceRecord preTransformRecord : toSend) {
-            maybeThrowProducerSendException();
             final SourceRecord record = transformationChain.apply(preTransformRecord);
 
             if (record == null) {
@@ -299,22 +274,21 @@ class WorkerSourceTask extends WorkerTask {
                                     // timeouts, callbacks with exceptions should never be invoked in practice. If the
                                     // user overrode these settings, the best we can do is notify them of the failure via
                                     // logging.
-                                    log.error("{} failed to send record to {}: ", WorkerSourceTask.this, topic, e);
+                                    log.error("{} failed to send record to {}: {}", WorkerSourceTask.this, topic, e);
                                     log.debug("{} Failed record: {}", WorkerSourceTask.this, preTransformRecord);
-                                    producerSendException.compareAndSet(null, e);
                                 } else {
-                                    recordSent(producerRecord);
-                                    counter.completeRecord();
                                     log.trace("{} Wrote record successfully: topic {} partition {} offset {}",
                                             WorkerSourceTask.this,
                                             recordMetadata.topic(), recordMetadata.partition(),
                                             recordMetadata.offset());
                                     commitTaskRecord(preTransformRecord);
                                 }
+                                recordSent(producerRecord);
+                                counter.completeRecord();
                             }
                         });
                 lastSendFailed = false;
-            } catch (org.apache.kafka.common.errors.RetriableException e) {
+            } catch (RetriableException e) {
                 log.warn("{} Failed to send {}, backing off before retrying:", this, producerRecord, e);
                 toSend = toSend.subList(processed, toSend.size());
                 lastSendFailed = true;

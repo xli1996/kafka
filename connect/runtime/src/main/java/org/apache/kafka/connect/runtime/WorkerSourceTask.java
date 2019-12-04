@@ -229,22 +229,22 @@ class WorkerSourceTask extends WorkerTask {
     }
 
     private void maybeThrowProducerSendException() {
-      if (producerSendException.get() != null) {
-        throw new ConnectException(
-            "Unrecoverable exception from producer send callback",
-            producerSendException.get()
-        );
-      }
+        if (producerSendException.get() != null) {
+            throw new ConnectException(
+                "Unrecoverable exception from producer send callback",
+                producerSendException.get()
+            );
+        }
     }
 
     protected List<SourceRecord> poll() throws InterruptedException {
-      try {
-        return task.poll();
-      } catch (RetriableException | org.apache.kafka.common.errors.RetriableException e) {
-        log.warn("{} failed to poll records from SourceTask. Will retry operation.", this, e);
-        // Do nothing. Let the framework poll whenever it's ready.
-        return null;
-      }
+        try {
+            return task.poll();
+        } catch (RetriableException | org.apache.kafka.common.errors.RetriableException e) {
+            log.warn("{} failed to poll records from SourceTask. Will retry operation.", this, e);
+            // Do nothing. Let the framework poll whenever it's ready.
+            return null;
+        }
     }
 
 

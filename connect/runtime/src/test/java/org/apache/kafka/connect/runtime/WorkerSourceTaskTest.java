@@ -735,7 +735,7 @@ public class WorkerSourceTaskTest extends ThreadedTest {
     private Capture<ProducerRecord<byte[], byte[]>> expectSendRecord(
         boolean anyTimes,
         boolean isRetry,
-        boolean sendSuccess,
+        final boolean sendSuccess,
         boolean commitSuccess
     ) throws InterruptedException {
         expectConvertKeyValue(anyTimes);

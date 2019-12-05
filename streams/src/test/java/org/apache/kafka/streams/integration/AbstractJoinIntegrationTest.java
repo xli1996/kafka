@@ -131,6 +131,8 @@ public abstract class AbstractJoinIntegrationTest {
 
     final boolean cacheEnabled;
 
+    private static final long TIMEOUT = 30000;
+
     AbstractJoinIntegrationTest(final boolean cacheEnabled) {
         this.cacheEnabled = cacheEnabled;
     }

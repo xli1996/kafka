@@ -184,7 +184,6 @@ public class TestTopicsTest {
         assertThrows(IllegalStateException.class, outputTopic::readKeyValuesToMap);
     }
 
-
     @Test
     public void testKeyValueListDuration() {
         final TestInputTopic<Long, String> inputTopic =

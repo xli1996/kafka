@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.LATE_RECORD_DROP;
+import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.PROCESSOR_NODE_ID_TAG;
 import static org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl.PROCESSOR_NODE_METRICS_GROUP;
 
 public class Sensors {
@@ -49,7 +50,13 @@ public class Sensors {
         StreamsMetricsImpl.addInvocationRateAndCountToSensor(
             sensor,
             PROCESSOR_NODE_METRICS_GROUP,
-            metrics.nodeLevelTagMap(threadId, context.taskId().toString(), context.currentNode().name()),
+            metrics.tagMap(
+                threadId,
+                "task-id",
+                context.taskId().toString(),
+                PROCESSOR_NODE_ID_TAG,
+                context.currentNode().name()
+            ),
             LATE_RECORD_DROP
         );
         return sensor;
@@ -66,7 +73,11 @@ public class Sensors {
             Sensor.RecordingLevel.DEBUG
         );
 
-        final Map<String, String> tags = metrics.taskLevelTagMap(threadId, context.taskId().toString());
+        final Map<String, String> tags = metrics.tagMap(
+            threadId,
+            "task-id",
+            context.taskId().toString()
+        );
         sensor.add(
             new MetricName(
                 "record-lateness-avg",
@@ -98,8 +109,13 @@ public class Sensors {
             Sensor.RecordingLevel.DEBUG
         );
 
-        final Map<String, String> tags =
-            metrics.nodeLevelTagMap(threadId, context.taskId().toString(), context.currentNode().name());
+        final Map<String, String> tags = metrics.tagMap(
+            threadId,
+            "task-id",
+            context.taskId().toString(),
+            PROCESSOR_NODE_ID_TAG,
+            context.currentNode().name()
+        );
 
         sensor.add(
             new MetricName(

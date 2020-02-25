@@ -26,8 +26,8 @@ def job = {
     ]
 
     stage("Compile and validate") {
-        sh "./gradlew clean assemble spotlessScalaCheck checkstyleMain checkstyleTest spotbugsMain " +
-                "--no-daemon --stacktrace --continue -PxmlSpotBugsReport=true"
+        sh "./gradlew clean assemble spotlessScalaCheck checkstyleMain checkstyleTest " +
+                "--no-daemon --stacktrace --continue"
     }
 
     if (config.publish && config.isDevJob) {

@@ -2219,7 +2219,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       case Some(auth) =>
         val filter = describeAclsRequest.filter
         val returnedAcls = new util.HashSet[AclBinding]()
-        auth.acls(filter).forEach(returnedAcls.add)
+        auth.acls(filter).asScala.foreach(returnedAcls.add)
         sendResponseMaybeThrottle(request, requestThrottleMs =>
           new DescribeAclsResponse(new DescribeAclsResponseData()
             .setThrottleTimeMs(requestThrottleMs)

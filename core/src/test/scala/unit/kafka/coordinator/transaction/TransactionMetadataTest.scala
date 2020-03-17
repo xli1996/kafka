@@ -26,11 +26,11 @@ import scala.collection.mutable
 class TransactionMetadataTest {
 
   val time = new MockTime()
+  val producerId = 23423L
+  val transactionalId = "txnlId"
 
   @Test
   def testInitializeEpoch(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = RecordBatch.NO_PRODUCER_EPOCH
 
     val txnMetadata = new TransactionMetadata(
@@ -50,8 +50,6 @@ class TransactionMetadataTest {
 
   @Test
   def testNormalEpochBump(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = 735.toShort
 
     val txnMetadata = new TransactionMetadata(
@@ -71,8 +69,6 @@ class TransactionMetadataTest {
 
   @Test(expected = classOf[IllegalStateException])
   def testBumpEpochNotAllowedIfEpochsExhausted(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = (Short.MaxValue - 1).toShort
 
     val txnMetadata = new TransactionMetadata(
@@ -90,8 +86,6 @@ class TransactionMetadataTest {
 
   @Test
   def testFenceProducerAfterEpochsExhausted(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = (Short.MaxValue - 1).toShort
 
     val txnMetadata = new TransactionMetadata(
@@ -118,8 +112,6 @@ class TransactionMetadataTest {
 
   @Test(expected = classOf[IllegalStateException])
   def testFenceProducerNotAllowedIfItWouldOverflow(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = Short.MaxValue
 
     val txnMetadata = new TransactionMetadata(
@@ -136,8 +128,6 @@ class TransactionMetadataTest {
 
   @Test
   def testRotateProducerId(): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = (Short.MaxValue - 1).toShort
 
     val txnMetadata = new TransactionMetadata(
@@ -172,8 +162,6 @@ class TransactionMetadataTest {
   }
 
   private def testRotateProducerIdInOngoingState(state: TransactionState): Unit = {
-    val transactionalId = "txnlId"
-    val producerId = 23423L
     val producerEpoch = (Short.MaxValue - 1).toShort
 
     val txnMetadata = new TransactionMetadata(

@@ -53,6 +53,12 @@ def job = {
               sh "./gradlew --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchivesAll"
           }
       }
+    } else if (config.publish && config.isPreviewJob) {
+        configFileProvider([configFile(fileId: 'Gradle-Artifactory-Preview-Release-Settings', variable: 'GRADLE_NEXUS_SETTINGS')]) {
+            stage("Publish to artifactory") {
+                sh "./gradlew --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchivesAll"
+            }
+        }
     }
 
     stage("Run Tests and build cp-downstream-builds") {

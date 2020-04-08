@@ -123,7 +123,7 @@ private[group] case object Empty extends GroupState {
 }
 
 
-private object GroupMetadata {
+private object GroupMetadata extends Logging {
 
   def loadGroup(groupId: String,
                 initialState: GroupState,
@@ -143,6 +143,8 @@ private object GroupMetadata {
     members.foreach(member => {
       group.add(member, null)
       if (member.isStaticMember) {
+        info(s"Static member $member.groupInstanceId of group $groupId loaded " +
+          s"with member id ${member.memberId} at generation ${group.generationId}.")
         group.addStaticMember(member.groupInstanceId, member.memberId)
       }
     })
@@ -383,11 +385,13 @@ private[group] class GroupMetadata(val groupId: String, initialState: GroupState
     *   2. group stored member.id doesn't match with given member.id
     */
   def isStaticMemberFenced(memberId: String,
-                           groupInstanceId: Option[String]): Boolean = {
+                           groupInstanceId: Option[String],
+                           operation: String): Boolean = {
     if (hasStaticMember(groupInstanceId)
       && getStaticMemberId(groupInstanceId) != memberId) {
-        error(s"given member.id $memberId is identified as a known static member ${groupInstanceId.get}," +
-          s"but not matching the expected member.id ${getStaticMemberId(groupInstanceId)}")
+        error(s"given member.id $memberId is identified as a known static member ${groupInstanceId.get}, " +
+          s"but not matching the expected member.id ${getStaticMemberId(groupInstanceId)} during $operation, will " +
+          s"respond with instance fenced error")
         true
     } else
       false

@@ -31,10 +31,12 @@ import org.apache.kafka.common.requests.EpochEndOffset.{UNDEFINED_EPOCH, UNDEFIN
 import org.apache.kafka.common.requests.{EpochEndOffset, FetchRequest, OffsetsForLeaderEpochRequest}
 import org.apache.kafka.common.{IsolationLevel, TopicPartition}
 import org.easymock.EasyMock._
-import org.easymock.{Capture, CaptureType, EasyMock, IExpectationSetters}
+import org.easymock.{Capture, CaptureType, EasyMock, IAnswer, IExpectationSetters}
 import org.junit.Assert._
 import org.junit.Test
 import org.mockito.Mockito.{doNothing, when}
+import org.mockito.invocation.InvocationOnMock
+import org.mockito.stubbing.Answer
 import org.mockito.{ArgumentCaptor, ArgumentMatchers, Mockito}
 
 import scala.collection.{Map, Seq}
@@ -246,9 +248,9 @@ class ReplicaAlterLogDirsThreadTest {
       responseCallback = callbackCaptor.capture(),
       isolationLevel = ArgumentMatchers.eq(IsolationLevel.READ_UNCOMMITTED),
       clientMetadata = ArgumentMatchers.eq(None)
-    )).thenAnswer(_ => {
-      callbackCaptor.getValue.apply(Seq((topicPartition, responseData)))
-    })
+    )) thenAnswer new Answer[Unit] {
+      override def answer(invocation: InvocationOnMock): Unit = callbackCaptor.getValue.apply(Seq((topicPartition, responseData)))
+    }
   }
 
   @Test
@@ -606,8 +608,12 @@ class ReplicaAlterLogDirsThreadTest {
       EasyMock.anyObject(),
       EasyMock.capture(responseCallback),
       EasyMock.anyObject(),
-      EasyMock.anyObject())
-    ).andAnswer(() => responseCallback.getValue.apply(Seq.empty[(TopicPartition, FetchPartitionData)])).anyTimes()
+      EasyMock.anyObject()))
+      .andAnswer(new IAnswer[Unit] {
+        override def answer(): Unit = {
+          responseCallback.getValue.apply(Seq.empty[(TopicPartition, FetchPartitionData)])
+        }
+      }).anyTimes()
 
     replay(replicaManager, logManager, quotaManager, partition, log, futureLog)
 
@@ -840,7 +846,11 @@ class ReplicaAlterLogDirsThreadTest {
       EasyMock.anyObject(),
       EasyMock.capture(responseCallback),
       EasyMock.anyObject(),
-      EasyMock.anyObject())
-    ).andAnswer(() => responseCallback.getValue.apply(Seq.empty[(TopicPartition, FetchPartitionData)])).anyTimes()
+      EasyMock.anyObject()))
+      .andAnswer(new IAnswer[Unit] {
+        override def answer(): Unit = {
+          responseCallback.getValue.apply(Seq.empty[(TopicPartition, FetchPartitionData)])
+        }
+      }).anyTimes()
   }
 }

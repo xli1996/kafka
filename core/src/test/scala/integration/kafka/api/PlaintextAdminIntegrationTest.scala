@@ -1728,7 +1728,7 @@ class PlaintextAdminIntegrationTest extends BaseAdminIntegrationTest {
 
   @Test
   def testIncrementalAlterConfigsDeleteAndSetBrokerConfigs(): Unit = {
-    client = Admin.create(createConfig())
+    client = AdminClient.create(createConfig())
     val broker0Resource = new ConfigResource(ConfigResource.Type.BROKER, "0")
     client.incrementalAlterConfigs(Map(broker0Resource ->
       Seq(new AlterConfigOp(new ConfigEntry(DynamicConfig.Broker.LeaderReplicationThrottledRateProp, "123"),
@@ -1765,7 +1765,7 @@ class PlaintextAdminIntegrationTest extends BaseAdminIntegrationTest {
 
   @Test
   def testIncrementalAlterConfigsDeleteBrokerConfigs(): Unit = {
-    client = Admin.create(createConfig())
+    client = AdminClient.create(createConfig())
     val broker0Resource = new ConfigResource(ConfigResource.Type.BROKER, "0")
     client.incrementalAlterConfigs(Map(broker0Resource ->
       Seq(new AlterConfigOp(new ConfigEntry(DynamicConfig.Broker.LeaderReplicationThrottledRateProp, "123"),

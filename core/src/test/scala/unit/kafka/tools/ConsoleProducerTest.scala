@@ -57,7 +57,7 @@ class ConsoleProducerTest {
     "--bootstrap-server",
     "localhost:1002",
     "--topic",
-    "t3",
+    "t3"
   )
 
   @Test

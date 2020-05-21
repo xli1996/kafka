@@ -28,7 +28,7 @@ import kafka.utils.{CommandDefaultOptions, CommandLineUtils, Exit, PasswordEncod
 import kafka.utils.Implicits._
 import kafka.zk.{AdminZkClient, KafkaZkClient}
 import org.apache.kafka.clients.CommonClientConfigs
-import org.apache.kafka.clients.admin.{Admin, AlterConfigOp, AlterConfigsOptions, ConfigEntry, DescribeClusterOptions, DescribeConfigsOptions, ListTopicsOptions, Config => JConfig}
+import org.apache.kafka.clients.admin.{Admin, AlterConfigOp, AlterConfigsOptions, ConfigEntry, DescribeClusterOptions, DescribeConfigsOptions, AdminClient => JAdminClient, Config => JConfig, ListTopicsOptions}
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.config.types.Password
 import org.apache.kafka.common.errors.InvalidConfigurationException
@@ -281,7 +281,7 @@ object ConfigCommand extends Config {
     else
       new Properties()
     props.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, opts.options.valueOf(opts.bootstrapServerOpt))
-    val adminClient = Admin.create(props)
+    val adminClient = JAdminClient.create(props)
 
     if (opts.entityTypes.size != 1)
       throw new IllegalArgumentException(s"Exactly one entity type (out of ${BrokerSupportedConfigTypes.mkString(",")}) must be specified with --bootstrap-server")

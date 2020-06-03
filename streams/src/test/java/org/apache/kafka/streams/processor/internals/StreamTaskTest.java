@@ -28,8 +28,10 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.metrics.JmxReporter;
 import org.apache.kafka.common.metrics.KafkaMetric;
+import org.apache.kafka.common.metrics.KafkaMetricsContext;
 import org.apache.kafka.common.metrics.MetricConfig;
 import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.metrics.MetricsContext;
 import org.apache.kafka.common.metrics.Sensor;
 import org.apache.kafka.common.metrics.stats.CumulativeSum;
 import org.apache.kafka.common.record.TimestampType;
@@ -46,7 +48,9 @@ import org.apache.kafka.streams.processor.PunctuationType;
 import org.apache.kafka.streams.processor.Punctuator;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.TaskId;
+import org.apache.kafka.streams.processor.internals.Task.TaskType;
 import org.apache.kafka.streams.processor.internals.metrics.StreamsMetricsImpl;
+import org.apache.kafka.streams.state.internals.ThreadCache;
 import org.apache.kafka.test.MockKeyValueStore;
 import org.apache.kafka.test.MockProcessorNode;
 import org.apache.kafka.test.MockSourceNode;
@@ -150,6 +154,8 @@ public class StreamTaskTest {
     private ProcessorStateManager stateManager;
     @Mock(type = MockType.NICE)
     private RecordCollector recordCollector;
+    @Mock(type = MockType.NICE)
+    private ThreadCache cache;
 
     private final Punctuator punctuator = new Punctuator() {
         @Override
@@ -201,7 +207,8 @@ public class StreamTaskTest {
 
     @Before
     public void setup() {
-        EasyMock.expect(stateManager.taskId()).andReturn(taskId).anyTimes();
+        EasyMock.expect(stateManager.taskId()).andStubReturn(taskId);
+        EasyMock.expect(stateManager.taskType()).andStubReturn(TaskType.ACTIVE);
 
         consumer.assign(asList(partition1, partition2));
         consumer.updateBeginningOffsets(mkMap(mkEntry(partition1, 0L), mkEntry(partition2, 0L)));
@@ -249,6 +256,7 @@ public class StreamTaskTest {
     public void shouldAttemptToDeleteStateDirectoryWhenCloseDirtyAndEosEnabled() throws IOException {
         final IMocksControl ctrl = EasyMock.createStrictControl();
         final ProcessorStateManager stateManager = ctrl.createMock(ProcessorStateManager.class);
+        EasyMock.expect(stateManager.taskType()).andStubReturn(TaskType.ACTIVE);
         stateDirectory = ctrl.createMock(StateDirectory.class);
 
         stateManager.registerGlobalStateStores(Collections.emptyList());
@@ -257,7 +265,6 @@ public class StreamTaskTest {
         EasyMock.expect(stateManager.taskId()).andReturn(taskId);
 
         EasyMock.expect(stateDirectory.lock(taskId)).andReturn(true);
-        EasyMock.expectLastCall();
 
         stateManager.close();
         EasyMock.expectLastCall();
@@ -575,7 +582,10 @@ public class StreamTaskTest {
             testMetricsForBuiltInMetricsVersionLatest();
         }
 
-        final JmxReporter reporter = new JmxReporter("kafka.streams");
+        final JmxReporter reporter = new JmxReporter();
+        final MetricsContext metricsContext = new KafkaMetricsContext("kafka.streams");
+        reporter.contextChange(metricsContext);
+
         metrics.addReporter(reporter);
         final String threadIdTag =
             StreamsConfig.METRICS_LATEST.equals(builtInMetricsVersion) ? THREAD_ID_TAG : THREAD_ID_TAG_0100_TO_24;
@@ -1399,7 +1409,7 @@ public class StreamTaskTest {
         task.initializeIfNeeded();
         task.completeRestoration();
         task.punctuate(processorStreamTime, 5, PunctuationType.STREAM_TIME, punctuator);
-        assertThat(((InternalProcessorContext) task.context()).currentNode(), nullValue());
+        assertThat(task.processorContext().currentNode(), nullValue());
     }
 
     @Test(expected = IllegalStateException.class)
@@ -1416,9 +1426,8 @@ public class StreamTaskTest {
     }
 
     @Test
-    public void shouldCloseStateManagerEvenFailureOnUncleanTaskClose() {
+    public void shouldCloseStateManagerEvenDuringFailureOnUncleanTaskClose() {
         EasyMock.expect(stateManager.changelogPartitions()).andReturn(Collections.emptySet()).anyTimes();
-        stateManager.registerStore(stateStore, stateStore.stateRestoreCallback);
         EasyMock.expectLastCall();
 
         stateManager.close();
@@ -1452,18 +1461,29 @@ public class StreamTaskTest {
         EasyMock.expect(recordCollector.offsets()).andReturn(Collections.emptyMap()).anyTimes();
         EasyMock.replay(stateManager, recordCollector);
 
+        final StreamsConfig config = createConfig(false, "0");
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         task = new StreamTask(
             taskId,
             mkSet(partition1, repartition),
             topology,
             consumer,
-            createConfig(false, "0"),
+            config,
             streamsMetrics,
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
+
         task.initializeIfNeeded();
         task.completeRestoration();
 
@@ -1795,6 +1815,14 @@ public class StreamTaskTest {
             singletonList(stateStore),
             Collections.singletonMap(storeName, topic1));
 
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         return new StreamTask(
             taskId,
             mkSet(partition1),
@@ -1803,10 +1831,11 @@ public class StreamTaskTest {
             config,
             streamsMetrics,
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
     }
 
     private StreamTask createDisconnectedTask(final StreamsConfig config) {
@@ -1825,6 +1854,14 @@ public class StreamTaskTest {
             }
         };
 
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         return new StreamTask(
             taskId,
             partitions,
@@ -1833,10 +1870,11 @@ public class StreamTaskTest {
             config,
             streamsMetrics,
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
     }
 
     private StreamTask createFaultyStatefulTask(final StreamsConfig config) {
@@ -1846,6 +1884,14 @@ public class StreamTaskTest {
             singletonList(stateStore),
             Collections.emptyMap());
 
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         return new StreamTask(
             taskId,
             partitions,
@@ -1854,10 +1900,11 @@ public class StreamTaskTest {
             config,
             streamsMetrics,
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
     }
 
     private StreamTask createStatefulTask(final StreamsConfig config, final boolean logged) {
@@ -1873,6 +1920,14 @@ public class StreamTaskTest {
             singletonList(stateStore),
             logged ? Collections.singletonMap(storeName, storeName + "-changelog") : Collections.emptyMap());
 
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         return new StreamTask(
             taskId,
             partitions,
@@ -1881,13 +1936,14 @@ public class StreamTaskTest {
             config,
             streamsMetrics,
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
     }
 
-    private StreamTask createStatelessTask(final StreamsConfig streamsConfig,
+    private StreamTask createStatelessTask(final StreamsConfig config,
                                            final String builtInMetricsVersion) {
         final ProcessorTopology topology = withSources(
             asList(source1, source2, processorStreamTime, processorSystemTime),
@@ -1903,18 +1959,27 @@ public class StreamTaskTest {
         EasyMock.expect(recordCollector.offsets()).andReturn(Collections.emptyMap()).anyTimes();
         EasyMock.replay(stateManager, recordCollector);
 
+        final InternalProcessorContext context = new ProcessorContextImpl(
+            taskId,
+            config,
+            stateManager,
+            streamsMetrics,
+            null
+        );
+
         return new StreamTask(
             taskId,
             partitions,
             topology,
             consumer,
-            streamsConfig,
+            config,
             new StreamsMetricsImpl(metrics, "test", builtInMetricsVersion),
             stateDirectory,
-            null,
+            cache,
             time,
             stateManager,
-            recordCollector);
+            recordCollector,
+            context);
     }
 
     private ConsumerRecord<byte[], byte[]> getConsumerRecord(final TopicPartition topicPartition, final long offset) {

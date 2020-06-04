@@ -59,7 +59,8 @@ public class TaskAssignorIntegrationTest {
     public TestName testName = new TestName();
 
     // Just a dummy implementation so we can check the config
-    public static final class MyTaskAssignor extends HighAvailabilityTaskAssignor implements TaskAssignor { }
+    public static final class MyTaskAssignor extends HighAvailabilityTaskAssignor implements TaskAssignor {
+    }
 
     @SuppressWarnings("unchecked")
     @Test
@@ -127,7 +128,7 @@ public class TaskAssignorIntegrationTest {
             assignmentListenerField.setAccessible(true);
             final AssignorConfiguration.AssignmentListener actualAssignmentListener =
                 (AssignorConfiguration.AssignmentListener) assignmentListenerField.get(streamsPartitionAssignor);
-
+            
             final Field taskAssignorSupplierField = StreamsPartitionAssignor.class.getDeclaredField("taskAssignorSupplier");
             taskAssignorSupplierField.setAccessible(true);
             final Supplier<TaskAssignor> taskAssignorSupplier =

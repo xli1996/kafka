@@ -128,7 +128,7 @@ public class TaskAssignorIntegrationTest {
             assignmentListenerField.setAccessible(true);
             final AssignorConfiguration.AssignmentListener actualAssignmentListener =
                 (AssignorConfiguration.AssignmentListener) assignmentListenerField.get(streamsPartitionAssignor);
-            
+
             final Field taskAssignorSupplierField = StreamsPartitionAssignor.class.getDeclaredField("taskAssignorSupplier");
             taskAssignorSupplierField.setAccessible(true);
             final Supplier<TaskAssignor> taskAssignorSupplier =

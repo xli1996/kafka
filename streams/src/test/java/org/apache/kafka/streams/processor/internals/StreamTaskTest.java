@@ -92,7 +92,9 @@ import static org.apache.kafka.test.StreamsTestUtils.getMetricByNameFilterByTags
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -390,7 +392,7 @@ public class StreamTaskTest {
 
         final KafkaMetric metric = getMetric("active-buffer", "%s-count", task.id().toString(), StreamsConfig.METRICS_LATEST);
 
-        assertThat(metric.metricValue(), equalTo(0.0d));
+        assertThat(metric.metricValue(), equalTo(0.0));
 
         task.addRecords(partition1, asList(
             getConsumerRecord(partition1, 10),
@@ -398,12 +400,12 @@ public class StreamTaskTest {
         ));
         task.recordProcessTimeRatioAndBufferSize(100L, time.milliseconds());
 
-        assertThat(metric.metricValue(), equalTo(2.0d));
+        assertThat(metric.metricValue(), equalTo(2.0));
 
         task.process(0L);
         task.recordProcessTimeRatioAndBufferSize(100L, time.milliseconds());
 
-        assertThat(metric.metricValue(), equalTo(1.0d));
+        assertThat(metric.metricValue(), equalTo(1.0));
     }
 
     @Test
@@ -412,22 +414,22 @@ public class StreamTaskTest {
 
         final KafkaMetric metric = getMetric("active-process", "%s-ratio", task.id().toString(), StreamsConfig.METRICS_LATEST);
 
-        assertThat(metric.metricValue(), equalTo(0.0d));
+        assertThat(metric.metricValue(), equalTo(0.0));
 
         task.recordProcessBatchTime(10L);
         task.recordProcessBatchTime(15L);
         task.recordProcessTimeRatioAndBufferSize(100L, time.milliseconds());
 
-        assertThat(metric.metricValue(), equalTo(0.25d));
+        assertThat(metric.metricValue(), equalTo(0.25));
 
         task.recordProcessBatchTime(10L);
 
-        assertThat(metric.metricValue(), equalTo(0.25d));
+        assertThat(metric.metricValue(), equalTo(0.25));
 
         task.recordProcessBatchTime(10L);
         task.recordProcessTimeRatioAndBufferSize(20L, time.milliseconds());
 
-        assertThat(metric.metricValue(), equalTo(1.0d));
+        assertThat(metric.metricValue(), equalTo(1.0));
     }
 
     @Test
@@ -444,24 +446,7 @@ public class StreamTaskTest {
         task.addRecords(partition1, singletonList(getConsumerRecord(partition1, 0L)));
         task.process(100L);
 
-        assertThat(maxMetric.metricValue(), equalTo(100d));
-    }
-
-    @Test
-    public void shouldRecordE2ELatencyOnProcessForTerminalNodes() {
-        time = new MockTime(0L, 0L, 0L);
-        metrics = new Metrics(new MetricConfig().recordLevel(Sensor.RecordingLevel.INFO), time);
-        task = createStatelessTask(createConfig(false, "0"), StreamsConfig.METRICS_LATEST);
-
-        final String terminalNode = processorStreamTime.name();
-
-        final Metric maxMetric = getProcessorMetric("record-e2e-latency", "%s-max", task.id().toString(), terminalNode, StreamsConfig.METRICS_LATEST);
-
-        // e2e latency = 100
-        time.setCurrentTimeMs(100L);
-        task.maybeRecordE2ELatency(0L, terminalNode);
-
-        assertThat(maxMetric.metricValue(), equalTo(100d));
+        assertThat(maxMetric.metricValue(), equalTo(100.0));
     }
 
     @Test
@@ -479,48 +464,24 @@ public class StreamTaskTest {
         assertThat(maxMetric.metricValue(), equalTo(Double.NaN));
 
         // e2e latency = 10
-        time.setCurrentTimeMs(10L);
-        task.maybeRecordE2ELatency(0L, sourceNode);
-        assertThat(minMetric.metricValue(), equalTo(10d));
-        assertThat(maxMetric.metricValue(), equalTo(10d));
+        task.maybeRecordE2ELatency(0L, 10L, sourceNode);
+        assertThat(minMetric.metricValue(), equalTo(10.0));
+        assertThat(maxMetric.metricValue(), equalTo(10.0));
 
         // e2e latency = 15
-        time.setCurrentTimeMs(25L);
-        task.maybeRecordE2ELatency(10L, sourceNode);
-        assertThat(minMetric.metricValue(), equalTo(10d));
-        assertThat(maxMetric.metricValue(), equalTo(15d));
+        task.maybeRecordE2ELatency(10L, 25L, sourceNode);
+        assertThat(minMetric.metricValue(), equalTo(10.0));
+        assertThat(maxMetric.metricValue(), equalTo(15.0));
 
         // e2e latency = 25
-        time.setCurrentTimeMs(30L);
-        task.maybeRecordE2ELatency(5L, sourceNode);
-        assertThat(minMetric.metricValue(), equalTo(10d));
-        assertThat(maxMetric.metricValue(), equalTo(25d));
+        task.maybeRecordE2ELatency(5L, 30L, sourceNode);
+        assertThat(minMetric.metricValue(), equalTo(10.0));
+        assertThat(maxMetric.metricValue(), equalTo(25.0));
 
         // e2e latency = 20
-        time.setCurrentTimeMs(40L);
-        task.maybeRecordE2ELatency(35L, sourceNode);
-        assertThat(minMetric.metricValue(), equalTo(5d));
-        assertThat(maxMetric.metricValue(), equalTo(25d));
-    }
-
-    @Test
-    public void shouldRecordE2ELatencyPercentiles() {
-        time = new MockTime(0L, 0L, 0L);
-        metrics = new Metrics(new MetricConfig().recordLevel(Sensor.RecordingLevel.INFO), time);
-        task = createStatelessTask(createConfig(false, "0"), StreamsConfig.METRICS_LATEST);
-
-        final String sourceNode = source1.name();
-
-        final Metric p99Metric = getProcessorMetric("record-e2e-latency", "%s-p99", task.id().toString(), sourceNode, StreamsConfig.METRICS_LATEST);
-        final Metric p90Metric = getProcessorMetric("record-e2e-latency", "%s-p90", task.id().toString(), sourceNode, StreamsConfig.METRICS_LATEST);
-
-        for (int i = 0; i < 100; i++) {
-            time.setCurrentTimeMs(i);
-            task.maybeRecordE2ELatency(0L, sourceNode);
-        }
-
-        assertEquals((double) p99Metric.metricValue(), 99d, 5.0);
-        assertEquals((double) p90Metric.metricValue(), 90d, 5.0);
+        task.maybeRecordE2ELatency(35L, 40L, sourceNode);
+        assertThat(minMetric.metricValue(), equalTo(5.0));
+        assertThat(maxMetric.metricValue(), equalTo(25.0));
     }
 
     @Test
@@ -1789,6 +1750,49 @@ public class StreamTaskTest {
     }
 
     @Test
+    public void shouldUnregisterMetricsInCloseClean() {
+        EasyMock.expect(stateManager.changelogPartitions()).andReturn(Collections.emptySet()).anyTimes();
+        EasyMock.expect(recordCollector.offsets()).andReturn(Collections.emptyMap()).anyTimes();
+        EasyMock.replay(stateManager, recordCollector);
+
+        task = createOptimizedStatefulTask(createConfig(false, "100"), consumer);
+
+        task.suspend();
+        assertThat(getTaskMetrics(), not(empty()));
+        final Map<TopicPartition, Long> checkpoint = task.prepareCloseClean();
+        task.closeClean(checkpoint);
+        assertThat(getTaskMetrics(), empty());
+    }
+
+    @Test
+    public void shouldUnregisterMetricsInCloseDirty() {
+        EasyMock.expect(stateManager.changelogPartitions()).andReturn(Collections.emptySet()).anyTimes();
+        EasyMock.expect(recordCollector.offsets()).andReturn(Collections.emptyMap()).anyTimes();
+        EasyMock.replay(stateManager, recordCollector);
+
+        task = createOptimizedStatefulTask(createConfig(false, "100"), consumer);
+
+        task.suspend();
+        assertThat(getTaskMetrics(), not(empty()));
+        task.closeDirty();
+        assertThat(getTaskMetrics(), empty());
+    }
+
+    @Test
+    public void shouldUnregisterMetricsInCloseAndRecycle() {
+        EasyMock.expect(stateManager.changelogPartitions()).andReturn(Collections.emptySet()).anyTimes();
+        EasyMock.expect(recordCollector.offsets()).andReturn(Collections.emptyMap()).anyTimes();
+        EasyMock.replay(stateManager, recordCollector);
+
+        task = createOptimizedStatefulTask(createConfig(false, "100"), consumer);
+
+        task.suspend();
+        assertThat(getTaskMetrics(), not(empty()));
+        task.closeAndRecycleState();
+        assertThat(getTaskMetrics(), empty());
+    }
+
+    @Test
     public void shouldThrowIfClosingOnIllegalState() {
         EasyMock.expect(stateManager.changelogPartitions()).andReturn(Collections.emptySet()).anyTimes();
         EasyMock.replay(stateManager);
@@ -1804,6 +1808,10 @@ public class StreamTaskTest {
 
         EasyMock.reset(stateManager);
         EasyMock.replay(stateManager);
+    }
+
+    private List<MetricName> getTaskMetrics() {
+        return metrics.metrics().keySet().stream().filter(m -> m.tags().containsKey("task-id")).collect(Collectors.toList());
     }
 
     private StreamTask createOptimizedStatefulTask(final StreamsConfig config, final Consumer<byte[], byte[]> consumer) {

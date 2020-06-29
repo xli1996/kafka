@@ -34,10 +34,22 @@ def retryFlagsString(jobConfig) {
 
 def downstreamBuildFailureOutput = ""
 def publishStep(String configSettings) {
-  configFileProvider([configFile(fileId: configSettings, variable: 'GRADLE_NEXUS_SETTINGS')]) {
-          sh "./gradlewAll --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives"
+  withDockerServer([uri: dockerHost()]) {
+      configFileProvider([configFile(fileId: configSettings, variable: 'GRADLE_NEXUS_SETTINGS')]) {
+        writeFile file:'.ci/extract-iam-credential.sh', text:libraryResource('scripts/extract-iam-credential.sh')
+        sh """
+            bash .ci/extract-iam-credential.sh && rm .ci/extract-iam-credential.sh
+
+            # Hide login credential from below
+            set +x
+
+            \$(aws ecr get-login --no-include-email --region us-west-2)
+            ./gradlewAll -PskipSigning=true --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives
+        """
+      }
   }
 }
+
 def job = {
     // https://github.com/confluentinc/common-tools/blob/master/confluent/config/dev/versions.json
     def kafkaMuckrakeVersionMap = [
@@ -61,11 +73,7 @@ def job = {
 
     if (config.publish) {
       stage("Publish to artifactory") {
-        if (config.isDevJob) {
-          publishStep('Gradle-Artifactory-Settings')
-        } else if (config.isPreviewJob) {
-          publishStep('Gradle-Artifactory-Preview-Release-Settings')
-        }
+          publishStep('3ac13099-0b5b-4089-84be-7d852f986973')
       }
     }
 

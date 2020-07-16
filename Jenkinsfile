@@ -35,7 +35,7 @@ def retryFlagsString(jobConfig) {
 def downstreamBuildFailureOutput = ""
 def publishStep(String configSettings) {
     withDockerServer([uri: dockerHost()]) {
-        withVaultFile([["gradle/artifactory_snapshots_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
+        withVaultFile([["gradle/artifactory_hotfix_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
             writeFile file:'.ci/extract-iam-credential.sh', text:libraryResource('scripts/extract-iam-credential.sh')
             sh """
                 bash .ci/extract-iam-credential.sh && rm .ci/extract-iam-credential.sh

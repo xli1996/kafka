@@ -256,22 +256,17 @@ class KafkaApisTest {
     expectNoThrottling()
 
     val configResource = new ConfigResource(ConfigResource.Type.TOPIC, resourceName)
+    val config = new DescribeConfigsResponse.Config(ApiError.NONE, Collections.emptyList[DescribeConfigsResponse.ConfigEntry])
     EasyMock.expect(adminManager.describeConfigs(anyObject(), EasyMock.eq(true), EasyMock.eq(false)))
-        .andReturn(
-          List(new DescribeConfigsResponseData.DescribeConfigsResult()
-            .setResourceName(configResource.name)
-            .setResourceType(configResource.`type`.id)
-            .setErrorCode(Errors.NONE.code)
-            .setConfigs(Collections.emptyList())))
+        .andReturn(Map(configResource -> config))
 
     EasyMock.replay(replicaManager, clientRequestQuotaManager, requestChannel, authorizer,
       adminManager)
 
-    val request = buildRequest(new DescribeConfigsRequest.Builder(new DescribeConfigsRequestData()
-      .setIncludeSynonyms(true)
-      .setResources(List(new DescribeConfigsRequestData.DescribeConfigsResource()
-        .setResourceName("topic-1")
-        .setResourceType(ConfigResource.Type.TOPIC.id)).asJava)).build(requestHeader.apiVersion))
+    val resourceToConfigNames = Map[ConfigResource, util.Collection[String]](
+      configResource -> Collections.emptyList[String])
+    val request = buildRequest(new DescribeConfigsRequest(requestHeader.apiVersion,
+      resourceToConfigNames.asJava, true))
     createKafkaApis(authorizer = Some(authorizer)).handleDescribeConfigsRequest(request)
 
     verify(authorizer, adminManager)

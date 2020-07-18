@@ -34,8 +34,6 @@ import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.CreatePartitionsRequestData.CreatePartitionsTopic
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic
 import org.apache.kafka.common.message.CreateTopicsResponseData.{CreatableTopicConfigs, CreatableTopicResult}
-import org.apache.kafka.common.message.DescribeConfigsResponseData
-import org.apache.kafka.common.message.DescribeConfigsRequestData.DescribeConfigsResource
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.server.policy.{AlterConfigPolicy, CreateTopicPolicy}
@@ -169,12 +167,15 @@ class AdminManager(val config: KafkaConfig,
           val createEntry = createTopicConfigEntry(logConfig, configs, includeSynonyms = false, includeDocumentation = false)(_, _)
           val topicConfigs = logConfig.values.asScala.map { case (k, v) =>
             val entry = createEntry(k, v)
+            val source = ConfigSource.values.indices.map(_.toByte)
+              .find(i => ConfigSource.forId(i.toByte) == entry.source)
+              .getOrElse(0.toByte)
             new CreatableTopicConfigs()
                 .setName(k)
                 .setValue(entry.value)
                 .setIsSensitive(entry.isSensitive)
-                .setReadOnly(entry.readOnly)
-                .setConfigSource(entry.configSource)
+                .setReadOnly(entry.isReadOnly)
+                .setConfigSource(source)
           }.toList.asJava
           result.setConfigs(topicConfigs)
           result.setNumPartitions(assignments.size)
@@ -346,30 +347,28 @@ class AdminManager(val config: KafkaConfig,
     }
   }
 
-  def describeConfigs(resourceToConfigNames: List[DescribeConfigsResource], includeSynonyms: Boolean, includeDocumentation: Boolean): List[DescribeConfigsResponseData.DescribeConfigsResult] = {
-    resourceToConfigNames.map { case resource =>
+  def describeConfigs(resourceToConfigNames: Map[ConfigResource, Option[Set[String]]], includeSynonyms: Boolean, includeDocumentation: Boolean): Map[ConfigResource, DescribeConfigsResponse.Config] = {
+    resourceToConfigNames.map { case (resource, configNames) =>
 
       def allConfigs(config: AbstractConfig) = {
         config.originals.asScala.filter(_._2 != null) ++ config.values.asScala
       }
       def createResponseConfig(configs: Map[String, Any],
-                               createConfigEntry: (String, Any) => DescribeConfigsResponseData.DescribeConfigsResourceResult): DescribeConfigsResponseData.DescribeConfigsResult = {
-        val filteredConfigPairs = if (resource.configurationKeys == null)
-          configs.toBuffer
-        else
-          configs.filter { case (configName, _) =>
-            resource.configurationKeys.asScala.forall(_.contains(configName))
-          }.toBuffer
+                               createConfigEntry: (String, Any) => DescribeConfigsResponse.ConfigEntry): DescribeConfigsResponse.Config = {
+        val filteredConfigPairs = configs.filter { case (configName, _) =>
+          /* Always returns true if configNames is None */
+          configNames.forall(_.contains(configName))
+        }.toBuffer
 
         val configEntries = filteredConfigPairs.map { case (name, value) => createConfigEntry(name, value) }
-        new DescribeConfigsResponseData.DescribeConfigsResult().setErrorCode(Errors.NONE.code)
-          .setConfigs(configEntries.asJava)
+        new DescribeConfigsResponse.Config(ApiError.NONE, configEntries.asJava)
       }
 
       try {
-        val configResult = ConfigResource.Type.forId(resource.resourceType) match {
+        val resourceConfig = resource.`type` match {
+
           case ConfigResource.Type.TOPIC =>
-            val topic = resource.resourceName
+            val topic = resource.name
             Topic.validate(topic)
             if (metadataCache.contains(topic)) {
               // Consider optimizing this by caching the configs or retrieving them from the `Log` when possible
@@ -377,33 +376,30 @@ class AdminManager(val config: KafkaConfig,
               val logConfig = LogConfig.fromProps(KafkaServer.copyKafkaConfigToLog(config), topicProps)
               createResponseConfig(allConfigs(logConfig), createTopicConfigEntry(logConfig, topicProps, includeSynonyms, includeDocumentation))
             } else {
-              new DescribeConfigsResponseData.DescribeConfigsResult().setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code)
-                .setConfigs(Collections.emptyList[DescribeConfigsResponseData.DescribeConfigsResourceResult])
+              new DescribeConfigsResponse.Config(new ApiError(Errors.UNKNOWN_TOPIC_OR_PARTITION, null), Collections.emptyList[DescribeConfigsResponse.ConfigEntry])
             }
 
           case ConfigResource.Type.BROKER =>
-            if (resource.resourceName == null || resource.resourceName.isEmpty)
+            if (resource.name == null || resource.name.isEmpty)
               createResponseConfig(config.dynamicConfig.currentDynamicDefaultConfigs,
-                  createBrokerConfigEntry(perBrokerConfig = false, includeSynonyms, includeDocumentation))
-            else if (resourceNameToBrokerId(resource.resourceName) == config.brokerId)
+                createBrokerConfigEntry(perBrokerConfig = false, includeSynonyms, includeDocumentation))
+            else if (resourceNameToBrokerId(resource.name) == config.brokerId)
               createResponseConfig(allConfigs(config),
-                  createBrokerConfigEntry(perBrokerConfig = true, includeSynonyms, includeDocumentation))
+                createBrokerConfigEntry(perBrokerConfig = true, includeSynonyms, includeDocumentation))
             else
-              throw new InvalidRequestException(s"Unexpected broker id, expected ${config.brokerId} or empty string, but received ${resource.resourceName}")
+              throw new InvalidRequestException(s"Unexpected broker id, expected ${config.brokerId} or empty string, but received ${resource.name}")
 
           case ConfigResource.Type.BROKER_LOGGER =>
-            if (resource.resourceName == null || resource.resourceName.isEmpty)
+            if (resource.name == null || resource.name.isEmpty)
               throw new InvalidRequestException("Broker id must not be empty")
-            else if (resourceNameToBrokerId(resource.resourceName) != config.brokerId)
-              throw new InvalidRequestException(s"Unexpected broker id, expected ${config.brokerId} but received ${resource.resourceName}")
+            else if (resourceNameToBrokerId(resource.name) != config.brokerId)
+              throw new InvalidRequestException(s"Unexpected broker id, expected ${config.brokerId} but received ${resource.name}")
             else
               createResponseConfig(Log4jController.loggers,
-                (name, value) => new DescribeConfigsResponseData.DescribeConfigsResourceResult().setName(name)
-                  .setValue(value.toString).setConfigSource(ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG.id)
-                  .setIsSensitive(false).setReadOnly(false).setSynonyms(List.empty.asJava))
+                (name, value) => new DescribeConfigsResponse.ConfigEntry(name, value.toString, ConfigSource.DYNAMIC_BROKER_LOGGER_CONFIG, false, false, List.empty.asJava))
           case resourceType => throw new InvalidRequestException(s"Unsupported resource type: $resourceType")
         }
-        configResult.setResourceName(resource.resourceName).setResourceType(resource.resourceType)
+        resource -> resourceConfig
       } catch {
         case e: Throwable =>
           // Log client errors at a lower level than unexpected exceptions
@@ -412,15 +408,9 @@ class AdminManager(val config: KafkaConfig,
             info(message, e)
           else
             error(message, e)
-          val err = ApiError.fromThrowable(e)
-          new DescribeConfigsResponseData.DescribeConfigsResult()
-              .setResourceName(resource.resourceName)
-              .setResourceType(resource.resourceType)
-              .setErrorMessage(err.message)
-              .setErrorCode(err.error.code)
-              .setConfigs(Collections.emptyList[DescribeConfigsResponseData.DescribeConfigsResourceResult])
+          resource -> new DescribeConfigsResponse.Config(ApiError.fromThrowable(e), Collections.emptyList[DescribeConfigsResponse.ConfigEntry])
       }
-    }.toList
+    }.toMap
   }
 
   def alterConfigs(configs: Map[ConfigResource, AlterConfigsRequest.Config], validateOnly: Boolean): Map[ConfigResource, ApiError] = {
@@ -691,15 +681,15 @@ class AdminManager(val config: KafkaConfig,
       case _ => DescribeConfigsResponse.ConfigType.UNKNOWN
     }
   }
-  
-  private def configSynonyms(name: String, synonyms: List[String], isSensitive: Boolean): List[DescribeConfigsResponseData.DescribeConfigsSynonym] = {
+
+  private def configSynonyms(name: String, synonyms: List[String], isSensitive: Boolean): List[DescribeConfigsResponse.ConfigSynonym] = {
     val dynamicConfig = config.dynamicConfig
-    val allSynonyms = mutable.Buffer[DescribeConfigsResponseData.DescribeConfigsSynonym]()
+    val allSynonyms = mutable.Buffer[DescribeConfigsResponse.ConfigSynonym]()
 
     def maybeAddSynonym(map: Map[String, String], source: ConfigSource)(name: String): Unit = {
       map.get(name).map { value =>
         val configValue = if (isSensitive) null else value
-        allSynonyms += new DescribeConfigsResponseData.DescribeConfigsSynonym().setName(name).setValue(configValue).setSource(source.id)
+        allSynonyms += new DescribeConfigsResponse.ConfigSynonym(name, configValue, source)
       }
     }
 
@@ -711,7 +701,7 @@ class AdminManager(val config: KafkaConfig,
   }
 
   private def createTopicConfigEntry(logConfig: LogConfig, topicProps: Properties, includeSynonyms: Boolean, includeDocumentation: Boolean)
-                                    (name: String, value: Any): DescribeConfigsResponseData.DescribeConfigsResourceResult = {
+                                    (name: String, value: Any): DescribeConfigsResponse.ConfigEntry = {
     val configEntryType = LogConfig.configType(name)
     val isSensitive = KafkaConfig.maybeSensitive(configEntryType)
     val valueAsString = if (isSensitive) null else ConfigDef.convertToString(value, configEntryType.orNull)
@@ -722,21 +712,17 @@ class AdminManager(val config: KafkaConfig,
       if (!topicProps.containsKey(name))
         list
       else
-        new DescribeConfigsResponseData.DescribeConfigsSynonym().setName(name).setValue(valueAsString)
-          .setSource(ConfigSource.TOPIC_CONFIG.id) +: list
+        new DescribeConfigsResponse.ConfigSynonym(name, valueAsString, ConfigSource.TOPIC_CONFIG) +: list
     }
-    val source = if (allSynonyms.isEmpty) ConfigSource.DEFAULT_CONFIG.id else allSynonyms.head.source
+    val source = if (allSynonyms.isEmpty) ConfigSource.DEFAULT_CONFIG else allSynonyms.head.source
     val synonyms = if (!includeSynonyms) List.empty else allSynonyms
     val dataType = configResponseType(configEntryType)
     val configDocumentation = if (includeDocumentation) brokerDocumentation(name) else null
-    new DescribeConfigsResponseData.DescribeConfigsResourceResult()
-      .setName(name).setValue(valueAsString).setConfigSource(source)
-      .setIsSensitive(isSensitive).setReadOnly(false).setSynonyms(synonyms.asJava)
-      .setDocumentation(configDocumentation).setConfigType(dataType.id)
+    new DescribeConfigsResponse.ConfigEntry(name, valueAsString, source, isSensitive, false, synonyms.asJava, dataType, configDocumentation)
   }
 
   private def createBrokerConfigEntry(perBrokerConfig: Boolean, includeSynonyms: Boolean, includeDocumentation: Boolean)
-                                     (name: String, value: Any): DescribeConfigsResponseData.DescribeConfigsResourceResult = {
+                                     (name: String, value: Any): DescribeConfigsResponse.ConfigEntry = {
     val allNames = brokerSynonyms(name)
     val configEntryType = KafkaConfig.configType(name)
     val isSensitive = KafkaConfig.maybeSensitive(configEntryType)
@@ -747,16 +733,13 @@ class AdminManager(val config: KafkaConfig,
       case _ => ConfigDef.convertToString(value, configEntryType.orNull)
     }
     val allSynonyms = configSynonyms(name, allNames, isSensitive)
-        .filter(perBrokerConfig || _.source == ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG.id)
+        .filter(perBrokerConfig || _.source == ConfigSource.DYNAMIC_DEFAULT_BROKER_CONFIG)
     val synonyms = if (!includeSynonyms) List.empty else allSynonyms
-    val source = if (allSynonyms.isEmpty) ConfigSource.DEFAULT_CONFIG.id else allSynonyms.head.source
+    val source = if (allSynonyms.isEmpty) ConfigSource.DEFAULT_CONFIG else allSynonyms.head.source
     val readOnly = !DynamicBrokerConfig.AllDynamicConfigs.contains(name)
-
     val dataType = configResponseType(configEntryType)
     val configDocumentation = if (includeDocumentation) brokerDocumentation(name) else null
-    new DescribeConfigsResponseData.DescribeConfigsResourceResult().setName(name).setValue(valueAsString).setConfigSource(source)
-      .setIsSensitive(isSensitive).setReadOnly(readOnly).setSynonyms(synonyms.asJava)
-      .setDocumentation(configDocumentation).setConfigType(dataType.id)
+    new DescribeConfigsResponse.ConfigEntry(name, valueAsString, source, isSensitive, readOnly, synonyms.asJava, dataType, configDocumentation)
   }
 
   private def sanitizeEntityName(entityName: String): String =
@@ -844,32 +827,32 @@ class AdminManager(val config: KafkaConfig,
     val excludeClientId = wantExcluded(clientIdComponent)
 
     val userEntries = if (exactUser && excludeClientId)
-      Map((Some(user.get), None) -> adminZkClient.fetchEntityConfig(ConfigType.User, sanitizedUser))
+      Map(((Some(user.get), None) -> adminZkClient.fetchEntityConfig(ConfigType.User, sanitizedUser)))
     else if (!excludeUser && !exactClientId)
       adminZkClient.fetchAllEntityConfigs(ConfigType.User).map { case (name, props) =>
-        (Some(desanitizeEntityName(name)), None) -> props
+        ((Some(desanitizeEntityName(name)), None) -> props)
       }
     else
       Map.empty
 
     val clientIdEntries = if (excludeUser && exactClientId)
-      Map((None, Some(clientId.get)) -> adminZkClient.fetchEntityConfig(ConfigType.Client, sanitizedClientId))
+      Map(((None, Some(clientId.get)) -> adminZkClient.fetchEntityConfig(ConfigType.Client, sanitizedClientId)))
     else if (!exactUser && !excludeClientId)
       adminZkClient.fetchAllEntityConfigs(ConfigType.Client).map { case (name, props) =>
-        (None, Some(desanitizeEntityName(name))) -> props
+        ((None, Some(desanitizeEntityName(name))) -> props)
       }
     else
       Map.empty
 
     val bothEntries = if (exactUser && exactClientId)
-      Map((Some(user.get), Some(clientId.get)) ->
-        adminZkClient.fetchEntityConfig(ConfigType.User, s"${sanitizedUser}/clients/${sanitizedClientId}"))
+      Map(((Some(user.get), Some(clientId.get)) ->
+        adminZkClient.fetchEntityConfig(ConfigType.User, s"${sanitizedUser}/clients/${sanitizedClientId}")))
     else if (!excludeUser && !excludeClientId)
       adminZkClient.fetchAllChildEntityConfigs(ConfigType.User, ConfigType.Client).map { case (name, props) =>
         val components = name.split("/")
         if (components.size != 3 || components(1) != "clients")
           throw new IllegalArgumentException(s"Unexpected config path: ${name}")
-        (Some(desanitizeEntityName(components(0))), Some(desanitizeEntityName(components(2)))) -> props
+        ((Some(desanitizeEntityName(components(0))), Some(desanitizeEntityName(components(2)))) -> props)
       }
     else
       Map.empty
@@ -890,13 +873,13 @@ class AdminManager(val config: KafkaConfig,
           case _: NumberFormatException =>
             throw new IllegalStateException(s"Unexpected client quota configuration value: ${key} -> ${value}")
         }
-        key -> doubleValue
+        (key -> doubleValue)
       }
     }
 
     (userEntries ++ clientIdEntries ++ bothEntries).map { case ((u, c), p) =>
       if (!p.isEmpty && matches(userComponent, u) && matches(clientIdComponent, c))
-        Some(userClientIdToEntity(u, c) -> fromProps(p))
+        Some((userClientIdToEntity(u, c) -> fromProps(p)))
       else
         None
     }.flatten.toMap
@@ -946,7 +929,7 @@ class AdminManager(val config: KafkaConfig,
           info(s"Error encountered while updating client quotas", e)
           ApiError.fromThrowable(e)
       }
-      entry.entity -> apiError
+      (entry.entity -> apiError)
     }.toMap
   }
 }

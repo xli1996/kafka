@@ -87,7 +87,8 @@ class DelayedFetch(delayMs: Long,
         val fetchLeaderEpoch = fetchStatus.fetchInfo.currentLeaderEpoch
         try {
           if (fetchOffset != LogOffsetMetadata.UnknownOffsetMetadata) {
-            val partition = replicaManager.getPartitionOrException(topicPartition)
+            val partition = replicaManager.getPartitionOrException(topicPartition,
+              expectLeader = fetchMetadata.fetchOnlyLeader)
             val offsetSnapshot = partition.fetchOffsetSnapshot(fetchLeaderEpoch, fetchMetadata.fetchOnlyLeader)
 
             val endOffset = fetchMetadata.fetchIsolation match {
@@ -120,8 +121,11 @@ class DelayedFetch(delayMs: Long,
             }
           }
         } catch {
-          case _: NotLeaderOrFollowerException =>  // Case A or Case B
-            debug(s"Broker is no longer the leader or follower of $topicPartition, satisfy $fetchMetadata immediately")
+          case _: NotLeaderForPartitionException =>  // Case A
+            debug(s"Broker is no longer the leader of $topicPartition, satisfy $fetchMetadata immediately")
+            return forceComplete()
+          case _: ReplicaNotAvailableException =>  // Case B
+            debug(s"Broker no longer has a replica of $topicPartition, satisfy $fetchMetadata immediately")
             return forceComplete()
           case _: UnknownTopicOrPartitionException => // Case C
             debug(s"Broker no longer knows of partition $topicPartition, satisfy $fetchMetadata immediately")

@@ -115,14 +115,14 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
 
         List<String> cipherSuitesList = (List<String>) configs.get(SslConfigs.SSL_CIPHER_SUITES_CONFIG);
         if (cipherSuitesList != null && !cipherSuitesList.isEmpty()) {
-            this.cipherSuites = cipherSuitesList.toArray(new String[0]);
+            this.cipherSuites = cipherSuitesList.toArray(new String[cipherSuitesList.size()]);
         } else {
             this.cipherSuites = null;
         }
 
         List<String> enabledProtocolsList = (List<String>) configs.get(SslConfigs.SSL_ENABLED_PROTOCOLS_CONFIG);
         if (enabledProtocolsList != null && !enabledProtocolsList.isEmpty()) {
-            this.enabledProtocols = enabledProtocolsList.toArray(new String[0]);
+            this.enabledProtocols = enabledProtocolsList.toArray(new String[enabledProtocolsList.size()]);
         } else {
             this.enabledProtocols = null;
         }
@@ -149,7 +149,7 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
     }
 
     @Override
-    public void close() {
+    public void close() throws IOException {
         this.sslContext = null;
     }
 
@@ -194,7 +194,7 @@ public final class DefaultSslEngineFactory implements SslEngineFactory {
         log.warn("Unrecognized client authentication configuration {}.  Falling " +
                 "back to NONE.  Recognized client authentication configurations are {}.",
                 key, String.join(", ", SslClientAuth.VALUES.stream().
-                        map(Enum::name).collect(Collectors.toList())));
+                        map(a -> a.name()).collect(Collectors.toList())));
         return SslClientAuth.NONE;
     }
 

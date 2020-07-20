@@ -17,10 +17,8 @@
 package org.apache.kafka.common.errors;
 
 /**
- * This server is not the leader for the given partition.
- * @deprecated since 2.7. Use {@link NotLeaderOrFollowerException}.
+ * This server is not the leader for the given partition
  */
-@Deprecated
 public class NotLeaderForPartitionException extends InvalidMetadataException {
 
     private static final long serialVersionUID = 1L;

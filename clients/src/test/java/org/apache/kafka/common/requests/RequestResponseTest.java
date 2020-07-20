@@ -147,9 +147,6 @@ import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.protocol.types.SchemaException;
 import org.apache.kafka.common.protocol.types.Struct;
-import org.apache.kafka.common.quota.ClientQuotaAlteration;
-import org.apache.kafka.common.quota.ClientQuotaEntity;
-import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.record.CompressionType;
 import org.apache.kafka.common.record.MemoryRecords;
 import org.apache.kafka.common.record.RecordBatch;
@@ -200,21 +197,18 @@ import static org.junit.Assert.fail;
 
 public class RequestResponseTest {
 
-    // Exception includes a message that we verify is not included in error responses
-    private final UnknownServerException unknownServerException = new UnknownServerException("secret");
-
     @Test
     public void testSerialization() throws Exception {
         checkRequest(createFindCoordinatorRequest(0), true);
         checkRequest(createFindCoordinatorRequest(1), true);
-        checkErrorResponse(createFindCoordinatorRequest(0), unknownServerException, true);
-        checkErrorResponse(createFindCoordinatorRequest(1), unknownServerException, true);
+        checkErrorResponse(createFindCoordinatorRequest(0), new UnknownServerException(), true);
+        checkErrorResponse(createFindCoordinatorRequest(1), new UnknownServerException(), true);
         checkResponse(createFindCoordinatorResponse(), 0, true);
         checkResponse(createFindCoordinatorResponse(), 1, true);
         checkRequest(createControlledShutdownRequest(), true);
         checkResponse(createControlledShutdownResponse(), 1, true);
-        checkErrorResponse(createControlledShutdownRequest(), unknownServerException, true);
-        checkErrorResponse(createControlledShutdownRequest(0), unknownServerException, true);
+        checkErrorResponse(createControlledShutdownRequest(), new UnknownServerException(), true);
+        checkErrorResponse(createControlledShutdownRequest(0), new UnknownServerException(), true);
         checkRequest(createFetchRequest(4), true);
         checkResponse(createFetchResponse(), 4, true);
         List<TopicPartition> toForgetTopics = new ArrayList<>();
@@ -224,53 +218,53 @@ public class RequestResponseTest {
         checkRequest(createFetchRequest(7, new FetchMetadata(123, 456), toForgetTopics), true);
         checkResponse(createFetchResponse(123), 7, true);
         checkResponse(createFetchResponse(Errors.FETCH_SESSION_ID_NOT_FOUND, 123), 7, true);
-        checkErrorResponse(createFetchRequest(4), unknownServerException, true);
+        checkErrorResponse(createFetchRequest(4), new UnknownServerException(), true);
         checkRequest(createHeartBeatRequest(), true);
-        checkErrorResponse(createHeartBeatRequest(), unknownServerException, true);
+        checkErrorResponse(createHeartBeatRequest(), new UnknownServerException(), true);
         checkResponse(createHeartBeatResponse(), 0, true);
 
         for (int v = ApiKeys.JOIN_GROUP.oldestVersion(); v <= ApiKeys.JOIN_GROUP.latestVersion(); v++) {
             checkRequest(createJoinGroupRequest(v), true);
-            checkErrorResponse(createJoinGroupRequest(v), unknownServerException, true);
+            checkErrorResponse(createJoinGroupRequest(v), new UnknownServerException(), true);
             checkResponse(createJoinGroupResponse(v), v, true);
         }
 
         for (int v = ApiKeys.SYNC_GROUP.oldestVersion(); v <= ApiKeys.SYNC_GROUP.latestVersion(); v++) {
             checkRequest(createSyncGroupRequest(v), true);
-            checkErrorResponse(createSyncGroupRequest(v), unknownServerException, true);
+            checkErrorResponse(createSyncGroupRequest(v), new UnknownServerException(), true);
             checkResponse(createSyncGroupResponse(v), v, true);
         }
 
         checkRequest(createLeaveGroupRequest(), true);
-        checkErrorResponse(createLeaveGroupRequest(), unknownServerException, true);
+        checkErrorResponse(createLeaveGroupRequest(), new UnknownServerException(), true);
         checkResponse(createLeaveGroupResponse(), 0, true);
 
         for (short v = ApiKeys.LIST_GROUPS.oldestVersion(); v <= ApiKeys.LIST_GROUPS.latestVersion(); v++) {
             checkRequest(createListGroupsRequest(v), false);
-            checkErrorResponse(createListGroupsRequest(v), unknownServerException, true);
+            checkErrorResponse(createListGroupsRequest(v), new UnknownServerException(), true);
             checkResponse(createListGroupsResponse(v), v, true);
         }
 
         checkRequest(createDescribeGroupRequest(), true);
-        checkErrorResponse(createDescribeGroupRequest(), unknownServerException, true);
+        checkErrorResponse(createDescribeGroupRequest(), new UnknownServerException(), true);
         checkResponse(createDescribeGroupResponse(), 0, true);
         checkRequest(createDeleteGroupsRequest(), true);
-        checkErrorResponse(createDeleteGroupsRequest(), unknownServerException, true);
+        checkErrorResponse(createDeleteGroupsRequest(), new UnknownServerException(), true);
         checkResponse(createDeleteGroupsResponse(), 0, true);
         for (int i = 0; i < ApiKeys.LIST_OFFSETS.latestVersion(); i++) {
             checkRequest(createListOffsetRequest(i), true);
-            checkErrorResponse(createListOffsetRequest(i), unknownServerException, true);
+            checkErrorResponse(createListOffsetRequest(i), new UnknownServerException(), true);
             checkResponse(createListOffsetResponse(i), i, true);
         }
         checkRequest(MetadataRequest.Builder.allTopics().build((short) 2), true);
         checkRequest(createMetadataRequest(1, Collections.singletonList("topic1")), true);
-        checkErrorResponse(createMetadataRequest(1, Collections.singletonList("topic1")), unknownServerException, true);
+        checkErrorResponse(createMetadataRequest(1, Collections.singletonList("topic1")), new UnknownServerException(), true);
         checkResponse(createMetadataResponse(), 2, true);
-        checkErrorResponse(createMetadataRequest(2, Collections.singletonList("topic1")), unknownServerException, true);
+        checkErrorResponse(createMetadataRequest(2, Collections.singletonList("topic1")), new UnknownServerException(), true);
         checkResponse(createMetadataResponse(), 3, true);
-        checkErrorResponse(createMetadataRequest(3, Collections.singletonList("topic1")), unknownServerException, true);
+        checkErrorResponse(createMetadataRequest(3, Collections.singletonList("topic1")), new UnknownServerException(), true);
         checkResponse(createMetadataResponse(), 4, true);
-        checkErrorResponse(createMetadataRequest(4, Collections.singletonList("topic1")), unknownServerException, true);
+        checkErrorResponse(createMetadataRequest(4, Collections.singletonList("topic1")), new UnknownServerException(), true);
         checkRequest(createOffsetFetchRequestForAllPartition("group1", false), true);
         checkRequest(createOffsetFetchRequestForAllPartition("group1", true), true);
         checkErrorResponse(createOffsetFetchRequestForAllPartition("group1", false), new NotCoordinatorException("Not Coordinator"), true);
@@ -281,42 +275,42 @@ public class RequestResponseTest {
         checkRequest(createOffsetFetchRequest(7, true), true);
         checkRequest(createOffsetFetchRequestForAllPartition("group1", false), true);
         checkRequest(createOffsetFetchRequestForAllPartition("group1", true), true);
-        checkErrorResponse(createOffsetFetchRequest(0, false), unknownServerException, true);
-        checkErrorResponse(createOffsetFetchRequest(1, false), unknownServerException, true);
-        checkErrorResponse(createOffsetFetchRequest(2, false), unknownServerException, true);
-        checkErrorResponse(createOffsetFetchRequest(7, true), unknownServerException, true);
+        checkErrorResponse(createOffsetFetchRequest(0, false), new UnknownServerException(), true);
+        checkErrorResponse(createOffsetFetchRequest(1, false), new UnknownServerException(), true);
+        checkErrorResponse(createOffsetFetchRequest(2, false), new UnknownServerException(), true);
+        checkErrorResponse(createOffsetFetchRequest(7, true), new UnknownServerException(), true);
         checkResponse(createOffsetFetchResponse(), 0, true);
         checkRequest(createProduceRequest(2), true);
-        checkErrorResponse(createProduceRequest(2), unknownServerException, true);
+        checkErrorResponse(createProduceRequest(2), new UnknownServerException(), true);
         checkRequest(createProduceRequest(3), true);
-        checkErrorResponse(createProduceRequest(3), unknownServerException, true);
+        checkErrorResponse(createProduceRequest(3), new UnknownServerException(), true);
         checkResponse(createProduceResponse(), 2, true);
         checkResponse(createProduceResponseWithErrorMessage(), 8, true);
 
         for (int v = ApiKeys.STOP_REPLICA.oldestVersion(); v <= ApiKeys.STOP_REPLICA.latestVersion(); v++) {
             checkRequest(createStopReplicaRequest(v, true), true);
             checkRequest(createStopReplicaRequest(v, false), true);
-            checkErrorResponse(createStopReplicaRequest(v, true), unknownServerException, true);
-            checkErrorResponse(createStopReplicaRequest(v, false), unknownServerException, true);
+            checkErrorResponse(createStopReplicaRequest(v, true), new UnknownServerException(), true);
+            checkErrorResponse(createStopReplicaRequest(v, false), new UnknownServerException(), true);
             checkResponse(createStopReplicaResponse(), v, true);
         }
 
         checkRequest(createLeaderAndIsrRequest(0), true);
-        checkErrorResponse(createLeaderAndIsrRequest(0), unknownServerException, false);
+        checkErrorResponse(createLeaderAndIsrRequest(0), new UnknownServerException(), false);
         checkRequest(createLeaderAndIsrRequest(1), true);
-        checkErrorResponse(createLeaderAndIsrRequest(1), unknownServerException, false);
+        checkErrorResponse(createLeaderAndIsrRequest(1), new UnknownServerException(), false);
         checkRequest(createLeaderAndIsrRequest(2), true);
-        checkErrorResponse(createLeaderAndIsrRequest(2), unknownServerException, false);
+        checkErrorResponse(createLeaderAndIsrRequest(2), new UnknownServerException(), false);
         checkResponse(createLeaderAndIsrResponse(), 0, true);
         checkRequest(createSaslHandshakeRequest(), true);
-        checkErrorResponse(createSaslHandshakeRequest(), unknownServerException, true);
+        checkErrorResponse(createSaslHandshakeRequest(), new UnknownServerException(), true);
         checkResponse(createSaslHandshakeResponse(), 0, true);
         checkRequest(createSaslAuthenticateRequest(), true);
-        checkErrorResponse(createSaslAuthenticateRequest(), unknownServerException, true);
+        checkErrorResponse(createSaslAuthenticateRequest(), new UnknownServerException(), true);
         checkResponse(createSaslAuthenticateResponse(), 0, true);
         checkResponse(createSaslAuthenticateResponse(), 1, true);
         checkRequest(createApiVersionRequest(), true);
-        checkErrorResponse(createApiVersionRequest(), unknownServerException, true);
+        checkErrorResponse(createApiVersionRequest(), new UnknownServerException(), true);
         checkErrorResponse(createApiVersionRequest(), new UnsupportedVersionException("Not Supported"), true);
         checkResponse(createApiVersionResponse(), 0, true);
         checkResponse(createApiVersionResponse(), 1, true);
@@ -328,107 +322,107 @@ public class RequestResponseTest {
         checkResponse(ApiVersionsResponse.DEFAULT_API_VERSIONS_RESPONSE, 3, true);
 
         checkRequest(createCreateTopicRequest(0), true);
-        checkErrorResponse(createCreateTopicRequest(0), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(0), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 0, true);
         checkRequest(createCreateTopicRequest(1), true);
-        checkErrorResponse(createCreateTopicRequest(1), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(1), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 1, true);
         checkRequest(createCreateTopicRequest(2), true);
-        checkErrorResponse(createCreateTopicRequest(2), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(2), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 2, true);
         checkRequest(createCreateTopicRequest(3), true);
-        checkErrorResponse(createCreateTopicRequest(3), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(3), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 3, true);
         checkRequest(createCreateTopicRequest(4), true);
-        checkErrorResponse(createCreateTopicRequest(4), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(4), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 4, true);
         checkRequest(createCreateTopicRequest(5), true);
-        checkErrorResponse(createCreateTopicRequest(5), unknownServerException, true);
+        checkErrorResponse(createCreateTopicRequest(5), new UnknownServerException(), true);
         checkResponse(createCreateTopicResponse(), 5, true);
 
         checkRequest(createDeleteTopicsRequest(), true);
-        checkErrorResponse(createDeleteTopicsRequest(), unknownServerException, true);
+        checkErrorResponse(createDeleteTopicsRequest(), new UnknownServerException(), true);
         checkResponse(createDeleteTopicsResponse(), 0, true);
 
         checkRequest(createInitPidRequest(), true);
-        checkErrorResponse(createInitPidRequest(), unknownServerException, true);
+        checkErrorResponse(createInitPidRequest(), new UnknownServerException(), true);
         checkResponse(createInitPidResponse(), 0, true);
 
         checkRequest(createAddPartitionsToTxnRequest(), true);
         checkResponse(createAddPartitionsToTxnResponse(), 0, true);
-        checkErrorResponse(createAddPartitionsToTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createAddPartitionsToTxnRequest(), new UnknownServerException(), true);
         checkRequest(createAddOffsetsToTxnRequest(), true);
         checkResponse(createAddOffsetsToTxnResponse(), 0, true);
-        checkErrorResponse(createAddOffsetsToTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createAddOffsetsToTxnRequest(), new UnknownServerException(), true);
         checkRequest(createEndTxnRequest(), true);
         checkResponse(createEndTxnResponse(), 0, true);
-        checkErrorResponse(createEndTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createEndTxnRequest(), new UnknownServerException(), true);
         checkRequest(createWriteTxnMarkersRequest(), true);
         checkResponse(createWriteTxnMarkersResponse(), 0, true);
-        checkErrorResponse(createWriteTxnMarkersRequest(), unknownServerException, true);
+        checkErrorResponse(createWriteTxnMarkersRequest(), new UnknownServerException(), true);
 
         checkOlderFetchVersions();
         checkResponse(createMetadataResponse(), 0, true);
         checkResponse(createMetadataResponse(), 1, true);
-        checkErrorResponse(createMetadataRequest(1, Collections.singletonList("topic1")), unknownServerException, true);
+        checkErrorResponse(createMetadataRequest(1, Collections.singletonList("topic1")), new UnknownServerException(), true);
         checkRequest(createOffsetCommitRequest(0), true);
-        checkErrorResponse(createOffsetCommitRequest(0), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(0), new UnknownServerException(), true);
         checkRequest(createOffsetCommitRequest(1), true);
-        checkErrorResponse(createOffsetCommitRequest(1), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(1), new UnknownServerException(), true);
         checkRequest(createOffsetCommitRequest(2), true);
-        checkErrorResponse(createOffsetCommitRequest(2), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(2), new UnknownServerException(), true);
         checkRequest(createOffsetCommitRequest(3), true);
-        checkErrorResponse(createOffsetCommitRequest(3), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(3), new UnknownServerException(), true);
         checkRequest(createOffsetCommitRequest(4), true);
-        checkErrorResponse(createOffsetCommitRequest(4), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(4), new UnknownServerException(), true);
         checkResponse(createOffsetCommitResponse(), 4, true);
         checkRequest(createOffsetCommitRequest(5), true);
-        checkErrorResponse(createOffsetCommitRequest(5), unknownServerException, true);
+        checkErrorResponse(createOffsetCommitRequest(5), new UnknownServerException(), true);
         checkResponse(createOffsetCommitResponse(), 5, true);
         checkRequest(createJoinGroupRequest(0), true);
         checkRequest(createUpdateMetadataRequest(0, null), false);
-        checkErrorResponse(createUpdateMetadataRequest(0, null), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(0, null), new UnknownServerException(), true);
         checkRequest(createUpdateMetadataRequest(1, null), false);
         checkRequest(createUpdateMetadataRequest(1, "rack1"), false);
-        checkErrorResponse(createUpdateMetadataRequest(1, null), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(1, null), new UnknownServerException(), true);
         checkRequest(createUpdateMetadataRequest(2, "rack1"), false);
         checkRequest(createUpdateMetadataRequest(2, null), false);
-        checkErrorResponse(createUpdateMetadataRequest(2, "rack1"), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(2, "rack1"), new UnknownServerException(), true);
         checkRequest(createUpdateMetadataRequest(3, "rack1"), false);
         checkRequest(createUpdateMetadataRequest(3, null), false);
-        checkErrorResponse(createUpdateMetadataRequest(3, "rack1"), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(3, "rack1"), new UnknownServerException(), true);
         checkRequest(createUpdateMetadataRequest(4, "rack1"), false);
         checkRequest(createUpdateMetadataRequest(4, null), false);
-        checkErrorResponse(createUpdateMetadataRequest(4, "rack1"), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(4, "rack1"), new UnknownServerException(), true);
         checkRequest(createUpdateMetadataRequest(5, "rack1"), false);
         checkRequest(createUpdateMetadataRequest(5, null), false);
-        checkErrorResponse(createUpdateMetadataRequest(5, "rack1"), unknownServerException, true);
+        checkErrorResponse(createUpdateMetadataRequest(5, "rack1"), new UnknownServerException(), true);
         checkResponse(createUpdateMetadataResponse(), 0, true);
         checkRequest(createListOffsetRequest(0), true);
-        checkErrorResponse(createListOffsetRequest(0), unknownServerException, true);
+        checkErrorResponse(createListOffsetRequest(0), new UnknownServerException(), true);
         checkResponse(createListOffsetResponse(0), 0, true);
         checkRequest(createLeaderEpochRequestForReplica(0, 1), true);
         checkRequest(createLeaderEpochRequestForConsumer(), true);
         checkResponse(createLeaderEpochResponse(), 0, true);
-        checkErrorResponse(createLeaderEpochRequestForConsumer(), unknownServerException, true);
+        checkErrorResponse(createLeaderEpochRequestForConsumer(), new UnknownServerException(), true);
         checkRequest(createAddPartitionsToTxnRequest(), true);
-        checkErrorResponse(createAddPartitionsToTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createAddPartitionsToTxnRequest(), new UnknownServerException(), true);
         checkResponse(createAddPartitionsToTxnResponse(), 0, true);
         checkRequest(createAddOffsetsToTxnRequest(), true);
-        checkErrorResponse(createAddOffsetsToTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createAddOffsetsToTxnRequest(), new UnknownServerException(), true);
         checkResponse(createAddOffsetsToTxnResponse(), 0, true);
         checkRequest(createEndTxnRequest(), true);
-        checkErrorResponse(createEndTxnRequest(), unknownServerException, true);
+        checkErrorResponse(createEndTxnRequest(), new UnknownServerException(), true);
         checkResponse(createEndTxnResponse(), 0, true);
         checkRequest(createWriteTxnMarkersRequest(), true);
-        checkErrorResponse(createWriteTxnMarkersRequest(), unknownServerException, true);
+        checkErrorResponse(createWriteTxnMarkersRequest(), new UnknownServerException(), true);
         checkResponse(createWriteTxnMarkersResponse(), 0, true);
         checkRequest(createTxnOffsetCommitRequest(0), true);
         checkRequest(createTxnOffsetCommitRequest(3), true);
         checkRequest(createTxnOffsetCommitRequestWithAutoDowngrade(2), true);
-        checkErrorResponse(createTxnOffsetCommitRequest(0), unknownServerException, true);
-        checkErrorResponse(createTxnOffsetCommitRequest(3), unknownServerException, true);
-        checkErrorResponse(createTxnOffsetCommitRequestWithAutoDowngrade(2), unknownServerException, true);
+        checkErrorResponse(createTxnOffsetCommitRequest(0), new UnknownServerException(), true);
+        checkErrorResponse(createTxnOffsetCommitRequest(3), new UnknownServerException(), true);
+        checkErrorResponse(createTxnOffsetCommitRequestWithAutoDowngrade(2), new UnknownServerException(), true);
         checkResponse(createTxnOffsetCommitResponse(), 0, true);
         checkRequest(createDescribeAclsRequest(), true);
         checkErrorResponse(createDescribeAclsRequest(), new SecurityDisabledException("Security is not enabled."), true);
@@ -440,18 +434,18 @@ public class RequestResponseTest {
         checkErrorResponse(createDeleteAclsRequest(), new SecurityDisabledException("Security is not enabled."), true);
         checkResponse(createDeleteAclsResponse(), ApiKeys.DELETE_ACLS.latestVersion(), true);
         checkRequest(createAlterConfigsRequest(), false);
-        checkErrorResponse(createAlterConfigsRequest(), unknownServerException, true);
+        checkErrorResponse(createAlterConfigsRequest(), new UnknownServerException(), true);
         checkResponse(createAlterConfigsResponse(), 0, false);
         checkRequest(createDescribeConfigsRequest(0), true);
         checkRequest(createDescribeConfigsRequestWithConfigEntries(0), false);
-        checkErrorResponse(createDescribeConfigsRequest(0), unknownServerException, true);
+        checkErrorResponse(createDescribeConfigsRequest(0), new UnknownServerException(), true);
         checkResponse(createDescribeConfigsResponse((short) 0), 0, false);
         checkRequest(createDescribeConfigsRequest(1), true);
         checkRequest(createDescribeConfigsRequestWithConfigEntries(1), false);
         checkRequest(createDescribeConfigsRequestWithDocumentation(1), false);
         checkRequest(createDescribeConfigsRequestWithDocumentation(2), false);
         checkRequest(createDescribeConfigsRequestWithDocumentation(3), false);
-        checkErrorResponse(createDescribeConfigsRequest(1), unknownServerException, true);
+        checkErrorResponse(createDescribeConfigsRequest(1), new UnknownServerException(), true);
         checkResponse(createDescribeConfigsResponse((short) 1), 1, false);
         checkDescribeConfigsResponseVersions();
         checkRequest(createCreatePartitionsRequest(), true);
@@ -459,43 +453,36 @@ public class RequestResponseTest {
         checkErrorResponse(createCreatePartitionsRequest(), new InvalidTopicException(), true);
         checkResponse(createCreatePartitionsResponse(), 0, true);
         checkRequest(createCreateTokenRequest(), true);
-        checkErrorResponse(createCreateTokenRequest(), unknownServerException, true);
+        checkErrorResponse(createCreateTokenRequest(), new UnknownServerException(), true);
         checkResponse(createCreateTokenResponse(), 0, true);
         checkRequest(createDescribeTokenRequest(), true);
-        checkErrorResponse(createDescribeTokenRequest(), unknownServerException, true);
+        checkErrorResponse(createDescribeTokenRequest(), new UnknownServerException(), true);
         checkResponse(createDescribeTokenResponse(), 0, true);
         checkRequest(createExpireTokenRequest(), true);
-        checkErrorResponse(createExpireTokenRequest(), unknownServerException, true);
+        checkErrorResponse(createExpireTokenRequest(), new UnknownServerException(), true);
         checkResponse(createExpireTokenResponse(), 0, true);
         checkRequest(createRenewTokenRequest(), true);
-        checkErrorResponse(createRenewTokenRequest(), unknownServerException, true);
+        checkErrorResponse(createRenewTokenRequest(), new UnknownServerException(), true);
         checkResponse(createRenewTokenResponse(), 0, true);
         checkRequest(createElectLeadersRequest(), true);
         checkRequest(createElectLeadersRequestNullPartitions(), true);
-        checkErrorResponse(createElectLeadersRequest(), unknownServerException, true);
+        checkErrorResponse(createElectLeadersRequest(), new UnknownServerException(), true);
         checkResponse(createElectLeadersResponse(), 1, true);
         checkRequest(createIncrementalAlterConfigsRequest(), true);
-        checkErrorResponse(createIncrementalAlterConfigsRequest(), unknownServerException, true);
+        checkErrorResponse(createIncrementalAlterConfigsRequest(), new UnknownServerException(), true);
         checkResponse(createIncrementalAlterConfigsResponse(), 0, true);
         checkRequest(createAlterPartitionReassignmentsRequest(), true);
-        checkErrorResponse(createAlterPartitionReassignmentsRequest(), unknownServerException, true);
+        checkErrorResponse(createAlterPartitionReassignmentsRequest(), new UnknownServerException(), true);
         checkResponse(createAlterPartitionReassignmentsResponse(), 0, true);
         checkRequest(createListPartitionReassignmentsRequest(), true);
-        checkErrorResponse(createListPartitionReassignmentsRequest(), unknownServerException, true);
+        checkErrorResponse(createListPartitionReassignmentsRequest(), new UnknownServerException(), true);
         checkResponse(createListPartitionReassignmentsResponse(), 0, true);
         checkRequest(createOffsetDeleteRequest(), true);
-        checkErrorResponse(createOffsetDeleteRequest(), unknownServerException, true);
+        checkErrorResponse(createOffsetDeleteRequest(), new UnknownServerException(), true);
         checkResponse(createOffsetDeleteResponse(), 0, true);
         checkRequest(createAlterReplicaLogDirsRequest(), true);
-        checkErrorResponse(createAlterReplicaLogDirsRequest(), unknownServerException, true);
+        checkErrorResponse(createAlterReplicaLogDirsRequest(), new UnknownServerException(), true);
         checkResponse(createAlterReplicaLogDirsResponse(), 0, true);
-
-        checkRequest(createDescribeClientQuotasRequest(), true);
-        checkErrorResponse(createDescribeClientQuotasRequest(), unknownServerException, true);
-        checkResponse(createDescribeClientQuotasResponse(), 0, true);
-        checkRequest(createAlterClientQuotasRequest(), true);
-        checkErrorResponse(createAlterClientQuotasRequest(), unknownServerException, true);
-        checkResponse(createAlterClientQuotasResponse(), 0, true);
     }
 
     @Test
@@ -509,7 +496,7 @@ public class RequestResponseTest {
     private void checkOlderFetchVersions() throws Exception {
         int latestVersion = FETCH.latestVersion();
         for (int i = 0; i < latestVersion; ++i) {
-            checkErrorResponse(createFetchRequest(i), unknownServerException, true);
+            checkErrorResponse(createFetchRequest(i), new UnknownServerException(), true);
             checkRequest(createFetchRequest(i), true);
             checkResponse(createFetchResponse(), i, true);
         }
@@ -564,13 +551,7 @@ public class RequestResponseTest {
     }
 
     private void checkErrorResponse(AbstractRequest req, Throwable e, boolean checkEqualityAndHashCode) {
-        AbstractResponse response = req.getErrorResponse(e);
-        checkResponse(response, req.version(), checkEqualityAndHashCode);
-        if (e instanceof UnknownServerException) {
-            String responseStr = response.toStruct(req.version()).toString();
-            assertFalse(String.format("Unknown message included in response for %s: %s ", req.api, responseStr),
-                    responseStr.contains(e.getMessage()));
-        }
+        checkResponse(req.getErrorResponse(e), req.version(), checkEqualityAndHashCode);
     }
 
     private void checkRequest(AbstractRequest req, boolean checkEqualityAndHashCode) {
@@ -2344,25 +2325,4 @@ public class RequestResponseTest {
         return new AlterReplicaLogDirsResponse(data);
     }
 
-    private DescribeClientQuotasRequest createDescribeClientQuotasRequest() {
-        ClientQuotaFilter filter = ClientQuotaFilter.all();
-        return new DescribeClientQuotasRequest.Builder(filter).build((short) 0);
-    }
-
-    private DescribeClientQuotasResponse createDescribeClientQuotasResponse() {
-        ClientQuotaEntity entity = new ClientQuotaEntity(Collections.singletonMap(ClientQuotaEntity.USER, "user"));
-        return new DescribeClientQuotasResponse(Collections.singletonMap(entity, Collections.singletonMap("request_percentage", 1.0)), 0);
-    }
-
-    private AlterClientQuotasRequest createAlterClientQuotasRequest() {
-        ClientQuotaEntity entity = new ClientQuotaEntity(Collections.singletonMap(ClientQuotaEntity.USER, "user"));
-        ClientQuotaAlteration.Op op = new ClientQuotaAlteration.Op("request_percentage", 2.0);
-        ClientQuotaAlteration alteration = new ClientQuotaAlteration(entity, Collections.singleton(op));
-        return new AlterClientQuotasRequest.Builder(Collections.singleton(alteration), false).build((short) 0);
-    }
-
-    private AlterClientQuotasResponse createAlterClientQuotasResponse() {
-        ClientQuotaEntity entity = new ClientQuotaEntity(Collections.singletonMap(ClientQuotaEntity.USER, "user"));
-        return new AlterClientQuotasResponse(Collections.singletonMap(entity, ApiError.NONE), 0);
-    }
 }

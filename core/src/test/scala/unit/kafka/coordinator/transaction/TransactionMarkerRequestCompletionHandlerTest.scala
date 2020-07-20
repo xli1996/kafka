@@ -177,8 +177,8 @@ class TransactionMarkerRequestCompletionHandlerTest {
   }
 
   @Test
-  def shouldRetryPartitionWhenNotLeaderOrFollowerError(): Unit = {
-    verifyRetriesPartitionOnError(Errors.NOT_LEADER_OR_FOLLOWER)
+  def shouldRetryPartitionWhenNotLeaderForPartitionError(): Unit = {
+    verifyRetriesPartitionOnError(Errors.NOT_LEADER_FOR_PARTITION)
   }
 
   @Test

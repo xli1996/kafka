@@ -368,7 +368,6 @@ public class ExpiringCredentialRefreshingLoginTest {
                         inOrder.verify(mockLoginContext).login();
                     }
                 }
-                testExpiringCredentialRefreshingLogin.close();
             }
         }
     }

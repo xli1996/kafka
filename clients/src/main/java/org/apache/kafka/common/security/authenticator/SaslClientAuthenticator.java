@@ -672,7 +672,7 @@ public class SaslClientAuthenticator implements Authenticator {
                 double pctWindowJitterToAvoidReauthenticationStormAcrossManyChannelsSimultaneously = 0.10;
                 double pctToUse = pctWindowFactorToTakeNetworkLatencyAndClockDriftIntoAccount + RNG.nextDouble()
                         * pctWindowJitterToAvoidReauthenticationStormAcrossManyChannelsSimultaneously;
-                sessionLifetimeMsToUse = (long) (positiveSessionLifetimeMs * pctToUse);
+                sessionLifetimeMsToUse = (long) (positiveSessionLifetimeMs.longValue() * pctToUse);
                 clientSessionReauthenticationTimeNanos = authenticationEndNanos + 1000 * 1000 * sessionLifetimeMsToUse;
                 log.debug(
                         "Finished {} with session expiration in {} ms and session re-authentication on or after {} ms",
@@ -684,7 +684,7 @@ public class SaslClientAuthenticator implements Authenticator {
 
         public Long reauthenticationLatencyMs() {
             return reauthenticating()
-                    ? Math.round((authenticationEndNanos - reauthenticationBeginNanos) / 1000.0 / 1000.0)
+                    ? Long.valueOf(Math.round((authenticationEndNanos - reauthenticationBeginNanos) / 1000.0 / 1000.0))
                     : null;
         }
 

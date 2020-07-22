@@ -34,8 +34,19 @@ def retryFlagsString(jobConfig) {
 
 def downstreamBuildFailureOutput = ""
 def publishStep(String configSettings) {
-    withVaultFile([["gradle/artifactory_hotfix_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
-        sh "./gradlewAll --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives"
+    withDockerServer([uri: dockerHost()]) {
+        withVaultFile([["gradle/artifactory_hotfix_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
+            writeFile file:'.ci/extract-iam-credential.sh', text:libraryResource('scripts/extract-iam-credential.sh')
+            sh """
+                bash .ci/extract-iam-credential.sh && rm .ci/extract-iam-credential.sh
+
+                # Hide login credential from below
+                set +x
+
+                \$(aws ecr get-login --no-include-email --region us-west-2)
+                ./gradlewAll -PskipSigning=true --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives
+            """
+        }
     }
 }
 def job = {
@@ -61,11 +72,7 @@ def job = {
 
     if (config.publish) {
       stage("Publish to artifactory") {
-        if (config.isDevJob) {
-          publishStep('Gradle-Artifactory-Settings')
-        } else if (config.isPreviewJob) {
-          publishStep('Gradle-Artifactory-Preview-Release-Settings')
-        }
+        publishStep('5cfa68d8-5e36-4f3d-aa73-568f5cff0e36')
       }
     }
 

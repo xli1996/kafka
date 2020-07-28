@@ -31,8 +31,12 @@ import org.apache.kafka.common.message.AlterClientQuotasRequestData;
 import org.apache.kafka.common.message.AlterClientQuotasResponseData;
 import org.apache.kafka.common.message.AlterConfigsRequestData;
 import org.apache.kafka.common.message.AlterConfigsResponseData;
+import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
+import org.apache.kafka.common.message.BrokerHeartbeatResponseData;
 import org.apache.kafka.common.message.ControlledShutdownRequestData;
 import org.apache.kafka.common.message.ControlledShutdownResponseData;
+import org.apache.kafka.common.message.ControllerHeartbeatRequestData;
+import org.apache.kafka.common.message.ControllerHeartbeatResponseData;
 import org.apache.kafka.common.message.CreateAclsRequestData;
 import org.apache.kafka.common.message.CreateAclsResponseData;
 import org.apache.kafka.common.message.CreateDelegationTokenRequestData;
@@ -217,7 +221,11 @@ public enum ApiKeys {
     DESCRIBE_CLIENT_QUOTAS(48, "DescribeClientQuotas", DescribeClientQuotasRequestData.SCHEMAS,
             DescribeClientQuotasResponseData.SCHEMAS),
     ALTER_CLIENT_QUOTAS(49, "AlterClientQuotas", AlterClientQuotasRequestData.SCHEMAS,
-            AlterClientQuotasResponseData.SCHEMAS);
+            AlterClientQuotasResponseData.SCHEMAS),
+    BROKER_HEARTBEAT(50, "BrokerHeartbeat", BrokerHeartbeatRequestData.SCHEMAS,
+            BrokerHeartbeatResponseData.SCHEMAS),
+    CONTROLLER_HEARTBEAT(51, "ControllerHeartbeat", ControllerHeartbeatRequestData.SCHEMAS,
+            ControllerHeartbeatResponseData.SCHEMAS);
 
     private static final ApiKeys[] ID_TO_TYPE;
     private static final int MIN_API_KEY = 0;

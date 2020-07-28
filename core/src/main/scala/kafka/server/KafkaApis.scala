@@ -179,6 +179,8 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.OFFSET_DELETE => handleOffsetDeleteRequest(request)
         case ApiKeys.DESCRIBE_CLIENT_QUOTAS => handleDescribeClientQuotasRequest(request)
         case ApiKeys.ALTER_CLIENT_QUOTAS => handleAlterClientQuotasRequest(request)
+        case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartbeat(request)
+        case ApiKeys.CONTROLLER_HEARTBEAT => handleControllerHeartbeat(request)
       }
     } catch {
       case e: FatalExitError => throw e
@@ -2942,6 +2944,34 @@ class KafkaApis(val requestChannel: RequestChannel,
     } else {
       sendResponseMaybeThrottle(request, requestThrottleMs =>
         alterClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+    }
+  }
+
+  def handleBrokerHeartbeat(request: RequestChannel.Request): Unit = {
+    val brokerHeartbeatRequest = request.body[BrokerHeartbeatRequest]
+
+    if (authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
+      sendResponseMaybeThrottle(request, requestThrottleMs =>
+        brokerHeartbeatRequest.getErrorResponse(requestThrottleMs,
+          Errors.UNSUPPORTED_VERSION.exception))
+    } else {
+      sendResponseMaybeThrottle(request, requestThrottleMs =>
+        brokerHeartbeatRequest.getErrorResponse(requestThrottleMs,
+          Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+    }
+  }
+
+  def handleControllerHeartbeat(request: RequestChannel.Request): Unit = {
+    val controllerHeartbeatRequest = request.body[ControllerHeartbeatRequest]
+
+    if (authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
+      sendResponseMaybeThrottle(request, requestThrottleMs =>
+        controllerHeartbeatRequest.getErrorResponse(requestThrottleMs,
+          Errors.UNSUPPORTED_VERSION.exception))
+    } else {
+      sendResponseMaybeThrottle(request, requestThrottleMs =>
+        controllerHeartbeatRequest.getErrorResponse(requestThrottleMs,
+          Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
     }
   }
 

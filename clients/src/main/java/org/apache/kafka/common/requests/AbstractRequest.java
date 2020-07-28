@@ -243,6 +243,10 @@ public abstract class AbstractRequest implements AbstractRequestResponse {
                 return new DescribeClientQuotasRequest(struct, apiVersion);
             case ALTER_CLIENT_QUOTAS:
                 return new AlterClientQuotasRequest(struct, apiVersion);
+            case BROKER_HEARTBEAT:
+                return new BrokerHeartbeatRequest(struct, apiVersion);
+            case CONTROLLER_HEARTBEAT:
+                return new ControllerHeartbeatRequest(struct, apiVersion);
             default:
                 throw new AssertionError(String.format("ApiKey %s is not currently handled in `parseRequest`, the " +
                         "code should be updated to do so.", apiKey));

@@ -37,8 +37,12 @@ import org.apache.kafka.common.message.ApiVersionsRequestData;
 import org.apache.kafka.common.message.ApiVersionsResponseData;
 import org.apache.kafka.common.message.BeginQuorumEpochRequestData;
 import org.apache.kafka.common.message.BeginQuorumEpochResponseData;
+import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
+import org.apache.kafka.common.message.BrokerHeartbeatResponseData;
 import org.apache.kafka.common.message.ControlledShutdownRequestData;
 import org.apache.kafka.common.message.ControlledShutdownResponseData;
+import org.apache.kafka.common.message.ControllerHeartbeatRequestData;
+import org.apache.kafka.common.message.ControllerHeartbeatResponseData;
 import org.apache.kafka.common.message.CreateAclsRequestData;
 import org.apache.kafka.common.message.CreateAclsResponseData;
 import org.apache.kafka.common.message.CreateDelegationTokenRequestData;
@@ -247,7 +251,11 @@ public enum ApiKeys {
         EndQuorumEpochRequestData.SCHEMAS, EndQuorumEpochResponseData.SCHEMAS),
     DESCRIBE_QUORUM(55, "DescribeQuorum", true, false,
         DescribeQuorumRequestData.SCHEMAS, DescribeQuorumResponseData.SCHEMAS),
-    ALTER_ISR(56, "AlterIsr", AlterIsrRequestData.SCHEMAS, AlterIsrResponseData.SCHEMAS);
+    ALTER_ISR(56, "AlterIsr", AlterIsrRequestData.SCHEMAS, AlterIsrResponseData.SCHEMAS),
+    BROKER_HEARTBEAT(57, "BrokerHeartbeat", BrokerHeartbeatRequestData.SCHEMAS,
+            BrokerHeartbeatResponseData.SCHEMAS),
+    CONTROLLER_HEARTBEAT(58, "ControllerHeartbeat", ControllerHeartbeatRequestData.SCHEMAS,
+            ControllerHeartbeatResponseData.SCHEMAS);
 
     private static final ApiKeys[] ID_TO_TYPE;
     private static final int MIN_API_KEY = 0;

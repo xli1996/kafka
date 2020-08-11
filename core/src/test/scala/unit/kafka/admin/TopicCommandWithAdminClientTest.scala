@@ -29,6 +29,7 @@ import org.apache.kafka.clients.admin._
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.config.{ConfigException, ConfigResource, TopicConfig}
+import org.apache.kafka.common.errors.ClusterAuthorizationException
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.Errors
@@ -36,6 +37,7 @@ import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.junit.Assert.{assertEquals, assertFalse, assertTrue}
 import org.junit.rules.TestName
 import org.junit.{After, Before, Rule, Test}
+import org.mockito.Mockito
 import org.scalatest.Assertions.{fail, intercept}
 
 import scala.collection.JavaConverters._
@@ -48,6 +50,9 @@ class TopicCommandWithAdminClientTest extends KafkaServerTestHarness with Loggin
   /**
     * Implementations must override this method to return a set of KafkaConfigs. This method will be invoked for every
     * test and should not reuse previous configurations unless they select their ports randomly when servers are started.
+    *
+    * Note the replica fetch max bytes is set to `1` in order to throttle the rate of replication for test
+    * `testDescribeUnderReplicatedPartitionsWhenReassignmentIsInProgress`.
     */
   override def generateConfigs: Seq[KafkaConfig] = TestUtils.createBrokerConfigs(
     numConfigs = 6,
@@ -55,7 +60,10 @@ class TopicCommandWithAdminClientTest extends KafkaServerTestHarness with Loggin
     rackInfo = Map(0 -> "rack1", 1 -> "rack2", 2 -> "rack2", 3 -> "rack1", 4 -> "rack3", 5 -> "rack3"),
     numPartitions = numPartitions,
     defaultReplicationFactor = defaultReplicationFactor
-  ).map(KafkaConfig.fromProps)
+  ).map { props =>
+    props.put(KafkaConfig.ReplicaFetchMaxBytesProp, "1")
+    KafkaConfig.fromProps(props)
+  }
 
   private val numPartitions = 1
   private val defaultReplicationFactor = 1.toShort
@@ -654,8 +662,13 @@ class TopicCommandWithAdminClientTest extends KafkaServerTestHarness with Loggin
     adminClient.createTopics(
       Collections.singletonList(new NewTopic(testTopicName, partitions, replicationFactor).configs(configMap))).all().get()
     waitForTopicCreated(testTopicName)
+
+    // Produce multiple batches.
+    TestUtils.generateAndProduceMessages(servers, testTopicName, numMessages = 10, acks = -1)
     TestUtils.generateAndProduceMessages(servers, testTopicName, numMessages = 10, acks = -1)
 
+    // Enable throttling. Note the broker config sets the replica max fetch bytes to `1` upon to minimize replication
+    // throughput so the reassignment doesn't complete quickly.
     val brokerIds = servers.map(_.config.brokerId)
     TestUtils.setReplicationThrottleForPartitions(adminClient, brokerIds, Set(tp), throttleBytes = 1)
 
@@ -684,6 +697,10 @@ class TopicCommandWithAdminClientTest extends KafkaServerTestHarness with Loggin
     val underReplicatedOutput = TestUtils.grabConsoleOutput(
       topicService.describeTopic(new TopicCommandOptions(Array("--under-replicated-partitions"))))
     assertEquals("--under-replicated-partitions shouldn't return anything", "", underReplicatedOutput)
+
+    // Verify reassignment is still ongoing.
+    val reassignments = adminClient.listPartitionReassignments(Collections.singleton(tp)).reassignments.get().get(tp)
+    assertFalse(Option(reassignments).forall(_.addingReplicas.isEmpty))
 
     TestUtils.removeReplicationThrottleForPartitions(adminClient, brokerIds, Set(tp))
     TestUtils.waitForAllReassignmentsToComplete(adminClient)
@@ -786,4 +803,27 @@ class TopicCommandWithAdminClientTest extends KafkaServerTestHarness with Loggin
     assertFalse(output.contains(Topic.GROUP_METADATA_TOPIC_NAME))
   }
 
+  @Test
+  def testDescribeDoesNotFailWhenListingReassignmentIsUnauthorized(): Unit = {
+    adminClient = Mockito.spy(adminClient)
+    topicService = AdminClientTopicService(adminClient)
+
+    val result = AdminClientTestUtils.listPartitionReassignmentsResult(
+      new ClusterAuthorizationException("Unauthorized"))
+
+    // Passing `null` here to help the compiler disambiguate the `doReturn` methods,
+    // compilation fails otherwise.
+    Mockito.doReturn(result, null).when(adminClient).listPartitionReassignments()
+
+    adminClient.createTopics(
+      Collections.singletonList(new NewTopic(testTopicName, 1, 1.toShort))
+    ).all().get()
+    waitForTopicCreated(testTopicName)
+
+    val output = TestUtils.grabConsoleOutput(
+      topicService.describeTopic(new TopicCommandOptions(Array("--topic", testTopicName))))
+    val rows = output.split("\n")
+    assertEquals(2, rows.size)
+    rows(0).startsWith(s"Topic:$testTopicName\tPartitionCount:1")
+  }
 }

@@ -22,6 +22,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent._
 
 import com.typesafe.scalalogging.Logger
+import com.yammer.metrics.core.Gauge
 import com.yammer.metrics.core.Meter
 import kafka.log.LogConfig
 import kafka.metrics.KafkaMetricsGroup
@@ -333,10 +334,12 @@ class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends 
   val requestQueueSizeMetricName = metricNamePrefix.concat(RequestQueueSizeMetric)
   val responseQueueSizeMetricName = metricNamePrefix.concat(ResponseQueueSizeMetric)
 
-  newGauge(requestQueueSizeMetricName, () => requestQueue.size)
+  newGauge(requestQueueSizeMetricName, new Gauge[Int] {
+      def value = requestQueue.size
+  })
 
-  newGauge(responseQueueSizeMetricName, () => {
-    processors.values.asScala.foldLeft(0) {(total, processor) =>
+  newGauge(responseQueueSizeMetricName, new Gauge[Int]{
+    def value = processors.values.asScala.foldLeft(0) {(total, processor) =>
       total + processor.responseQueueSize
     }
   })
@@ -345,8 +348,12 @@ class RequestChannel(val queueSize: Int, val metricNamePrefix : String) extends 
     if (processors.putIfAbsent(processor.id, processor) != null)
       warn(s"Unexpected processor with processorId ${processor.id}")
 
-    newGauge(responseQueueSizeMetricName, () => processor.responseQueueSize,
-      Map(ProcessorMetricTag -> processor.id.toString))
+    newGauge(responseQueueSizeMetricName,
+      new Gauge[Int] {
+        def value = processor.responseQueueSize
+      },
+      Map(ProcessorMetricTag -> processor.id.toString)
+    )
   }
 
   def removeProcessor(processorId: Int): Unit = {

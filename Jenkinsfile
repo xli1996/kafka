@@ -83,11 +83,7 @@ def job = {
             ciTool("ci-push-tag ${env.WORKSPACE} kafka")
         }
 
-        if (config.isDevJob) {
-          publishStep('artifactory_snapshots_settings')
-        } else if (config.isPreviewJob) {
-          publishStep('artifactory_preview_release_settings')
-        }
+        publishStep('artifactory_hotfix_settings')
       }
     }
 

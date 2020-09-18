@@ -207,12 +207,23 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   private val dynamicConfigPasswordEncoder = maybeCreatePasswordEncoder(kafkaConfig.passwordEncoderSecret)
 
   private[server] def initialize(zkClient: KafkaZkClient): Unit = {
+    if (!kafkaConfig.metadataRoleBroker || !kafkaConfig.metadataReadFromZookeeper) {
+      throw new IllegalStateException("Only allowed to initialize dynamic configs from ZooKeeper for brokers not in KIP-500 mode")
+    }
     currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
     val adminZkClient = new AdminZkClient(zkClient)
     updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.Broker, ConfigEntityName.Default))
     val props = adminZkClient.fetchEntityConfig(ConfigType.Broker, kafkaConfig.brokerId.toString)
     val brokerConfig = maybeReEncodePasswords(props, adminZkClient)
     updateBrokerConfig(kafkaConfig.brokerId, brokerConfig)
+  }
+
+  private[server] def initialize(): Unit = {
+    if (kafkaConfig.metadataRoleBroker && kafkaConfig.metadataReadFromZookeeper) {
+      throw new IllegalStateException("Cannot initialize dynamic broker config from Metadata log when it is still reading from ZooKeeper")
+    }
+    currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
+    // TODO: we need a way to accept and process the basis from a snapshot load as well as an individual message
   }
 
   /**
@@ -403,6 +414,8 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   // encoded using the current secret. Ignore any errors during decoding since old secret may not
   // have been removed during broker restart.
   private def maybeReEncodePasswords(persistentProps: Properties, adminZkClient: AdminZkClient): Properties = {
+    // TODO: figure out if/how an equivalent thing happens in the KIP-500 Metadata Controller world
+    // for now we assume that we don't have to re-encode anything on the broker side because the controller does it
     val props = persistentProps.clone().asInstanceOf[Properties]
     if (props.asScala.keySet.exists(isPasswordConfig)) {
       maybeCreatePasswordEncoder(kafkaConfig.passwordEncoderOldSecret).foreach { passwordDecoder =>

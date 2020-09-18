@@ -185,10 +185,16 @@ class DelegationTokenManager(val config: KafkaConfig,
 
   def startup() = {
     if (config.tokenAuthEnabled) {
-      zkClient.createDelegationTokenPaths()
-      loadCache()
-      tokenChangeListener = new ZkNodeChangeNotificationListener(zkClient, DelegationTokenChangeNotificationZNode.path, DelegationTokenChangeNotificationSequenceZNode.SequenceNumberPrefix, TokenChangedNotificationHandler)
-      tokenChangeListener.init()
+      if (config.metadataRoleBroker && config.metadataReadFromZookeeper) {
+        zkClient.createDelegationTokenPaths()
+      }
+      if (config.metadataReadFromZookeeper) {
+        loadCacheFromZooKeeper()
+        if (config.metadataRoleBroker) {
+          tokenChangeListener = new ZkNodeChangeNotificationListener(zkClient, DelegationTokenChangeNotificationZNode.path, DelegationTokenChangeNotificationSequenceZNode.SequenceNumberPrefix, TokenChangedNotificationHandler)
+          tokenChangeListener.init()
+        }
+      }
     }
   }
 
@@ -198,7 +204,7 @@ class DelegationTokenManager(val config: KafkaConfig,
     }
   }
 
-  private def loadCache(): Unit = {
+  private def loadCacheFromZooKeeper(): Unit = {
     lock.synchronized {
       val tokens = zkClient.getChildren(DelegationTokensZNode.path)
       info(s"Loading the token cache. Total token count: ${tokens.size}")
@@ -331,9 +337,17 @@ class DelegationTokenManager(val config: KafkaConfig,
    * @param token
    */
   private def updateToken(token: DelegationToken): Unit = {
-    zkClient.setOrCreateDelegationToken(token)
-    updateCache(token)
-    zkClient.createTokenChangeNotification(token.tokenInfo.tokenId())
+    if (config.metadataRoleBroker && config.metadataReadFromZookeeper) {
+      zkClient.setOrCreateDelegationToken(token)
+      updateCache(token)
+      zkClient.createTokenChangeNotification(token.tokenInfo.tokenId())
+    } else {
+      if (config.metadataRoleBroker) {
+        throw new IllegalStateException("updateToken() should never occur on a broker when it is reading from the metadata log -- such requests should always be forwarded to the Active Controller")
+      }
+      // TODO updateToken() for Active Controller
+      throw new IllegalStateException("KIP-500 mode")
+    }
   }
 
   /**
@@ -435,9 +449,17 @@ class DelegationTokenManager(val config: KafkaConfig,
    * @param tokenId
    */
   private def removeToken(tokenId: String): Unit = {
-    zkClient.deleteDelegationToken(tokenId)
-    removeCache(tokenId)
-    zkClient.createTokenChangeNotification(tokenId)
+    if (config.metadataRoleBroker && config.metadataReadFromZookeeper) {
+      zkClient.deleteDelegationToken(tokenId)
+      removeCache(tokenId)
+      zkClient.createTokenChangeNotification(tokenId)
+    } else {
+      if (config.metadataRoleBroker) {
+        throw new IllegalStateException("removeToken() should never occur on a broker when it is reading from the metadata log -- such requests should always be forwarded to the Active Controller")
+      }
+      // TODO removeToken() for Active Controller
+      throw new IllegalStateException("KIP-500 mode")
+    }
   }
 
   /**

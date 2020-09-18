@@ -29,6 +29,7 @@ import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.{KafkaException, TopicPartition}
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.common.errors.{KafkaStorageException, LogDirNotFoundException}
+import org.apache.kafka.metadata.MetadataLogBasis
 
 import scala.jdk.CollectionConverters._
 import scala.collection._
@@ -1054,6 +1055,7 @@ object LogManager {
   val LogStartOffsetCheckpointFile = "log-start-offset-checkpoint"
   val ProducerIdExpirationCheckIntervalMs = 10 * 60 * 1000
 
+  // Create based on reading ZooKeeper
   def apply(config: KafkaConfig,
             initialOfflineDirs: Seq[String],
             zkClient: KafkaZkClient,
@@ -1073,7 +1075,40 @@ object LogManager {
       defaultProps
     )
     if (!failed.isEmpty) throw failed.head._2
+    apply(config, initialOfflineDirs, topicConfigs, defaultLogConfig,
+      brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+  }
 
+  def topicConfigsFrom(metadataLogBasis: MetadataLogBasis): Map[String, LogConfig] = {
+    throw new IllegalStateException("KIP-500 mode")
+  }
+
+  // Create based on ingested Metadata Log
+  def apply(config: KafkaConfig,
+            initialOfflineDirs: Seq[String],
+            metadataLogBasis: MetadataLogBasis,
+            brokerState: BrokerState,
+            kafkaScheduler: KafkaScheduler,
+            time: Time,
+            brokerTopicStats: BrokerTopicStats,
+            logDirFailureChannel: LogDirFailureChannel): LogManager = {
+    val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
+
+    LogConfig.validateValues(defaultProps)
+    val defaultLogConfig = LogConfig(defaultProps)
+    apply(config, initialOfflineDirs, topicConfigsFrom(metadataLogBasis), defaultLogConfig,
+      brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+  }
+
+  def apply(config: KafkaConfig,
+            initialOfflineDirs: Seq[String],
+            topicConfigs: Map[String, LogConfig],
+            defaultLogConfig: LogConfig,
+            brokerState: BrokerState,
+            kafkaScheduler: KafkaScheduler,
+            time: Time,
+            brokerTopicStats: BrokerTopicStats,
+            logDirFailureChannel: LogDirFailureChannel): LogManager = {
     val cleanerConfig = LogCleaner.cleanerConfig(config)
 
     new LogManager(logDirs = config.logDirs.map(new File(_).getAbsoluteFile),

@@ -1328,6 +1328,82 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   private[server] def valuesFromThisConfigWithPrefixOverride(prefix: String): util.Map[String, AnyRef] =
     super.valuesWithPrefixOverride(prefix)
 
+  /** ********* Metadata Datastore Configuration ***********/
+  /*
+   * We identify 3 different sets of Kafka releases:
+   *
+   * 1) Any release before the KIP-500 bridge release
+   * 2) The KIP-500 bridge release
+   * 3) Any release after the KIP-500 bridge release
+   *
+   * In the pre-bridge releases:
+   *  - Brokers always read from ZooKeeper/use watches for notification
+   *  - Brokers always write data to ZooKeeper
+   *  - Any broker may write to ZooKeeper because we do not yet forward mutating RPCs to the controller broker
+   *  - the only role is "broker-controller" (it is implied)
+   *
+   * In the post-bridge releases:
+   *  - Brokers always learn of mutations by fetching the Metadata Log and processing the events
+   *  - Brokers advertise their aliveness by fetching the Metadata log
+   *  - The Raft controller quorum always writes data to the Metadata Log
+   *  - Brokers always forward mutating RPCs to the Active Controller in the Metadata quorum
+   *  - ZooKeeper does not exist
+   *  - There are two separate roles: "broker" (for brokers) and "metadata-controller" (for Metadata Controllers)
+   *
+   * In the bridge releases:
+   *  - Brokers start with the (implied) "broker-controller" role
+   *  - All mutating RPCs are being forwarded to the controller, which is the only broker writing to ZooKeeper
+   *  - Metadata Controllers start, they have the explicit "metadata-controller" role, and they take over as Controller
+   *  - (Will it be necessary to roll brokers here to guarantee they can never take over as Controller
+   *     in case of Metadata Controller failure?  They would still read/register with ZooKeeper in this state.
+   *     Assume not for now.)
+   *  - Metadata Controller reads ZooKeeper, creates log, watches ZooKeeper/pushes Metadata to broker-controller nodes
+   *  - Brokers roll and enter the explicit "broker" role where they read from the Metadata Log rather than ZooKeeper
+   *    and maintain their aliveness by fetching the log.
+   *  - Such brokers at this point no longer use ZooKeeper.
+   *  - The Metadata Controllers roll and remain in the "metadata-controller" role but no longer read from ZooKeeper.
+   *  - ZooKeeper is no longer used at this point and beyond.
+   *
+   * Given the above, we provide the following values to configure each instance:
+   *
+   * 1) metadataRoleBroker: Boolean true for broker; false for Metadata Controller
+   * 2) metadataReadFromZooKeeper: Boolean Should brokers/metadata controllers read from ZooKeeper?
+   *
+   * We can identify where we are as follows:
+   *
+   * In the pre-bridge releases:
+   *  metadataRoleBroker = true
+   *  metadataReadFromZookeeper = true
+   *  Any broker may write to ZooKeeper because we are not yet forwarding all mutating RPCs
+   *
+   * In the post-bridge releases:
+   *  metadataRoleBroker = true for brokers and false for Metadata Controllers
+   *  metadataReadFromZookeeper = false
+   *
+   * In the bridge releases:
+   *  - Brokers start with the (implied) "broker-controller" role
+   *    metadataRoleBroker = true
+   *    metadataReadFromZookeeper = true
+   *
+   *  - Metadata Controllers start, they have the explicit "metadata-controller" role, and they take over as Controller
+   *  - Metadata Controller reads ZooKeeper, creates log, watches ZooKeeper/pushes Metadata to broker-controllers
+   *    metadataRoleBroker = false
+   *    metadataReadFromZookeeper = true
+   *
+   *  - Brokers roll and enter the explicit "broker" role where they read from the Metadata Log rather than ZooKeeper
+   *  - Brokers no longer use ZooKeeper at this point.
+   *    metadataRoleBroker = true
+   *    metadataReadFromZookeeper = false
+   *
+   *  - The Metadata Controllers roll and remain in the "metadata-controller" role but no longer read from ZooKeeper.
+   *  - ZooKeeper is no longer used at this point and beyond.
+   *    metadataRoleBroker = false
+   *    metadataReadFromZookeeper = false
+   *
+   */
+  def metadataRoleBroker: Boolean = true
+  def metadataReadFromZookeeper: Boolean = true
+
   /** ********* Zookeeper Configuration ***********/
   val zkConnect: String = getString(KafkaConfig.ZkConnectProp)
   val zkSessionTimeoutMs: Int = getInt(KafkaConfig.ZkSessionTimeoutMsProp)

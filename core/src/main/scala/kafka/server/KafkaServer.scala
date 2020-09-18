@@ -47,6 +47,7 @@ import org.apache.kafka.common.security.token.delegation.internals.DelegationTok
 import org.apache.kafka.common.security.{JaasContext, JaasUtils}
 import org.apache.kafka.common.utils.{AppInfoParser, LogContext, Time}
 import org.apache.kafka.common.{ClusterResource, Endpoint, Node}
+import org.apache.kafka.metadata.IngestedMetadataLog
 import org.apache.kafka.server.authorizer.Authorizer
 import org.apache.zookeeper.client.ZKClientConfig
 
@@ -123,6 +124,11 @@ object KafkaServer {
  */
 class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNamePrefix: Option[String] = None,
                   kafkaMetricsReporters: Seq[KafkaMetricsReporter] = List()) extends Logging with KafkaMetricsGroup {
+
+  def ingestedMetadataLog(): IngestedMetadataLog = {
+    throw new IllegalStateException("KIP-500 mode")
+  }
+
   private val startupComplete = new AtomicBoolean(false)
   private val isShuttingDown = new AtomicBoolean(false)
   private val isStartingUp = new AtomicBoolean(false)
@@ -223,17 +229,41 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
       if (canStartup) {
         brokerState.newState(Starting)
 
-        /* setup zookeeper */
-        initZkClient(time)
-
-        /* initialize features */
-        _featureChangeListener = new FinalizedFeatureChangeListener(_zkClient)
-        if (config.isFeatureVersioningEnabled) {
-          _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
+        if (config.metadataReadFromZookeeper) {
+          /* setup zookeeper */
+          initZkClient(time)
+        }
+        if (!config.metadataRoleBroker || !config.metadataReadFromZookeeper) {
+          // initialize connectivity to Raft controller quorum and start fetching/ingesting the log
+          // Do we need to load meta.properties first to get the config?
+          // also need to fully ingest ZooKeeper at some point if this is the Active Controller
         }
 
-        /* Get or create cluster_id */
-        _clusterId = getOrGenerateClusterId(zkClient)
+        /* initialize features */
+        if (config.metadataRoleBroker && config.metadataReadFromZookeeper) {
+          // Note that the write path for KIP-584 (feature versioning) is not yet merged
+          _featureChangeListener = new FinalizedFeatureChangeListener(_zkClient)
+          if (config.isFeatureVersioningEnabled) {
+            _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
+          }
+        }
+
+        /* cluster_id */
+        if (config.metadataRoleBroker) {
+          if (config.metadataReadFromZookeeper) {
+            /* Get or create cluster_id from ZooKeeper */
+            _clusterId = getOrGenerateClusterId(zkClient)
+          } else {
+            /* Get cluster_id from ingested metadata log */
+            // This blocks until the metadata log has been ingested at least to the point where the cluster ID is known
+            _clusterId = ingestedMetadataLog().clusterId.get
+          }
+        } else {
+          /* Metadata Controller get or create cluster_id from ingested metadata log */
+          // How/when will Metadata Controller get or create cluster_id?
+          // This blocks until the metadata log has been ingested at least to the point where the cluster ID is known (and of course created if necessary)
+          _clusterId = ingestedMetadataLog().clusterId.get
+        }
         info(s"Cluster ID = $clusterId")
 
         /* load metadata */
@@ -250,9 +280,13 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
-        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
-        // applied after DynamicConfigManager starts.
-        config.dynamicConfig.initialize(zkClient)
+        if (config.metadataRoleBroker && config.metadataReadFromZookeeper) {
+          // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
+          // applied after DynamicConfigManager starts.
+          config.dynamicConfig.initialize(zkClient)
+        } else {
+          config.dynamicConfig.initialize() // snapshots and individual messages will have to be fed to it via log ingestion
+        }
 
         /* start scheduler */
         kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
@@ -281,7 +315,13 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
         /* start log manager */
-        logManager = LogManager(config, initialOfflineDirs, zkClient, brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+        logManager = if (config.metadataReadFromZookeeper) {
+          LogManager(config, initialOfflineDirs, zkClient, brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+        } else {
+          // this may block; is that acceptable?
+          val ingestedLogBasis = ingestedMetadataLog().latestBasis().get()
+          LogManager(config, initialOfflineDirs, ingestedLogBasis, brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+        }
         logManager.startup()
 
         metadataCache = new MetadataCache(config.brokerId)
@@ -301,7 +341,12 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         replicaManager.startup()
 
         val brokerInfo = createBrokerInfo
-        val brokerEpoch = zkClient.registerBroker(brokerInfo)
+        val brokerEpoch = if (config.metadataReadFromZookeeper) {
+          zkClient.registerBroker(brokerInfo)
+        } else {
+          // TODO: register with Raft metadata quorum?
+          throw new IllegalStateException("KIP-500 mode")
+        }
 
         // Now that the broker is successfully registered, checkpoint its metadata
         checkpointBrokerMetadata(BrokerMetadata(config.brokerId, Some(clusterId)))

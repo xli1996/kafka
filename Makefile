@@ -13,14 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-group=org.apache.kafka
-# NOTE: When you change this version number, you should also make sure to update
-# the version numbers in
-#  - docs/js/templateData.js
-#  - tests/kafkatest/__init__.py
-#  - tests/kafkatest/version.py (variable DEV_VERSION)
-#  - kafka-merge-pr.py
-version=6.0.1-ccs-SNAPSHOT
-scalaVersion=2.13.2
-task=build
-org.gradle.jvmargs=-Xmx2g -Xss4m -XX:+UseParallelGC
+# Below targets are used during kafka packaging for debian.
+
+.PHONY: clean
+clean:
+
+.PHONY: distclean
+distclean:
+
+%:
+	$(MAKE) -f debian/Makefile $@

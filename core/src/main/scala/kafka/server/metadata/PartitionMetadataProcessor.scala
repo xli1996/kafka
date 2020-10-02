@@ -1,0 +1,500 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package kafka.server.metadata
+
+import java.util
+import java.util.UUID
+
+import kafka.api.LeaderAndIsr
+import kafka.cluster.{Broker, EndPoint}
+import kafka.coordinator.group.GroupCoordinator
+import kafka.coordinator.transaction.TransactionCoordinator
+import kafka.server.{KafkaConfig, MetadataCache, MetadataSnapshot, QuotaFactory, ReplicaManager}
+import kafka.utils.Implicits.MapExtensionMethods
+import kafka.utils.{CoreUtils, Logging}
+import org.apache.kafka.common.internals.Topic
+import org.apache.kafka.common.message.StopReplicaRequestData.StopReplicaPartitionState
+import org.apache.kafka.common.message.UpdateMetadataRequestData.UpdateMetadataPartitionState
+import org.apache.kafka.common.{Node, TopicPartition}
+import org.apache.kafka.common.metadata.{BrokerRecord, FenceBrokerRecord, PartitionRecord, TopicRecord}
+import org.apache.kafka.common.network.ListenerName
+import org.apache.kafka.common.protocol.{ApiMessage, Errors}
+import org.apache.kafka.common.security.auth.SecurityProtocol
+
+import scala.collection.{Map, mutable}
+import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
+
+/**
+ * Updates the metadata cache and replica manager state based on metadata log messages and out-of-band events
+ * originating from the local broker's metadata heartbeat.
+ *
+ * The changes due to various events are as follows:
+ *
+ * Out-of-band appearance of "register local broker" message from broker heartbeat:
+ *     Set the local broker's epoch in the metadata.  We do not yet know the local broker's endpoints/features
+ *     (we won't see those until we see the corresponding BrokerRecord in the metadata log).
+ *
+ * Out-of-band appearance of "fence local broker" message from broker heartbeat:
+ *     Mark the local broker as not being alive, and remove it from all partition leadership (leader will be unknown)
+ *     and ISRs (don't stop existing replica fetchers, if any).
+ *
+ * Appearance of BrokerRecord in the metadata log:
+ *     Update metadata about the indicated broker and its endpoints, and mark the broker as being alive.
+ *
+ * Appearance of FenceBrokerRecord in the metadata log:
+ *     Mark the indicated broker as not being alive.
+ *     If it is the local broker, update metadata to remove it from all partition leadership (leader will be unknown)
+ *     and ISRs (don't stop existing replica fetchers, if any, though).
+ *
+ * Appearance of TopicRecord in the metadata log with Delete=false
+ *     Create the topic in the metadata with no partitions (yet)
+ *
+ * Appearance of ConfigRecord in the metadata log for a topic:
+ *     TODO
+ *
+ * Appearance of TopicRecord in the metadata log with Delete=true
+ *     Remove all topic-partitions for the indicated topic from the metadata.
+ *     Stop replica fetchers as required with deletion of log directories.
+ *     The only remaining thing in the metadata will be the Topic UUID.
+ *
+ * Appearance of PartitionRecord in the metadata log:
+ *     Update metadata about the indicated topic-partition and its leader/replicas.
+ *     Stop/start applicable replica fetchers.
+ *
+ * Appearance of UnfenceBrokerRecord in the metadata log:
+ *     Mark the indicated broker as being alive.
+ *
+ * Appearance of IsrChangeRecord in the metadata log:
+ *     Update metadata about the indicated topic-partition and its leader/ISRs.
+ *     React as though we received a LeaderAndIsr message if the local broker is the leader or in the ISR.
+ *
+ * Appearance of RemoveTopicRecord in the metadata log:
+ *     Remove the Topic UUID from the metadata.
+ *
+ * @param kafkaConfig the kafkaConfig
+ * @param clusterId the Kafka Cluster Id
+ * @param metadataCache the metadata cche
+ * @param groupCoordinator the group coordinator to be notified of topic deletions
+ * @param quotaManagers the quota managers to be given an opportunity to update quota metric configs
+ *                      when partition counts change
+ * @param replicaManager the replica manager
+ * @param txnCoordinator the transaction coordinator
+ */
+class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
+                                 clusterId: String,
+                                 metadataCache: MetadataCache,
+                                 groupCoordinator: GroupCoordinator,
+                                 quotaManagers: QuotaFactory.QuotaManagers,
+                                 replicaManager: ReplicaManager,
+                                 txnCoordinator: TransactionCoordinator) extends ApiMessageProcessor with Logging {
+  var brokerEpoch: Long = -1
+  override def process(apiMessages: List[ApiMessage]): Unit = {
+    // We have to copy any data structures that we are going to modify, and when we perform the copy
+    // we want to define a new capacity that will be high enough to prevent additional internal copying, so
+    // iterate over all messages once to determine new data structure capacities
+    // before iterating again to process the messages.  Only count adds since it is possible that all adds could come
+    // before all deletes, and oversizing the capacity is a small memory cost relative to the cost in time and code
+    // complexity to determine the absolute minimum capacities.
+    var numBrokersAdding = 0
+    var numBrokersFencing = 0
+    var numTopicsAdding = 0
+    var numPartitionRecords = 0
+    apiMessages.foreach(msg => msg match {
+      case _ : BrokerRecord => numBrokersAdding += 1
+      case _ : FenceBrokerRecord => numBrokersFencing += 1
+      case topic : TopicRecord => if (!topic.deleting()) numTopicsAdding += 1
+      case _: PartitionRecord => numPartitionRecords += 1
+    })
+
+    // define functions to retrieve and copy stuff on-demand
+    var metadataSnapshot: Option[MetadataSnapshot] = None
+    def getMetadataSnapshot(): MetadataSnapshot = {
+      metadataSnapshot match {
+        case Some(snapshot) => snapshot
+        case None =>
+          metadataSnapshot = Some(metadataCache.readState()) // so we don't copy it again
+          metadataSnapshot.get
+      }
+    }
+
+    var copiedAliveBrokers: Option[mutable.LongMap[Broker]] = None
+    var copiedAliveNodes: Option[mutable.LongMap[collection.Map[ListenerName, Node]]] = None
+    def hasBrokerChanges(): Boolean = copiedAliveBrokers.isDefined
+
+    def copyAliveBrokersAndNodes(): Unit = {
+      val metadataSnapshot = getMetadataSnapshot()
+      val maxPossibleCapacity = metadataSnapshot.aliveBrokers.size + numBrokersAdding
+      val nextAliveBrokers = new mutable.LongMap[Broker](maxPossibleCapacity)
+      val nextAliveNodes = new mutable.LongMap[collection.Map[ListenerName, Node]](maxPossibleCapacity)
+      for ((existingBrokerId, existingBroker) <- metadataSnapshot.aliveBrokers) {
+        nextAliveBrokers(existingBrokerId) = existingBroker
+      }
+      for ((existingBrokerId, existingListenerNameToNodeMap) <- metadataSnapshot.aliveNodes) {
+        nextAliveNodes(existingBrokerId) = existingListenerNameToNodeMap
+      }
+      copiedAliveBrokers = Some(nextAliveBrokers)  // so we don't copy it again
+      copiedAliveNodes = Some(nextAliveNodes)  // so we don't copy it again
+    }
+
+    // get the alive brokers, copying first if necessary
+    def getCopiedAliveBrokers(): mutable.LongMap[Broker] = {
+      copiedAliveBrokers match {
+        case Some(map) => map
+        case None =>
+          copyAliveBrokersAndNodes()  // so we don't copy it again
+          copiedAliveBrokers.get
+      }
+    }
+    // get the current alive brokers, either the copy if we have already copied or the original if not
+    def getCurrentAliveBrokers(): mutable.LongMap[Broker] = {
+      copiedAliveBrokers match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().aliveBrokers
+      }
+    }
+    // get the alive nodes, copying first if necessary
+    def getCopiedAliveNodes(): mutable.LongMap[collection.Map[ListenerName, Node]] = {
+      copiedAliveNodes match {
+        case Some(map) => map
+        case None =>
+          copyAliveBrokersAndNodes()  // so we don't copy it again
+          copiedAliveNodes.get
+      }
+    }
+    // get the current alive node, either the copy if we have already copied or the original if not
+    def getCurrentAliveNodes(): mutable.LongMap[collection.Map[ListenerName, Node]] = {
+      copiedAliveNodes match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().aliveNodes
+      }
+    }
+
+    var copiedTopicIdMap: Option[util.Map[UUID, String]] = None
+    def hasTopicIdMapChanges(): Boolean = copiedTopicIdMap.isDefined
+
+    // get the topicId-to-name map, copying first if necessary
+    def getCopiedTopicIdMap(): util.Map[UUID, String] = {
+      copiedTopicIdMap match {
+        case Some(map) => map
+        case None =>
+          val metadataSnapshot = getMetadataSnapshot()
+          val maxPossibleCapacity = metadataSnapshot.topicIdMap.size() + numTopicsAdding
+          val copy = new util.HashMap[UUID, String](maxPossibleCapacity)
+          copy.putAll(metadataSnapshot.topicIdMap)
+          copiedTopicIdMap = Some(copy) // so we don't copy it again
+          copy
+      }
+    }
+    // get the current topicId-to-name map, either the copy if we have already copied or the original if not
+    def getCurrentTopicIdMap(): util.Map[UUID, String] = {
+      copiedTopicIdMap match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().topicIdMap
+      }
+    }
+
+    var copiedPartitionStates: Option[mutable.AnyRefMap[String, mutable.LongMap[UpdateMetadataPartitionState]]] = None
+    def hasPartitionStateChanges(): Boolean = copiedPartitionStates.isDefined
+
+    // get the partition states map, copying first if necessary
+    def getCopiedPartitionStates(): mutable.AnyRefMap[String, mutable.LongMap[UpdateMetadataPartitionState]] = {
+      copiedPartitionStates match {
+        case Some(map) => map
+        case None =>
+          val metadataSnapshot = getMetadataSnapshot()
+          val copy = metadataSnapshot.copyPartitionStates()
+          copiedPartitionStates = Some(copy) // so we don't copy it again
+          copy
+      }
+    }
+    // get the current partition states map, either the copy if we have already copied or the original if not
+    def getCurrentPartitionStates(): mutable.AnyRefMap[String, mutable.LongMap[UpdateMetadataPartitionState]] = {
+      copiedPartitionStates match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().partitionStates
+      }
+    }
+
+    var copiedFencedBrokers: Option[mutable.LongMap[Broker]] = None
+    def hasFencedBrokerChanges(): Boolean = copiedFencedBrokers.isDefined
+
+    // get the fenced brokers map, copying first if necessary
+    def getCopiedFencedBrokers(): mutable.LongMap[Broker] = {
+      copiedFencedBrokers match {
+        case Some(map) => map
+        case None =>
+          val metadataSnapshot = getMetadataSnapshot()
+          val maxPossibleCapacity = metadataSnapshot.fencedBrokers.size + numBrokersFencing
+          val copy = new mutable.LongMap[Broker](maxPossibleCapacity)
+          for ((existingBrokerId, existingBroker) <- metadataSnapshot.fencedBrokers) {
+            copy(existingBrokerId) = existingBroker
+          }
+          copiedFencedBrokers = Some(copy)
+          copy
+      }
+    }
+    // get the current fenced broker map, either the copy if we have already copied or the original if not
+    def getCurrentFencedBrokers(): mutable.LongMap[Broker] = {
+      copiedFencedBrokers match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().fencedBrokers
+      }
+    }
+
+    var copiedBrokerEpochs: Option[mutable.LongMap[Long]] = None
+    def hasBrokerEpochChanges(): Boolean = copiedBrokerEpochs.isDefined
+
+    // get the broker epochs map, copying first if necessary
+    def getCopiedBrokerEpochs(): mutable.LongMap[Long] = {
+      copiedBrokerEpochs match {
+        case Some(map) => map
+        case None =>
+          val metadataSnapshot = getMetadataSnapshot()
+          val maxPossibleCapacity = metadataSnapshot.brokerEpochs.size + numBrokersAdding
+          val copy = new mutable.LongMap[Long](maxPossibleCapacity)
+          for ((existingBrokerId, existingBrokerEpoch) <- metadataSnapshot.brokerEpochs) {
+            copy(existingBrokerId) = existingBrokerEpoch
+          }
+          copiedBrokerEpochs = Some(copy)
+          copy
+      }
+    }
+    // get the current broker epochs map, either the copy if we have already copied or the original if not
+    def getCurrentBrokerEpochs(): mutable.LongMap[Long] = {
+      copiedBrokerEpochs match {
+        case Some(map) => map
+        case None => getMetadataSnapshot().brokerEpochs
+      }
+    }
+
+    var requiresUpdateQuotaMetricConfigs = false
+
+    // collect information about which topic partitions need replicas stopped
+    // and process it at the end since it requires acquisition of a write lock
+    val topicPartitionsNeedingStopReplica: mutable.Set[TopicPartition] = mutable.Set.empty
+
+    // Iterate over all messages again to process them
+    apiMessages.foreach(msg => msg match {
+      case brokerRecord: BrokerRecord =>
+        /*
+         * Handle Broker Record
+         */
+        val nodes = new util.HashMap[ListenerName, Node]
+        val endPoints = new ArrayBuffer[EndPoint]
+        val brokerId = brokerRecord.brokerId()
+        brokerRecord.endPoints().forEach { ep =>
+          val listenerName = new ListenerName(ep.name())
+          endPoints += new EndPoint(ep.host, ep.port, listenerName, SecurityProtocol.forId(ep.securityProtocol))
+          nodes.put(listenerName, new Node(brokerId, ep.host, ep.port))
+        }
+        // copy if necessary and update the copies
+        // add/update it as alive
+        getCopiedAliveBrokers()(brokerId) = Broker(brokerId, endPoints, Option(brokerRecord.rack))
+        getCopiedAliveNodes()(brokerId) = nodes.asScala
+        // remove it from fenced if necessary
+        getCopiedFencedBrokers().remove(brokerId)
+        // set the broker epoch
+        getCopiedBrokerEpochs()(brokerId) = brokerRecord.brokerEpoch()
+      case fenceBroker: FenceBrokerRecord =>
+        /*
+         * Handle Fence Broker Record
+         */
+        val brokerId = fenceBroker.id()
+        // check the current state, whether copied already or not
+        if (!getCurrentAliveBrokers().contains(brokerId)) {
+          // The broker is not considered alive.
+          // If it is this specific broker then the heartbeat mechanism has fenced it, so log that at INFO level;
+          // otherwise log at ERROR level because this state should not occur.
+          if (kafkaConfig.brokerId == brokerId) {
+            info(s"Skipping fence broker message because heartbeat already fenced this broker: $fenceBroker")
+          } else {
+            error(s"Skipping fence broker because the broker is not considered alive: $fenceBroker")
+          }
+        } else {
+          // sanity-check the fenced broker epoch
+          val currentBrokerEpoch = getCurrentBrokerEpochs().get(brokerId).get
+          if (fenceBroker.epoch() != currentBrokerEpoch) {
+            error(s"Skipping fence broker message because current broker epoch ($currentBrokerEpoch)" +
+              s" is not the epoch being fenced: $fenceBroker")
+          } else {
+            // copy if necessary and update the copies
+            // move the broker from alive to fenced
+            val aliveBrokersCopy = getCopiedAliveBrokers()
+            val aliveNodesCopy = getCopiedAliveNodes()
+            getCopiedFencedBrokers()(brokerId) = aliveBrokersCopy.remove(brokerId).get
+            aliveNodesCopy.remove(brokerId)
+            // no need to change the broker epoch since the existing one will be the one that is fenced
+
+            // Remove the fenced broker from ISRs where it appears, being sure to copy if necessary and update the copy.
+            // This is likely to have already been done by the heartbeat mechanism if the fenced broker is this one,
+            // but do it here for this broker anyway just in case.
+            // Note also that we don't stop replica fetchers -- they are allowed to continue as long as they can.
+            // TODO: PartitionMetadataProcessor.removeFromIsr(brokerId, getCopiedPartitionStates())
+          }
+        }
+      case topicRecord: TopicRecord =>
+        /*
+         * Handle Topic Record
+         */
+        val topicId = topicRecord.topicId()
+        val topicName = topicRecord.name()
+        if (topicRecord.deleting()) {
+          val currentPartitionStatesForTopic = getCurrentPartitionStates().get(topicName)
+          if (currentPartitionStatesForTopic.isEmpty) {
+            error(s"Skipping metadata message for a topic to be deleted that doesn't exist: $topicRecord")
+          } else {
+            val deletingPartitionsForThisTopic = currentPartitionStatesForTopic.get.keySet.map(
+              partition => new TopicPartition(topicName, partition.toInt))
+            val copiedPartitionStates = getCopiedPartitionStates()
+            // collect the topic partitions where we are a replica so we can stop
+            topicPartitionsNeedingStopReplica ++= deletingPartitionsForThisTopic.filter(tp =>
+              copiedPartitionStates.get(topicName).exists(infos => infos.get(tp.partition()).exists(partitionState =>
+                partitionState.replicas().contains(kafkaConfig.brokerId))))
+            // delete the partitions
+            deletingPartitionsForThisTopic.foreach(tp => {
+              MetadataCache.removePartitionInfo(copiedPartitionStates, topicName, tp.partition())
+              if (metadataCache.stateChangeTraceEnabled())
+                metadataCache.logStateChangeTrace(s"Deleting partition $tp from metadata cache in response to a TopicRecord on the metadata log")
+            })
+            // notify group coordinator of the deleting partitions right away since this isn't too expensive
+            groupCoordinator.handleDeletedPartitions(deletingPartitionsForThisTopic.toSeq)
+            requiresUpdateQuotaMetricConfigs = true
+            // stop replica fetchers
+
+            // clear coordinator caches
+
+          }
+        } else { // topic adding
+          if (getCurrentTopicIdMap().containsKey(topicId) || getCurrentPartitionStates().get(topicName).isDefined) {
+            error(s"Skipping metadata message for a new topic that already exists: $topicRecord")
+          } else {
+            getCopiedPartitionStates()(topicName) = mutable.LongMap.empty
+            getCopiedTopicIdMap().put(topicId, topicName)
+            if (metadataCache.stateChangeTraceEnabled()) {
+              metadataCache.logStateChangeTrace(s"Caching new topic $topicId/$topicName with no partitions (yet) via metadata log")
+            }
+          }
+        }
+      // case topicBeingRemoved: RemoveRecord => getCopiedTopicIdMap().remove(topicBeingRemoved.topicId())
+      case partition: PartitionRecord =>
+        /*
+         * Handle Partition Record
+         */
+        val topicName = getCurrentTopicIdMap().get(partition.topicId())
+        if (topicName == null) {
+          error(s"Unable to process PartitionRecord due to unknown topicId: $partition")
+        } else {
+          // add or update the partition info, being sure to copy the data structure first if necessary
+          //
+          MetadataCache.addOrUpdatePartitionInfo(getCopiedPartitionStates(), topicName, partition.partitionId(),
+            new UpdateMetadataPartitionState()
+              .setPartitionIndex(partition.partitionId())
+              // ignore controllerEpoch?
+              .setLeader(partition.leader())
+              .setLeaderEpoch(partition.leaderEpoch())
+              .setIsr(partition.isr())
+              .setReplicas(partition.replicas())
+              // TODO: ignore offline replicas until we support the JBOD disk failure use case
+          )
+          // stop/start replicas as required
+        }
+    })
+    // We're done iterating through the batch and applying messages as required to data structure copies
+    // (which may or may not have caused any changes).
+    // Apply any changes we've made and perform any additional logging or notification as necessary
+    if (hasBrokerChanges()) {
+      metadataCache.logListenersNotIdenticalIfNecessary(getCopiedAliveNodes())
+    }
+    // update metadata cache if necessary
+    if (hasPartitionStateChanges() || hasBrokerChanges() || hasTopicIdMapChanges() || hasFencedBrokerChanges()
+      || hasBrokerEpochChanges()) {
+      // Be sure to update metadata cache before potentially updating quota metric configs below
+      // because the decision to update quota metric configs is based on an accurate cluster metadata cache
+      metadataCache.writeState(
+        // We know that at least one of these data structures has changed, but we don't want to copy
+        // anything that hasn't changed already, so use the current version; this will
+        // use the copy if there is one or the original if not.
+        MetadataSnapshot(
+          getCurrentPartitionStates(),
+          getMetadataSnapshot().controllerId,
+          getCurrentAliveBrokers(),
+          getCurrentAliveNodes(),
+          getCurrentTopicIdMap(),
+          getCurrentFencedBrokers(),
+          getCurrentBrokerEpochs()))
+      if (requiresUpdateQuotaMetricConfigs) {
+        quotaManagers.clientQuotaCallback.foreach { callback =>
+          val listenerName = kafkaConfig.interBrokerListenerName // TODO: confirm that this is correct
+          if (callback.updateClusterMetadata(metadataCache.getClusterMetadata(clusterId, listenerName))) {
+            quotaManagers.fetch.updateQuotaMetricConfigs()
+            quotaManagers.produce.updateQuotaMetricConfigs()
+            quotaManagers.request.updateQuotaMetricConfigs()
+            quotaManagers.controllerMutation.updateQuotaMetricConfigs()
+          }
+        }
+      }
+    }
+    // update replicas if necessary
+    if (topicPartitionsNeedingStopReplica.nonEmpty) {
+      val correlationId = -1 // remove after bridge release
+      val controllerId = -1 // remove after bridge release
+      val controllerEpoch = replicaManager.controllerEpoch // requirement is it can't go backwards, so use current value
+      val brokerEpoch = 0 // unused, so provide an arbitrary number
+      val partitionDeleting = true
+      val leaderEpoch = LeaderAndIsr.EpochDuringDelete
+      val partitionStates: Map[TopicPartition, StopReplicaPartitionState] =
+        topicPartitionsNeedingStopReplica.foldLeft(mutable.Map.empty[TopicPartition, StopReplicaPartitionState]) {
+          case (map, tp) =>
+            map(tp) = new StopReplicaPartitionState()
+              .setPartitionIndex(tp.partition())
+              .setDeletePartition(partitionDeleting)
+              .setLeaderEpoch(leaderEpoch)
+            map
+        }
+      val (result, error) = replicaManager.stopReplicas(
+        correlationId, controllerId, controllerEpoch, brokerEpoch, partitionStates)
+      result.forKeyValue { (topicPartition, error) =>
+        if (error == Errors.NONE) {
+          if (topicPartition.topic == Topic.GROUP_METADATA_TOPIC_NAME
+            && partitionStates(topicPartition).deletePartition) {
+            groupCoordinator.onResignation(topicPartition.partition)
+          } else if (topicPartition.topic == Topic.TRANSACTION_STATE_TOPIC_NAME
+            && partitionStates(topicPartition).deletePartition) {
+            val partitionState = partitionStates(topicPartition)
+            val leaderEpoch = if (partitionState.leaderEpoch >= 0)
+              Some(partitionState.leaderEpoch)
+            else
+              None
+            txnCoordinator.onResignation(topicPartition.partition, coordinatorEpoch = leaderEpoch)
+          }
+        }
+      }
+      CoreUtils.swallow(replicaManager.getReplicaFetcherManager().shutdownIdleFetcherThreads(), this)
+    }
+  }
+
+  override def process(registerLocalBrokerEvent: OutOfBandRegisterLocalBrokerEvent): Unit = {
+    // set the broker epoch
+    brokerEpoch = registerLocalBrokerEvent.brokerEpoch
+  }
+
+  override def process(fenceLocalBrokerEvent: OutOfBandFenceLocalBrokerEvent): Unit = {
+    // TODO
+  }
+}

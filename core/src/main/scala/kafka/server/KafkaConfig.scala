@@ -647,7 +647,7 @@ object KafkaConfig {
   val ControllerConnectDoc = "A comma-separated list of controller URIs that KIP-500 brokers should connect to on startup. Required for brokers running in KIP-500 mode."
   val RegistrationHeartbeatIntervalMsDoc = "The length of time in milliseconds between broker heartbeats. Used when running in KIP-500 mode."
   val RegistrationLeaseTimeoutMsDoc = "The length of time in milliseconds that a broker lease lasts if no heartbeats are made. Used when running in KIP-500 mode."
-  val MetadataLogDirDoc = "The directory in which the metadata log is kept. If not set, we default to the first log given by log.dirs"
+  val MetadataLogDirDoc = "The directory in which the metadata log is kept. If not set, we default to the first directory given by log.dirs"
 
   /************* Authorizer Configuration ***********/
   val AuthorizerClassNameDoc = s"The fully qualified name of a class that implements s${classOf[Authorizer].getName}" +

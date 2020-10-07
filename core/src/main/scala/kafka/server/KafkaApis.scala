@@ -17,7 +17,6 @@
 
 package kafka.server
 
-import java.lang.{Byte => JByte}
 import java.lang.{Long => JLong}
 import java.nio.ByteBuffer
 import java.util
@@ -36,7 +35,7 @@ import kafka.coordinator.transaction.{InitProducerIdResult, TransactionCoordinat
 import kafka.log.AppendOrigin
 import kafka.message.ZStdCompressionCodec
 import kafka.network.RequestChannel
-import kafka.security.authorizer.{AclEntry, AuthorizerUtils}
+import kafka.security.authorizer.AuthorizerUtils
 import kafka.server.QuotaFactory.{QuotaManagers, UnboundedQuota}
 import kafka.utils.{CoreUtils, Logging}
 import kafka.utils.Implicits._
@@ -79,7 +78,7 @@ import org.apache.kafka.common.resource.ResourceType._
 import org.apache.kafka.common.resource.{PatternType, Resource, ResourcePattern, ResourceType}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.common.security.token.delegation.{DelegationToken, TokenInformation}
-import org.apache.kafka.common.utils.{ProducerIdAndEpoch, Time, Utils}
+import org.apache.kafka.common.utils.{ProducerIdAndEpoch, Time}
 import org.apache.kafka.common.{Node, TopicPartition}
 import org.apache.kafka.common.message.MetadataResponseData.{MetadataResponsePartition, MetadataResponseTopic}
 import org.apache.kafka.server.authorizer._
@@ -95,7 +94,7 @@ import kafka.coordinator.group.GroupOverview
 /**
  * Logic to handle the various Kafka requests
  */
-class KafkaApis(val requestChannel: RequestChannel,
+class KafkaApis(requestChannel: RequestChannel,
                 val replicaManager: ReplicaManager,
                 val adminManager: AdminManager,
                 val groupCoordinator: GroupCoordinator,
@@ -106,14 +105,18 @@ class KafkaApis(val requestChannel: RequestChannel,
                 val config: KafkaConfig,
                 val metadataCache: MetadataCache,
                 val metrics: Metrics,
-                val authorizer: Option[Authorizer],
-                val quotas: QuotaManagers,
+                authorizer: Option[Authorizer],
+                quotas: QuotaManagers,
                 val fetchManager: FetchManager,
                 brokerTopicStats: BrokerTopicStats,
                 val clusterId: String,
                 time: Time,
                 val tokenManager: DelegationTokenManager)
-  extends ApiRequestHandler with Logging {
+  extends AbstractRequestHandler(requestChannel = requestChannel,
+                                 authorizer = authorizer,
+                                 quotas = quotas,
+                                 time = time)
+  with Logging {
 
   type FetchResponseStats = Map[TopicPartition, RecordConversionStats]
   this.logIdent = "[KafkaApi-%d] ".format(brokerId)
@@ -189,10 +192,10 @@ class KafkaApis(val requestChannel: RequestChannel,
 
         // Until we are ready to integrate the Raft layer, these APIs are treated as
         // unexpected and we just close the connection.
-        case ApiKeys.VOTE => closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.BEGIN_QUORUM_EPOCH => closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.END_QUORUM_EPOCH => closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.DESCRIBE_QUORUM => closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.VOTE => requestChannel.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.BEGIN_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.END_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.DESCRIBE_QUORUM => requestChannel.closeConnection(request, util.Collections.emptyMap())
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartbeat(request)
         case ApiKeys.CONTROLLER_HEARTBEAT => handleControllerHeartbeat(request)
       }
@@ -593,14 +596,14 @@ class KafkaApis(val requestChannel: RequestChannel,
               s"from client id ${request.header.clientId} with ack=0\n" +
               s"Topic and partition to exceptions: $exceptionsSummary"
           )
-          closeConnection(request, new ProduceResponse(mergedResponseStatus.asJava).errorCounts)
+          requestChannel.closeConnection(request, new ProduceResponse(mergedResponseStatus.asJava).errorCounts)
         } else {
           // Note that although request throttling is exempt for acks == 0, the channel may be throttled due to
           // bandwidth quota violation.
           sendNoOpResponseExemptThrottle(request)
         }
       } else {
-        sendResponse(request, Some(new ProduceResponse(mergedResponseStatus.asJava, maxThrottleTimeMs)), None)
+        requestChannel.sendResponse(request, Some(new ProduceResponse(mergedResponseStatus.asJava, maxThrottleTimeMs)), None)
       }
     }
 
@@ -865,7 +868,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
 
         // Send the response immediately.
-        sendResponse(request, Some(createResponse(maxThrottleTimeMs)), Some(updateConversionStats))
+        requestChannel.sendResponse(request, Some(createResponse(maxThrottleTimeMs)), Some(updateConversionStats))
       }
     }
 
@@ -3140,21 +3143,6 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   // private package for testing
-  private[server] def authorize(requestContext: RequestContext,
-                                operation: AclOperation,
-                                resourceType: ResourceType,
-                                resourceName: String,
-                                logIfAllowed: Boolean = true,
-                                logIfDenied: Boolean = true,
-                                refCount: Int = 1): Boolean = {
-    authorizer.forall { authZ =>
-      val resource = new ResourcePattern(resourceType, resourceName, PatternType.LITERAL)
-      val actions = Collections.singletonList(new Action(operation, resource, refCount, logIfAllowed, logIfDenied))
-      authZ.authorize(requestContext, actions).get(0) == AuthorizationResult.ALLOWED
-    }
-  }
-
-  // private package for testing
   private[server] def filterByAuthorized[T](requestContext: RequestContext,
                                             operation: AclOperation,
                                             resourceType: ResourceType,
@@ -3207,27 +3195,6 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
-  private def authorizeClusterOperation(request: RequestChannel.Request, operation: AclOperation): Unit = {
-    if (!authorize(request.context, operation, CLUSTER, CLUSTER_NAME))
-      throw new ClusterAuthorizationException(s"Request $request is not authorized.")
-  }
-
-  private def authorizedOperations(request: RequestChannel.Request, resource: Resource): Int = {
-    val supportedOps = AclEntry.supportedOperations(resource.resourceType).toList
-    val authorizedOps = authorizer match {
-      case Some(authZ) =>
-        val resourcePattern = new ResourcePattern(resource.resourceType, resource.name, PatternType.LITERAL)
-        val actions = supportedOps.map { op => new Action(op, resourcePattern, 1, false, false) }
-        authZ.authorize(request.context, actions.asJava).asScala
-          .zip(supportedOps)
-          .filter(_._1 == AuthorizationResult.ALLOWED)
-          .map(_._2).toSet
-      case None =>
-        supportedOps.toSet
-    }
-    Utils.to32BitField(authorizedOps.map(operation => operation.code.asInstanceOf[JByte]).asJava)
-  }
-
   private def updateRecordConversionStats(request: RequestChannel.Request,
                                           tp: TopicPartition,
                                           conversionStats: RecordConversionStats): Unit = {
@@ -3248,118 +3215,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     request.temporaryMemoryBytes = conversionStats.temporaryMemoryBytes
   }
 
-  private def handleError(request: RequestChannel.Request, e: Throwable): Unit = {
-    val mayThrottle = e.isInstanceOf[ClusterAuthorizationException] || !request.header.apiKey.clusterAction
-    error("Error when handling request: " +
-      s"clientId=${request.header.clientId}, " +
-      s"correlationId=${request.header.correlationId}, " +
-      s"api=${request.header.apiKey}, " +
-      s"version=${request.header.apiVersion}, " +
-      s"body=${request.body[AbstractRequest]}", e)
-    if (mayThrottle)
-      sendErrorResponseMaybeThrottle(request, e)
-    else
-      sendErrorResponseExemptThrottle(request, e)
-  }
 
-  // Throttle the channel if the request quota is enabled but has been violated. Regardless of throttling, send the
-  // response immediately.
-  private def sendResponseMaybeThrottle(request: RequestChannel.Request,
-                                        createResponse: Int => AbstractResponse,
-                                        onComplete: Option[Send => Unit] = None): Unit = {
-    val throttleTimeMs = maybeRecordAndGetThrottleTimeMs(request)
-    quotas.request.throttle(request, throttleTimeMs, requestChannel.sendResponse)
-    sendResponse(request, Some(createResponse(throttleTimeMs)), onComplete)
-  }
-
-  private def sendErrorResponseMaybeThrottle(request: RequestChannel.Request, error: Throwable): Unit = {
-    val throttleTimeMs = maybeRecordAndGetThrottleTimeMs(request)
-    quotas.request.throttle(request, throttleTimeMs, requestChannel.sendResponse)
-    sendErrorOrCloseConnection(request, error, throttleTimeMs)
-  }
-
-  private def maybeRecordAndGetThrottleTimeMs(request: RequestChannel.Request): Int = {
-    val throttleTimeMs = quotas.request.maybeRecordAndGetThrottleTimeMs(request, time.milliseconds())
-    request.apiThrottleTimeMs = throttleTimeMs
-    throttleTimeMs
-  }
-
-  /**
-   * Throttle the channel if the controller mutations quota or the request quota have been violated.
-   * Regardless of throttling, send the response immediately.
-   */
-  private def sendResponseMaybeThrottle(controllerMutationQuota: ControllerMutationQuota,
-                                        request: RequestChannel.Request,
-                                        createResponse: Int => AbstractResponse,
-                                        onComplete: Option[Send => Unit]): Unit = {
-    val timeMs = time.milliseconds
-    val controllerThrottleTimeMs = controllerMutationQuota.throttleTime
-    val requestThrottleTimeMs = quotas.request.maybeRecordAndGetThrottleTimeMs(request, timeMs)
-    val maxThrottleTimeMs = Math.max(controllerThrottleTimeMs, requestThrottleTimeMs)
-    if (maxThrottleTimeMs > 0) {
-      request.apiThrottleTimeMs = maxThrottleTimeMs
-      if (controllerThrottleTimeMs > requestThrottleTimeMs) {
-        quotas.controllerMutation.throttle(request, controllerThrottleTimeMs, requestChannel.sendResponse)
-      } else {
-        quotas.request.throttle(request, requestThrottleTimeMs, requestChannel.sendResponse)
-      }
-    }
-
-    sendResponse(request, Some(createResponse(maxThrottleTimeMs)), onComplete)
-  }
-
-  private def sendResponseExemptThrottle(request: RequestChannel.Request,
-                                         response: AbstractResponse,
-                                         onComplete: Option[Send => Unit] = None): Unit = {
-    quotas.request.maybeRecordExempt(request)
-    sendResponse(request, Some(response), onComplete)
-  }
-
-  private def sendErrorResponseExemptThrottle(request: RequestChannel.Request, error: Throwable): Unit = {
-    quotas.request.maybeRecordExempt(request)
-    sendErrorOrCloseConnection(request, error, 0)
-  }
-
-  private def sendErrorOrCloseConnection(request: RequestChannel.Request, error: Throwable, throttleMs: Int): Unit = {
-    val requestBody = request.body[AbstractRequest]
-    val response = requestBody.getErrorResponse(throttleMs, error)
-    if (response == null)
-      closeConnection(request, requestBody.errorCounts(error))
-    else
-      sendResponse(request, Some(response), None)
-  }
-
-  private def sendNoOpResponseExemptThrottle(request: RequestChannel.Request): Unit = {
-    quotas.request.maybeRecordExempt(request)
-    sendResponse(request, None, None)
-  }
-
-  private def closeConnection(request: RequestChannel.Request, errorCounts: java.util.Map[Errors, Integer]): Unit = {
-    // This case is used when the request handler has encountered an error, but the client
-    // does not expect a response (e.g. when produce request has acks set to 0)
-    requestChannel.updateErrorMetrics(request.header.apiKey, errorCounts.asScala)
-    requestChannel.sendResponse(new RequestChannel.CloseConnectionResponse(request))
-  }
-
-  private def sendResponse(request: RequestChannel.Request,
-                           responseOpt: Option[AbstractResponse],
-                           onComplete: Option[Send => Unit]): Unit = {
-    // Update error metrics for each error code in the response including Errors.NONE
-    responseOpt.foreach(response => requestChannel.updateErrorMetrics(request.header.apiKey, response.errorCounts.asScala))
-
-    val response = responseOpt match {
-      case Some(response) =>
-        val responseSend = request.context.buildResponse(response)
-        val responseString =
-          if (RequestChannel.isRequestLoggingEnabled) Some(response.toString(request.context.apiVersion))
-          else None
-        new RequestChannel.SendResponse(request, responseSend, responseString, onComplete)
-      case None =>
-        new RequestChannel.NoOpResponse(request)
-    }
-
-    requestChannel.sendResponse(response)
-  }
 
   private def isBrokerEpochStale(brokerEpochInRequest: Long): Boolean = {
     // Broker epoch in LeaderAndIsr/UpdateMetadata/StopReplica request is unknown

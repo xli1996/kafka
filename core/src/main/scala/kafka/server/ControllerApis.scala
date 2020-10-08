@@ -1,7 +1,6 @@
 package kafka.server
 
 import kafka.network.RequestChannel
-import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.acl.AclOperation.CLUSTER_ACTION
@@ -13,7 +12,6 @@ import org.apache.kafka.common.resource.Resource.CLUSTER_NAME
 import org.apache.kafka.common.resource.ResourceType.CLUSTER
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.controller.{Controller, LeaderAndIsr}
-import org.apache.kafka.server.authorizer.Authorizer
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -21,16 +19,9 @@ import scala.jdk.CollectionConverters._
 /**
  * Request handler for Controller APIs
  */
-class ControllerApis(requestChannel: RequestChannel,
-                     authorizer: Option[Authorizer],
-                     quotas: QuotaManagers,
-                     time: Time,
-                     val controller: Controller)
-  extends AbstractRequestHandler(
-    requestChannel = requestChannel,
-    authorizer = authorizer,
-    quotas = quotas,
-    time = time) with Logging {
+class ControllerApis(val requestChannelHelper: RequestChannelHelper,
+                     val time: Time,
+                     val controller: Controller) extends ApiRequestHandler with Logging {
 
   override def handle(request: RequestChannel.Request): Unit = {
     try {
@@ -41,7 +32,7 @@ class ControllerApis(requestChannel: RequestChannel,
       }
     } catch {
       case e: FatalExitError => throw e
-      case e: Throwable => handleError(request, e)
+      case e: Throwable => requestChannelHelper.handleError(request, e)
     } finally {
 
     }
@@ -49,7 +40,7 @@ class ControllerApis(requestChannel: RequestChannel,
 
   def handleAlterIsrRequest(request: RequestChannel.Request): Unit = {
     val alterIsrRequest = request.body[AlterIsrRequest]
-    if (!authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
+    if (!requestChannelHelper.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
       val isrsToAlter = mutable.Map[TopicPartition, LeaderAndIsr]()
       alterIsrRequest.data.topics.forEach { topicReq =>
         topicReq.partitions.forEach { partitionReq =>

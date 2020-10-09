@@ -36,8 +36,19 @@ def retryFlagsString(jobConfig) {
 
 def downstreamBuildFailureOutput = ""
 def publishStep(String vaultSecret) {
-    withVaultFile([["gradle/${vaultSecret}", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
-        sh "./gradlewAll --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives"
+    withDockerServer([uri: dockerHost()]) {
+        withVaultFile([["gradle/artifactory_hotfix_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
+            writeFile file:'.ci/extract-iam-credential.sh', text:libraryResource('scripts/extract-iam-credential.sh')
+            sh """
+                bash .ci/extract-iam-credential.sh && rm .ci/extract-iam-credential.sh
+
+                # Hide login credential from below
+                set +x
+
+                \$(aws ecr get-login --no-include-email --region us-west-2)
+                ./gradlewAll -PskipSigning=true --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchives
+            """
+        }
     }
 }
 
@@ -72,11 +83,7 @@ def job = {
             ciTool("ci-push-tag ${env.WORKSPACE} kafka")
         }
 
-        if (config.isDevJob) {
-          publishStep('artifactory_snapshots_settings')
-        } else if (config.isPreviewJob) {
-          publishStep('artifactory_preview_release_settings')
-        }
+        publishStep('artifactory_hotfix_settings')
       }
     }
 

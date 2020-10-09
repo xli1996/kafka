@@ -36,7 +36,7 @@ import scala.jdk.CollectionConverters._
 /**
  * Request handler for Controller APIs
  */
-class ControllerApis(val requestChannelHelper: RequestChannelHelper,
+class ControllerApis(val requestChannelHelper: ApisUtils,
                      val time: Time,
                      val controller: Controller) extends ApiRequestHandler with Logging {
 

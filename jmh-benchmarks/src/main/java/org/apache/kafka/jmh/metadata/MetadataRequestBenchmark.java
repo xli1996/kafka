@@ -34,7 +34,7 @@ import kafka.server.MetadataCache;
 import kafka.server.QuotaFactory;
 import kafka.server.ReplicaManager;
 import kafka.server.ReplicationQuotaManager;
-import kafka.server.RequestChannelHelper;
+import kafka.server.ApisUtils;
 import kafka.zk.KafkaZkClient;
 import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.message.UpdateMetadataRequestData.UpdateMetadataBroker;
@@ -168,7 +168,7 @@ public class MetadataRequestBenchmark {
         kafkaProps.put(KafkaConfig$.MODULE$.BrokerIdProp(), brokerId + "");
         Time time = new SystemTime();
         return new KafkaApis(requestChannel,
-            new RequestChannelHelper(requestChannel, Option.empty(), quotaManagers, time),
+            new ApisUtils(requestChannel, Option.empty(), quotaManagers, time),
             replicaManager,
             adminManager,
             groupCoordinator,

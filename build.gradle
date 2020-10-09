@@ -237,7 +237,7 @@ subprojects {
     deployerJars
   }
 
-  dependenices {
+  dependencies {
     deployerJars "org.springframework.build:aws-maven:5.0.0.RELEASE", "javax.xml.bind:jaxb-api:$versions.jaxb"
   }
 

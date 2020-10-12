@@ -36,7 +36,7 @@ import scala.jdk.CollectionConverters._
 /**
  * Request handler for Controller APIs
  */
-class ControllerApis(val requestChannelHelper: ApisUtils,
+class ControllerApis(val apisUtil: ApisUtils,
                      val time: Time,
                      val controller: Controller) extends ApiRequestHandler with Logging {
 
@@ -49,7 +49,7 @@ class ControllerApis(val requestChannelHelper: ApisUtils,
       }
     } catch {
       case e: FatalExitError => throw e
-      case e: Throwable => requestChannelHelper.handleError(request, e)
+      case e: Throwable => apisUtil.handleError(request, e)
     } finally {
 
     }
@@ -57,7 +57,7 @@ class ControllerApis(val requestChannelHelper: ApisUtils,
 
   def handleAlterIsrRequest(request: RequestChannel.Request): Unit = {
     val alterIsrRequest = request.body[AlterIsrRequest]
-    if (!requestChannelHelper.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
+    if (!apisUtil.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
       val isrsToAlter = mutable.Map[TopicPartition, LeaderAndIsr]()
       alterIsrRequest.data.topics.forEach { topicReq =>
         topicReq.partitions.forEach { partitionReq =>

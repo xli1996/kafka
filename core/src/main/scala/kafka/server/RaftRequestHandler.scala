@@ -28,11 +28,9 @@ import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.message.MetadataResponseData
 import org.apache.kafka.common.message.MetadataResponseData.{MetadataResponsePartition, MetadataResponseTopic}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
-import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, ApiVersionsResponse, MetadataRequest, MetadataResponse, ProduceRequest, ProduceResponse}
+import org.apache.kafka.common.requests.{AbstractRequest, ApiVersionsResponse, MetadataRequest, MetadataResponse, ProduceRequest, ProduceResponse}
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.raft.{AckMode, RaftClient}
-
-import scala.jdk.CollectionConverters._
 
 class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
                          requestChannel: RequestChannel,
@@ -54,11 +52,11 @@ class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
           networkChannel.postInboundRequest(
             request.header,
             requestBody,
-            response => sendResponse(request, Some(response)))
+            response => requestChannel.sendResponse(request, Some(response), None))
 
         case ApiKeys.API_VERSIONS =>
-          sendResponse(request, Option(ApiVersionsResponse.apiVersionsResponse(0, 2,
-            Features.emptySupportedFeatures())))
+          requestChannel.sendResponse(request, Option(ApiVersionsResponse.apiVersionsResponse(0, 2,
+            Features.emptySupportedFeatures())), None)
 
         case ApiKeys.METADATA =>
           val metadataRequest = request.body[MetadataRequest]
@@ -90,11 +88,10 @@ class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
               .setHost(connection.host)
               .setPort(connection.port))
           }
-
-          sendResponse(request, Option(new MetadataResponse(
+          requestChannel.sendResponse(request, Option(new MetadataResponse(
             new MetadataResponseData()
               .setTopics(topics)
-              .setBrokers(brokers))))
+              .setBrokers(brokers))), None)
 
         case ApiKeys.PRODUCE =>
           val produceRequest = request.body[ProduceRequest]
@@ -114,9 +111,9 @@ class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
               else
                 Errors.forException(exception)
 
-              sendResponse(request, Option(new ProduceResponse(
+              requestChannel.sendResponse(request, Option(new ProduceResponse(
                 Collections.singletonMap(metadataPartition,
-                  new ProduceResponse.PartitionResponse(error)))))
+                  new ProduceResponse.PartitionResponse(error)))), None)
             }
 
         case _ => throw new IllegalArgumentException(s"Unsupported api key: ${request.header.apiKey}")
@@ -131,6 +128,7 @@ class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
     }
   }
 
+
   private def handleError(request: RequestChannel.Request, err: Throwable): Unit = {
     error("Error when handling request: " +
       s"clientId=${request.header.clientId}, " +
@@ -142,38 +140,8 @@ class RaftRequestHandler(networkChannel: KafkaNetworkChannel,
     val requestBody = request.body[AbstractRequest]
     val response = requestBody.getErrorResponse(0, err)
     if (response == null)
-      closeConnection(request, requestBody.errorCounts(err))
+      requestChannel.closeConnection(request, requestBody.errorCounts(err))
     else
-      sendResponse(request, Some(response))
+      requestChannel.sendResponse(request, Some(response), None)
   }
-
-  private def closeConnection(request: RequestChannel.Request, errorCounts: java.util.Map[Errors, Integer]): Unit = {
-    // This case is used when the request handler has encountered an error, but the client
-    // does not expect a response (e.g. when produce request has acks set to 0)
-    requestChannel.updateErrorMetrics(request.header.apiKey, errorCounts.asScala)
-    requestChannel.sendResponse(new RequestChannel.CloseConnectionResponse(request))
-  }
-
-  private def sendResponse(request: RequestChannel.Request,
-                           responseOpt: Option[AbstractResponse]): Unit = {
-    // Update error metrics for each error code in the response including Errors.NONE
-    responseOpt.foreach(response => requestChannel.updateErrorMetrics(request.header.apiKey, response.errorCounts.asScala))
-
-    val response = responseOpt match {
-      case Some(response) =>
-        val responseSend = request.context.buildResponse(response)
-        val responseString =
-          if (RequestChannel.isRequestLoggingEnabled) Some(response.toString(request.context.apiVersion))
-          else None
-        new RequestChannel.SendResponse(request, responseSend, responseString, None)
-      case None =>
-        new RequestChannel.NoOpResponse(request)
-    }
-    sendResponse(response)
-  }
-
-  private def sendResponse(response: RequestChannel.Response): Unit = {
-    requestChannel.sendResponse(response)
-  }
-
 }

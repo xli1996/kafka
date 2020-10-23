@@ -447,7 +447,8 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
     }
 
     private void shouldGetCacheLevelTagMap(final String builtInMetricsVersion) {
-        final StreamsMetricsImpl streamsMetrics = new StreamsMetricsImpl(metrics, CLIENT_ID, builtInMetricsVersion);
+        final StreamsMetricsImpl streamsMetrics =
+            new StreamsMetricsImpl(metrics, THREAD_ID, builtInMetricsVersion);
         final String taskName = "taskName";
         final String storeName = "storeName";
 
@@ -549,7 +550,7 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
     @Test
     public void shouldReturnMetricsVersionCurrent() {
         assertThat(
-            new StreamsMetricsImpl(metrics, CLIENT_ID, StreamsMetricsImpl.METRICS_LATEST).version(),
+            new StreamsMetricsImpl(metrics, THREAD_ID, StreamsMetricsImpl.METRICS_LATEST).version(),
             equalTo(Version.LATEST)
         );
     }
@@ -557,7 +558,7 @@ public class StreamsMetricsImplTest extends EasyMockSupport {
     @Test
     public void shouldReturnMetricsVersionFrom100To23() {
         assertThat(
-            new StreamsMetricsImpl(metrics, CLIENT_ID, StreamsMetricsImpl.METRICS_0100_TO_23).version(),
+            new StreamsMetricsImpl(metrics, THREAD_ID, StreamsMetricsImpl.METRICS_0100_TO_23).version(),
             equalTo(Version.FROM_100_TO_23)
         );
     }

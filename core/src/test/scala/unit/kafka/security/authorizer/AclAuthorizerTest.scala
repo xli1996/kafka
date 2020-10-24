@@ -27,7 +27,7 @@ import kafka.Kafka
 import kafka.api.{ApiVersion, KAFKA_2_0_IV0, KAFKA_2_0_IV1}
 import kafka.security.authorizer.AclEntry.{WildcardHost, WildcardPrincipalString}
 import kafka.server.KafkaConfig
-import kafka.utils.TestUtils
+import kafka.utils.{CoreUtils, TestUtils}
 import kafka.zk.{ZkAclStore, ZooKeeperTestHarness}
 import kafka.zookeeper.{GetChildrenRequest, GetDataRequest, ZooKeeperClient}
 import org.apache.kafka.common.acl._
@@ -393,7 +393,7 @@ class AclAuthorizerTest extends ZooKeeperTestHarness {
       }
     }
     try {
-      val future = executor.submit((() => aclAuthorizer3.configure(config.originals)): Runnable)
+      val future = executor.submit(CoreUtils.runnable(aclAuthorizer3.configure(config.originals)))
       configureSemaphore.acquire()
       val user1 = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, username)
       val acls = Set(new AccessControlEntry(user1.toString, "host-1", READ, DENY))

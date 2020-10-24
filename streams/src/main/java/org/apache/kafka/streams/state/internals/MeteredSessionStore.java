@@ -22,6 +22,7 @@ import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.streams.errors.ProcessorStateException;
 import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.kstream.internals.WrappingNullableUtils;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.processor.StateStoreContext;
@@ -111,7 +112,7 @@ public class MeteredSessionStore<K, V>
         e2eLatencySensor = StateStoreMetrics.e2ELatencySensor(taskId, metricsScope, name(), streamsMetrics);
     }
 
-    @SuppressWarnings("unchecked")
+
     private void initStoreSerde(final ProcessorContext context) {
         final String storeName = name();
         final String changelogTopic = ProcessorContextUtils.changelogFor(context, storeName);
@@ -119,12 +120,11 @@ public class MeteredSessionStore<K, V>
             changelogTopic != null ?
                 changelogTopic :
                 ProcessorStateManager.storeChangelogTopic(context.applicationId(), storeName),
-            keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-            valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde
+                WrappingNullableUtils.prepareKeySerde(keySerde, context.keySerde(), context.valueSerde()),
+                WrappingNullableUtils.prepareValueSerde(valueSerde, context.keySerde(), context.valueSerde())
         );
     }
 
-    @SuppressWarnings("unchecked")
     private void initStoreSerde(final StateStoreContext context) {
         final String storeName = name();
         final String changelogTopic = ProcessorContextUtils.changelogFor(context, storeName);
@@ -132,8 +132,8 @@ public class MeteredSessionStore<K, V>
             changelogTopic != null ?
                 changelogTopic :
                 ProcessorStateManager.storeChangelogTopic(context.applicationId(), storeName),
-            keySerde == null ? (Serde<K>) context.keySerde() : keySerde,
-            valueSerde == null ? (Serde<V>) context.valueSerde() : valueSerde
+                WrappingNullableUtils.prepareKeySerde(keySerde, context.keySerde(), context.valueSerde()),
+                WrappingNullableUtils.prepareValueSerde(valueSerde, context.keySerde(), context.valueSerde())
         );
     }
 
@@ -222,6 +222,18 @@ public class MeteredSessionStore<K, V>
     }
 
     @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFetch(final K key) {
+        Objects.requireNonNull(key, "key cannot be null");
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFetch(keyBytes(key)),
+            fetchSensor,
+            streamsMetrics,
+            serdes,
+            time
+        );
+    }
+
+    @Override
     public KeyValueIterator<Windowed<K>, V> fetch(final K from,
                                                   final K to) {
         Objects.requireNonNull(from, "from cannot be null");
@@ -232,6 +244,20 @@ public class MeteredSessionStore<K, V>
             streamsMetrics,
             serdes,
             time);
+    }
+
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFetch(final K from,
+                                                          final K to) {
+        Objects.requireNonNull(from, "from cannot be null");
+        Objects.requireNonNull(to, "to cannot be null");
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFetch(keyBytes(from), keyBytes(to)),
+            fetchSensor,
+            streamsMetrics,
+            serdes,
+            time
+        );
     }
 
     @Override
@@ -249,6 +275,25 @@ public class MeteredSessionStore<K, V>
             streamsMetrics,
             serdes,
             time);
+    }
+
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K key,
+                                                                 final long earliestSessionEndTime,
+                                                                 final long latestSessionStartTime) {
+        Objects.requireNonNull(key, "key cannot be null");
+        final Bytes bytesKey = keyBytes(key);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFindSessions(
+                bytesKey,
+                earliestSessionEndTime,
+                latestSessionStartTime
+            ),
+            fetchSensor,
+            streamsMetrics,
+            serdes,
+            time
+        );
     }
 
     @Override
@@ -270,6 +315,29 @@ public class MeteredSessionStore<K, V>
             streamsMetrics,
             serdes,
             time);
+    }
+
+    @Override
+    public KeyValueIterator<Windowed<K>, V> backwardFindSessions(final K keyFrom,
+                                                                 final K keyTo,
+                                                                 final long earliestSessionEndTime,
+                                                                 final long latestSessionStartTime) {
+        Objects.requireNonNull(keyFrom, "keyFrom cannot be null");
+        Objects.requireNonNull(keyTo, "keyTo cannot be null");
+        final Bytes bytesKeyFrom = keyBytes(keyFrom);
+        final Bytes bytesKeyTo = keyBytes(keyTo);
+        return new MeteredWindowedKeyValueIterator<>(
+            wrapped().backwardFindSessions(
+                bytesKeyFrom,
+                bytesKeyTo,
+                earliestSessionEndTime,
+                latestSessionStartTime
+            ),
+            fetchSensor,
+            streamsMetrics,
+            serdes,
+            time
+        );
     }
 
     @Override

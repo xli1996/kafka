@@ -36,7 +36,6 @@ import kafka.server.MetadataCache;
 import kafka.server.QuotaFactory;
 import kafka.server.ReplicaManager;
 import kafka.server.ReplicationQuotaManager;
-import kafka.server.ApisUtils;
 import kafka.zk.KafkaZkClient;
 import org.apache.kafka.common.memory.MemoryPool;
 import org.apache.kafka.common.message.UpdateMetadataRequestData.UpdateMetadataBroker;
@@ -54,6 +53,7 @@ import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.utils.SystemTime;
 import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.server.authorizer.Authorizer;
 import org.mockito.Mockito;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -171,7 +171,6 @@ public class MetadataRequestBenchmark {
         BrokerFeatures brokerFeatures = BrokerFeatures.createDefault();
         Time time = new SystemTime();
         return new KafkaApis(requestChannel,
-            new ApisUtils(requestChannel, Option.empty(), quotaManagers, time),
             replicaManager,
             adminManager,
             groupCoordinator,
@@ -182,7 +181,7 @@ public class MetadataRequestBenchmark {
             new KafkaConfig(kafkaProps),
             metadataCache,
             metrics,
-            Option.empty(),
+            Option.<Authorizer>empty(),
             quotaManagers,
             fetchManager,
             brokerTopicStats,

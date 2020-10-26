@@ -95,7 +95,6 @@ import kafka.coordinator.group.GroupOverview
  * Logic to handle the various Kafka requests
  */
 class KafkaApis(val requestChannel: RequestChannel,
-                val apisUtils: ApisUtils,
                 val replicaManager: ReplicaManager,
                 val adminManager: LegacyAdminManager,
                 val groupCoordinator: GroupCoordinator,
@@ -200,6 +199,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         // Handle requests that should have been sent to the KIP-500 controller.
         case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartbeat(request)
+        case ApiKeys.CONTROLLER_HEARTBEAT => handleControllerHeartbeat(request)
       }
     } catch {
       case e: FatalExitError => throw e
@@ -3157,6 +3157,13 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   def handleBrokerHeartbeat(request: RequestChannel.Request): Unit = {
     val heartbeatRequest = request.body[BrokerHeartbeatRequest]
+    apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+      heartbeatRequest.getErrorResponse(requestThrottleMs,
+        Errors.NOT_CONTROLLER.exception))
+  }
+
+  def handleControllerHeartbeat(request: RequestChannel.Request): Unit = {
+    val heartbeatRequest = request.body[ControllerHeartbeatRequest]
     apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
       heartbeatRequest.getErrorResponse(requestThrottleMs,
         Errors.NOT_CONTROLLER.exception))

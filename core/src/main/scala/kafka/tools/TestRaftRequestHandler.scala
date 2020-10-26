@@ -33,7 +33,6 @@ import org.apache.kafka.common.requests.{AbstractRequest, ApiVersionsResponse, M
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.raft.{AckMode, RaftClient}
 
-import scala.jdk.CollectionConverters._
 
 /**
  * Simple request handler implementation for use by [[TestRaftServer]].

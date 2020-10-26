@@ -14,7 +14,7 @@
 // limitations under the License.
 
 {
-  "apiKey": 58,
+  "apiKey": 60,
   "type": "request",
   "name": "ControllerHeartbeatRequest",
   "validVersions": "0",

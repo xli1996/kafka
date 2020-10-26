@@ -261,7 +261,8 @@ public enum ApiKeys {
     BROKER_REGISTRATION(58, "BrokerRegistration", BrokerRegistrationRequestData.SCHEMAS,
             BrokerRegistrationResponseData.SCHEMAS),
     BROKER_HEARTBEAT(59, "BrokerHeartbeat", BrokerHeartbeatRequestData.SCHEMAS,
-            BrokerHeartbeatResponseData.SCHEMAS);
+            BrokerHeartbeatResponseData.SCHEMAS),
+    CONTROLLER_HEARTBEAT(60, "ControllerHeartbeat", ControllerHeartbeatRequestData.SCHEMAS, ControllerHeartbeatResponseData.SCHEMAS);
 
     private static final ApiKeys[] ID_TO_TYPE;
     private static final int MIN_API_KEY = 0;

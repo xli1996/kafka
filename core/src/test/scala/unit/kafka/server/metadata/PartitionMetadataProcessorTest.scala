@@ -40,7 +40,7 @@ import scala.collection.mutable
 class PartitionMetadataProcessorTest {
 
   @Test
-  def testBrokerRecordsAndTopicRecords() : Unit = {
+  def testBrokerRecordsAndTopicRecords(): Unit = {
     val kafkaConfig = mock(classOf[KafkaConfig])
     val clusterId = "clusterId"
     val groupCoordinator = mock(classOf[GroupCoordinator])
@@ -187,5 +187,47 @@ class PartitionMetadataProcessorTest {
     verify(requestClientQuotaManager, times(1)).updateQuotaMetricConfigs()
     verify(produceClientQuotaManager, times(1)).updateQuotaMetricConfigs()
     verify(controllerMutationQuotaManager, times(1)).updateQuotaMetricConfigs()
+  }
+
+  @Test
+  def testOutOfBandRegisterLocalBrokerEvent(): Unit = {
+    val processor = createSimpleProcessor()
+    val initialBrokerEpoch = -1
+    assertEquals(initialBrokerEpoch, processor.brokerEpoch)
+    val brokerEpoch = 1
+    processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch))
+    assertEquals(brokerEpoch, processor.brokerEpoch)
+    assertEquals(brokerEpoch, processor.MetadataMgr().getCurrentBrokerEpochs().get(0).get)
+    // test idempotency
+    processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch))
+    assertEquals(brokerEpoch, processor.brokerEpoch)
+    assertEquals(brokerEpoch, processor.MetadataMgr().getCurrentBrokerEpochs().get(0).get)
+  }
+
+  @Test(expected = classOf[IllegalArgumentException])
+  def testDisallowChangeBrokerEpoch(): Unit = {
+    val processor = createSimpleProcessor()
+    val brokerEpoch = 1
+    processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch))
+    processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch + 1)) // should be disallowed
+  }
+
+  @Test(expected = classOf[IllegalArgumentException])
+  def testDisallowNegativeBrokerEpoch(): Unit = {
+    val processor = createSimpleProcessor()
+    processor.process(OutOfBandRegisterLocalBrokerEvent(-1))
+  }
+
+  def createSimpleProcessor(): PartitionMetadataProcessor = {
+    val kafkaConfig = mock(classOf[KafkaConfig]) // broker ID will be 0
+    val clusterId = "clusterId"
+    val groupCoordinator = mock(classOf[GroupCoordinator])
+    val quotaManagers = mock(classOf[QuotaFactory.QuotaManagers])
+    val metadataCache = new MetadataCache(0)
+    val replicaManager = mock(classOf[ReplicaManager])
+    val txnCoordinator = mock(classOf[TransactionCoordinator])
+
+    new PartitionMetadataProcessor(
+      kafkaConfig, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, txnCoordinator)
   }
 }

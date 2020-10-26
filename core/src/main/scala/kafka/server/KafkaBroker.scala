@@ -30,7 +30,7 @@ import kafka.controller.KafkaController
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.{LogConfig, LogManager}
-import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter, KafkaYammerMetrics}
+import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter, KafkaYammerMetrics, LinuxIoMetricsCollector}
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
 import kafka.utils._
@@ -53,7 +53,7 @@ import org.apache.zookeeper.client.ZKClientConfig
 import scala.jdk.CollectionConverters._
 import scala.collection.{Map, Seq, mutable}
 
-object KafkaServer {
+object KafkaBroker {
   // Copy the subset of properties that are relevant to Logs
   // I'm listing out individual properties here since the names are slightly different in each Config class...
   private[kafka] def copyKafkaConfigToLog(kafkaConfig: KafkaConfig): java.util.Map[String, Object] = {
@@ -92,27 +92,38 @@ object KafkaServer {
       .timeWindow(kafkaConfig.metricSampleWindowMs, TimeUnit.MILLISECONDS)
   }
 
-  def zkClientConfigFromKafkaConfig(config: KafkaConfig, forceZkSslClientEnable: Boolean = false) =
-    if (!config.zkSslClientEnable && !forceZkSslClientEnable)
-      None
-    else {
-      val clientConfig = new ZKClientConfig()
-      KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslClientEnableProp, "true")
-      config.zkClientCnxnSocketClassName.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkClientCnxnSocketProp, _))
-      config.zkSslKeyStoreLocation.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslKeyStoreLocationProp, _))
-      config.zkSslKeyStorePassword.foreach(x => KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslKeyStorePasswordProp, x.value))
-      config.zkSslKeyStoreType.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslKeyStoreTypeProp, _))
-      config.zkSslTrustStoreLocation.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslTrustStoreLocationProp, _))
-      config.zkSslTrustStorePassword.foreach(x => KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslTrustStorePasswordProp, x.value))
-      config.zkSslTrustStoreType.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslTrustStoreTypeProp, _))
-      KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslProtocolProp, config.ZkSslProtocol)
-      config.ZkSslEnabledProtocols.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslEnabledProtocolsProp, _))
-      config.ZkSslCipherSuites.foreach(KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslCipherSuitesProp, _))
-      KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslEndpointIdentificationAlgorithmProp, config.ZkSslEndpointIdentificationAlgorithm)
-      KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslCrlEnableProp, config.ZkSslCrlEnable.toString)
-      KafkaConfig.setZooKeeperClientProperty(clientConfig, KafkaConfig.ZkSslOcspEnableProp, config.ZkSslOcspEnable.toString)
-      Some(clientConfig)
+  //properties for MetricsContext
+  private val metricsPrefix: String = "kafka.server"
+  private val KAFKA_CLUSTER_ID: String = "kafka.cluster.id"
+  private val KAFKA_BROKER_ID: String = "kafka.broker.id"
+
+  private[server] def createKafkaMetricsContext(clusterId: String,
+                                                config: KafkaConfig) : KafkaMetricsContext = {
+    val contextLabels = new util.HashMap[String, Object]
+    contextLabels.put(KAFKA_CLUSTER_ID, clusterId)
+    contextLabels.put(KAFKA_BROKER_ID, config.brokerId.toString)
+    contextLabels.putAll(config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX))
+    val metricsContext = new KafkaMetricsContext(metricsPrefix, contextLabels)
+    metricsContext
+  }
+
+  private[server] def notifyClusterListeners(clusterId: String,
+                                             clusterListeners: Seq[AnyRef]): Unit = {
+    val clusterResourceListeners = new ClusterResourceListeners
+    clusterResourceListeners.maybeAddAll(clusterListeners.asJava)
+    clusterResourceListeners.onUpdate(new ClusterResource(clusterId))
+  }
+
+  private[server] def notifyMetricsReporters(clusterId: String,
+                                             config: KafkaConfig,
+                                             metricsReporters: Seq[AnyRef]): Unit = {
+    val metricsContext = KafkaBroker.createKafkaMetricsContext(clusterId, config)
+    metricsReporters.foreach {
+      case x: MetricsReporter => x.contextChange(metricsContext)
+      case _ => //do nothing
     }
+  }
+
 
   val MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS: Long = 120000
 }
@@ -121,18 +132,17 @@ object KafkaServer {
  * Represents the lifecycle of a single Kafka broker. Handles all functionality required
  * to start up and shutdown a single Kafka node.
  */
-class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNamePrefix: Option[String] = None,
-                  kafkaMetricsReporters: Seq[KafkaMetricsReporter] = List()) extends Logging with KafkaMetricsGroup {
+abstract class KafkaBroker(val config: KafkaConfig,
+                           time: Time,
+                           threadNamePrefix: Option[String],
+                           kafkaMetricsReporters: Seq[KafkaMetricsReporter]) extends Logging with KafkaMetricsGroup {
+  import KafkaBroker._
+
   private val startupComplete = new AtomicBoolean(false)
   private val isShuttingDown = new AtomicBoolean(false)
   private val isStartingUp = new AtomicBoolean(false)
 
   private var shutdownLatch = new CountDownLatch(1)
-
-  //properties for MetricsContext
-  private val metricsPrefix: String = "kafka.server"
-  private val KAFKA_CLUSTER_ID: String = "kafka.cluster.id"
-  private val KAFKA_BROKER_ID: String = "kafka.broker.id"
 
 
   private var logContext: LogContext = null
@@ -154,11 +164,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
   var logManager: LogManager = null
 
   var replicaManager: ReplicaManager = null
-  var adminManager: AdminManager = null
+  var adminManager: LegacyAdminManager = null
   var tokenManager: DelegationTokenManager = null
 
   var dynamicConfigHandlers: Map[String, ConfigHandler] = null
-  var dynamicConfigManager: DynamicConfigManager = null
+  var dynamicConfigManager: LegacyDynamicConfigManager = null
   var credentialProvider: CredentialProvider = null
   var tokenCache: DelegationTokenCache = null
 
@@ -175,7 +185,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
   var metadataCache: MetadataCache = null
   var quotaManagers: QuotaFactory.QuotaManagers = null
 
-  val zkClientConfig: ZKClientConfig = KafkaServer.zkClientConfigFromKafkaConfig(config).getOrElse(new ZKClientConfig())
+  val zkClientConfig: ZKClientConfig = LegacyBroker.zkClientConfigFromKafkaConfig(config).getOrElse(new ZKClientConfig())
   private var _zkClient: KafkaZkClient = null
 
   val correlationId: AtomicInteger = new AtomicInteger(0)
@@ -186,6 +196,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
   private var _brokerTopicStats: BrokerTopicStats = null
 
   private var _featureChangeListener: FinalizedFeatureChangeListener = null
+
+  val brokerFeatures: BrokerFeatures = BrokerFeatures.createDefault()
+
+  val featureCache: FinalizedFeatureCache = new FinalizedFeatureCache(brokerFeatures)
 
   def clusterId: String = _clusterId
 
@@ -229,8 +243,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         initZkClient(time)
 
         /* initialize features */
-        _featureChangeListener = new FinalizedFeatureChangeListener(_zkClient)
-        if (config.isFeatureVersioningEnabled) {
+        _featureChangeListener = new FinalizedFeatureChangeListener(featureCache, _zkClient)
+        if (config.isFeatureVersioningSupported) {
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
@@ -249,7 +263,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
 
         /* generate brokerId */
         config.brokerId = getOrGenerateBrokerId(preloadedBrokerMetadataCheckpoint)
-        logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
+        logContext = new LogContext(s"[KafkaBroker id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
@@ -270,15 +284,15 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         val reporters = new util.ArrayList[MetricsReporter]
         reporters.add(jmxReporter)
 
-        val metricConfig = KafkaServer.metricConfig(config)
-        val metricsContext = createKafkaMetricsContext()
+        val metricConfig = KafkaBroker.metricConfig(config)
+        val metricsContext = KafkaBroker.createKafkaMetricsContext(_clusterId, config)
         metrics = new Metrics(metricConfig, reporters, time, true, metricsContext)
 
         /* register broker metrics */
         _brokerTopicStats = new BrokerTopicStats
 
         quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
-        notifyClusterListeners(kafkaMetricsReporters ++ metrics.reporters.asScala)
+        notifyClusterListeners(_clusterId, kafkaMetricsReporters ++ metrics.reporters.asScala)
 
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
@@ -308,17 +322,17 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         val brokerEpoch = zkClient.registerBroker(brokerInfo)
 
         // Now that the broker is successfully registered, checkpoint its metadata
-        checkpointBrokerMetadata(BrokerMetadata(config.brokerId, Some(clusterId)))
+        checkpointBrokerMetadata(LegacyMetaProperties(config.brokerId, Some(clusterId)))
 
         /* start token manager */
         tokenManager = new DelegationTokenManager(config, tokenCache, time , zkClient)
         tokenManager.startup()
 
         /* start kafka controller */
-        kafkaController = new KafkaController(config, zkClient, time, metrics, brokerInfo, brokerEpoch, tokenManager, threadNamePrefix)
+        kafkaController = new KafkaController(config, zkClient, time, metrics, brokerInfo, brokerEpoch, tokenManager, brokerFeatures, featureCache, threadNamePrefix)
         kafkaController.startup()
 
-        adminManager = new AdminManager(config, metrics, metadataCache, zkClient)
+        adminManager = new LegacyAdminManager(config, metrics, metadataCache, zkClient)
 
         /* start group coordinator */
         // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
@@ -346,24 +360,22 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
 
         val fetchManager = new FetchManager(Time.SYSTEM,
           new FetchSessionCache(config.maxIncrementalFetchSessionCacheSlots,
-            KafkaServer.MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS))
+            KafkaBroker.MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS))
 
         /* start processing requests */
         dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
-          new ApisUtils(socketServer.dataPlaneRequestChannel, authorizer, quotaManagers, time),
           replicaManager, adminManager, groupCoordinator, transactionCoordinator,
           kafkaController, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-          fetchManager, brokerTopicStats, clusterId, time, tokenManager)
+          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache)
 
         dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
           config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
 
         socketServer.controlPlaneRequestChannelOpt.foreach { controlPlaneRequestChannel =>
           controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
-            new ApisUtils(controlPlaneRequestChannel, authorizer, quotaManagers, time),
             replicaManager, adminManager, groupCoordinator, transactionCoordinator,
             kafkaController, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-            fetchManager, brokerTopicStats, clusterId, time, tokenManager)
+            fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache)
 
           controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
             1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)
@@ -372,7 +384,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         Mx4jLoader.maybeLoad()
 
         /* Add all reconfigurables for config change notification before starting config handlers */
-        config.dynamicConfig.addReconfigurables(this)
+        config.dynamicConfig.addReconfigurables(this.asInstanceOf[LegacyBroker])
 
         /* start dynamic config manager */
         dynamicConfigHandlers = Map[String, ConfigHandler](ConfigType.Topic -> new TopicConfigHandler(logManager, config, quotaManagers, kafkaController),
@@ -381,7 +393,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
                                                            ConfigType.Broker -> new BrokerConfigHandler(config, quotaManagers))
 
         // Create the config manager. start listening to notifications
-        dynamicConfigManager = new DynamicConfigManager(zkClient, dynamicConfigHandlers)
+        dynamicConfigManager = new LegacyDynamicConfigManager(zkClient, dynamicConfigHandlers)
         dynamicConfigManager.startup()
 
         socketServer.startProcessingRequests(authorizerFutures)
@@ -396,34 +408,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     }
     catch {
       case e: Throwable =>
-        fatal("Fatal error during KafkaServer startup. Prepare to shutdown", e)
+        fatal("Fatal error during KafkaBroker startup. Prepare to shutdown", e)
         isStartingUp.set(false)
         shutdown()
         throw e
     }
-  }
-
-  private[server] def notifyClusterListeners(clusterListeners: Seq[AnyRef]): Unit = {
-    val clusterResourceListeners = new ClusterResourceListeners
-    clusterResourceListeners.maybeAddAll(clusterListeners.asJava)
-    clusterResourceListeners.onUpdate(new ClusterResource(clusterId))
-  }
-
-  private[server] def notifyMetricsReporters(metricsReporters: Seq[AnyRef]): Unit = {
-    val metricsContext = createKafkaMetricsContext()
-    metricsReporters.foreach {
-      case x: MetricsReporter => x.contextChange(metricsContext)
-      case _ => //do nothing
-    }
-  }
-
-  private[server] def createKafkaMetricsContext() : KafkaMetricsContext = {
-    val contextLabels = new util.HashMap[String, Object]
-    contextLabels.put(KAFKA_CLUSTER_ID, clusterId)
-    contextLabels.put(KAFKA_BROKER_ID, config.brokerId.toString)
-    contextLabels.putAll(config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX))
-    val metricsContext = new KafkaMetricsContext(metricsPrefix, contextLabels)
-    metricsContext
   }
 
   protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager = {
@@ -471,7 +460,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     zkClient.getClusterId.getOrElse(zkClient.createOrGetClusterId(CoreUtils.generateUuidAsBase64()))
   }
 
-  private[server] def createBrokerInfo: BrokerInfo = {
+  def createBrokerInfo: BrokerInfo = {
     val endPoints = config.advertisedListeners.map(e => s"${e.host}:${e.port}")
     zkClient.getAllBrokersInCluster.filter(_.id != config.brokerId).foreach { broker =>
       val commonEndPoints = broker.endPoints.map(e => s"${e.host}:${e.port}").intersect(endPoints)
@@ -495,7 +484,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
 
     val jmxPort = System.getProperty("com.sun.management.jmxremote.port", "-1").toInt
     BrokerInfo(
-      Broker(config.brokerId, updatedEndpoints, config.rack, SupportedFeatures.get),
+      Broker(config.brokerId, updatedEndpoints, config.rack, brokerFeatures.supportedFeatures),
       config.interBrokerProtocolVersion,
       jmxPort)
   }
@@ -751,7 +740,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     }
     catch {
       case e: Throwable =>
-        fatal("Fatal error during KafkaServer shutdown.", e)
+        fatal("Fatal error during KafkaBroker shutdown.", e)
         isShuttingDown.set(false)
         throw e
     }
@@ -774,18 +763,18 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
    *
    * @return A 2-tuple containing the brokerMetadata and a sequence of offline log directories.
    */
-  private def getBrokerMetadataAndOfflineDirs: (BrokerMetadata, Seq[String]) = {
-    val brokerMetadataMap = mutable.HashMap[String, BrokerMetadata]()
-    val brokerMetadataSet = mutable.HashSet[BrokerMetadata]()
+  private def getBrokerMetadataAndOfflineDirs: (LegacyMetaProperties, Seq[String]) = {
+    val brokerMetadataMap = mutable.HashMap[String, LegacyMetaProperties]()
+    val brokerMetadataSet = mutable.HashSet[LegacyMetaProperties]()
     val offlineDirs = mutable.ArrayBuffer.empty[String]
 
     for (logDir <- config.logDirs) {
       try {
-        val brokerMetadataOpt = brokerMetadataCheckpoints(logDir).read()
-        brokerMetadataOpt.foreach { brokerMetadata =>
+        brokerMetadataCheckpoints(logDir).read().foreach(properties => {
+          val brokerMetadata = LegacyMetaProperties(properties)
           brokerMetadataMap += (logDir -> brokerMetadata)
           brokerMetadataSet += brokerMetadata
-        }
+        })
       } catch {
         case e: IOException =>
           offlineDirs += logDir
@@ -806,7 +795,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
     } else if (brokerMetadataSet.size == 1)
       (brokerMetadataSet.last, offlineDirs)
     else
-      (BrokerMetadata(-1, None), offlineDirs)
+      (LegacyMetaProperties(-1, None), offlineDirs)
   }
 
 
@@ -815,10 +804,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
    *
    * @param brokerMetadata
    */
-  private def checkpointBrokerMetadata(brokerMetadata: BrokerMetadata) = {
+  private def checkpointBrokerMetadata(brokerMetadata: LegacyMetaProperties) = {
     for (logDir <- config.logDirs if logManager.isLogDirOnline(new File(logDir).getAbsolutePath)) {
       val checkpoint = brokerMetadataCheckpoints(logDir)
-      checkpoint.write(brokerMetadata)
+      checkpoint.write(brokerMetadata.toProperties())
     }
   }
 
@@ -832,7 +821,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
    *
    * @return The brokerId.
    */
-  private def getOrGenerateBrokerId(brokerMetadata: BrokerMetadata): Int = {
+  private def getOrGenerateBrokerId(brokerMetadata: LegacyMetaProperties): Int = {
     val brokerId = config.brokerId
 
     if (brokerId >= 0 && brokerMetadata.brokerId >= 0 && brokerMetadata.brokerId != brokerId)

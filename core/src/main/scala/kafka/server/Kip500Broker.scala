@@ -15,11 +15,18 @@
  * limitations under the License.
  */
 
-package kafka.common
+package kafka.server
+
+import kafka.metrics.KafkaMetricsReporter
+import org.apache.kafka.common.utils.Time
 
 /**
- * Thrown when a get epoch request is made for partition, but no epoch exists for that partition
+ * A KIP-500 Kafka broker.
  */
-class NoEpochForPartitionException(message: String) extends RuntimeException(message) {
-  def this() = this(null)
+class Kip500Broker(config: KafkaConfig,
+                   time: Time,
+                   threadNamePrefix: Option[String],
+                   kafkaMetricsReporters: Seq[KafkaMetricsReporter])
+                     extends KafkaBroker(config, time, threadNamePrefix,
+                       kafkaMetricsReporters) {
 }

@@ -16,12 +16,8 @@
  */
 package org.apache.kafka.streams.integration.utils;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
 import kafka.api.Request;
-import kafka.server.KafkaServer;
+import kafka.server.LegacyBroker;
 import kafka.server.MetadataCache;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
@@ -79,9 +75,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -782,7 +782,7 @@ public class IntegrationTestUtils {
     }
 
     @SuppressWarnings("WeakerAccess")
-    public static void waitForTopicPartitions(final List<KafkaServer> servers,
+    public static void waitForTopicPartitions(final List<LegacyBroker> servers,
                                               final List<TopicPartition> partitions,
                                               final long timeout) throws InterruptedException {
         final long end = System.currentTimeMillis() + timeout;
@@ -795,7 +795,7 @@ public class IntegrationTestUtils {
         }
     }
 
-    private static void waitUntilMetadataIsPropagated(final List<KafkaServer> servers,
+    private static void waitUntilMetadataIsPropagated(final List<LegacyBroker> servers,
                                                      final String topic,
                                                      final int partition,
                                                      final long timeout) throws InterruptedException {
@@ -803,10 +803,10 @@ public class IntegrationTestUtils {
             topic, partition, timeout);
 
         retryOnExceptionWithTimeout(timeout, () -> {
-            final List<KafkaServer> emptyPartitionInfos = new ArrayList<>();
-            final List<KafkaServer> invalidBrokerIds = new ArrayList<>();
+            final List<LegacyBroker> emptyPartitionInfos = new ArrayList<>();
+            final List<LegacyBroker> invalidBrokerIds = new ArrayList<>();
 
-            for (final KafkaServer server : servers) {
+            for (final LegacyBroker server : servers) {
                 final MetadataCache metadataCache = server.dataPlaneRequestProcessor().metadataCache();
                 final Option<UpdateMetadataPartitionState> partitionInfo =
                     metadataCache.getPartitionInfo(topic, partition);
@@ -1184,6 +1184,28 @@ public class IntegrationTestUtils {
             driver.cleanUp();
         }
         driver.start();
+        return driver;
+    }
+
+    public static KafkaStreams getRunningStreams(final Properties streamsConfig,
+                                                 final StreamsBuilder builder,
+                                                 final boolean clean) {
+        final KafkaStreams driver = new KafkaStreams(builder.build(), streamsConfig);
+        if (clean) {
+            driver.cleanUp();
+        }
+        final CountDownLatch latch = new CountDownLatch(1);
+        driver.setStateListener((newState, oldState) -> {
+            if (newState == State.RUNNING) {
+                latch.countDown();
+            }
+        });
+        driver.start();
+        try {
+            latch.await(DEFAULT_TIMEOUT, TimeUnit.MILLISECONDS);
+        } catch (final InterruptedException e) {
+            throw new RuntimeException("Streams didn't start in time.", e);
+        }
         return driver;
     }
 

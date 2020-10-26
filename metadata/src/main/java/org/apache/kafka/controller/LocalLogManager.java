@@ -38,7 +38,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.WatchService;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,10 +117,10 @@ public final class LocalLogManager implements MetaLogManager {
 
     /**
      * A registry for locks on paths.
-     *
+     * <p>
      * We want a lock that works in a cross-process fashion, so that multiple processes
      * on the same machine can attempt to become the leader of our file-backed mock log.
-     *
+     * <p>
      * FileChannel#lock is almost good enough to do the job on its own, but it has a
      * quirk: if two threads from the same process try to lock the same file, one of them
      * will get an OverlappingFileLockException.  This would be bad for the case where
@@ -280,9 +279,18 @@ public final class LocalLogManager implements MetaLogManager {
         }
 
         void renounce(long epoch) {
-            if (claimedEpoch == epoch) {
-                this.interrupt();
+            long curClaimedEpoch = claimedEpoch;
+            while (epoch > curClaimedEpoch) {
+                try {
+                    Thread.sleep(1);
+                } catch (InterruptedException e) {
+                    break;
+                }
+                curClaimedEpoch = claimedEpoch;
             }
+            log.info("Interrupting LeadershipClaimerThread in order to " +
+                "renounce epoch {}", curClaimedEpoch);
+            this.interrupt();
         }
 
         void beginShutdown() {
@@ -304,6 +312,8 @@ public final class LocalLogManager implements MetaLogManager {
         private final Condition wakeCond = lock.newCondition();
         private final Condition claimedCond = lock.newCondition();
         private final Condition renouncedCond = lock.newCondition();
+        private final Condition maxAllowedOffsetCond = lock.newCondition();
+        private long maxAllowedOffset = Long.MAX_VALUE;
         private final FileChannel logChannel;
         private Listener listener = null;
         private final long logCheckIntervalMs;
@@ -333,11 +343,12 @@ public final class LocalLogManager implements MetaLogManager {
             try {
                 log.debug("starting ScribeThread");
                 LeaderInfo claim = null;
+                List<ApiMessageAndVersion> toWrite = new ArrayList<>();
                 while (true) {
-                    List<ApiMessageAndVersion> toWrite = null;
                     long shouldRenounceEpoch = -1, shouldClaimEpoch = -1;
                     ScribeState curState;
                     lock.lock();
+                    long curMaxAllowedOffset = Long.MAX_VALUE;
                     try {
                         if (shuttingDown) {
                             break;
@@ -369,6 +380,9 @@ public final class LocalLogManager implements MetaLogManager {
                             nextLogCheckMs = 0;
                             renouncedCond.signalAll();
                         }
+                        while (nextReadOffset > maxAllowedOffset) {
+                            maxAllowedOffsetCond.await();
+                        }
                         if (shouldClaimEpoch == -1 && shouldRenounceEpoch == -1) {
                             switch (state) {
                                 case FOLLOWER:
@@ -390,23 +404,25 @@ public final class LocalLogManager implements MetaLogManager {
                                     // Wait to be signalled before waking up.  The signal
                                     // may indicate that we should stop being the leader,
                                     // or that there are new writes to be done.
-                                    if (incomingWrites == null && shouldLead) {
+                                    if (toWrite.isEmpty() && incomingWrites == null && shouldLead) {
                                         wakeCond.await();
                                     }
-                                    toWrite = (incomingWrites == null) ?
-                                        Collections.emptyList() : incomingWrites;
-                                    incomingWrites = null;
+                                    if (incomingWrites != null) {
+                                        toWrite.addAll(incomingWrites);
+                                        incomingWrites = null;
+                                    }
                                     break;
                             }
                         }
                         claim = null;
+                        curMaxAllowedOffset = maxAllowedOffset;
                     } finally {
                         curState = state;
                         lock.unlock();
                     }
                     if (log.isTraceEnabled()) {
                         log.trace("ScribeThread state = {}, shouldRenounceEpoch = {}, " +
-                            "shouldClaimEpoch = {}", curState, shouldRenounceEpoch,
+                                "shouldClaimEpoch = {}", curState, shouldRenounceEpoch,
                             shouldClaimEpoch);
                     }
                     if (shouldRenounceEpoch > -1L) {
@@ -422,6 +438,13 @@ public final class LocalLogManager implements MetaLogManager {
                             int result;
                             List<ApiMessage> messages = new ArrayList<>();
                             do {
+                                if (nextReadOffset > curMaxAllowedOffset) {
+                                    log.trace("ScribeThread can't read any more " +
+                                        "messages because we are at the maximum allowed " +
+                                        "offset.");
+                                    result = -1;
+                                    break;
+                                }
                                 result = readNextMessage(messages);
                                 if (log.isTraceEnabled()) {
                                     if (result < 0) {
@@ -448,15 +471,22 @@ public final class LocalLogManager implements MetaLogManager {
                             break;
                         case LEADER:
                             // Write out the messages that we were given earlier.
-                            if (toWrite != null) {
-                                List<ApiMessage> written = new ArrayList<>();
-                                for (ApiMessageAndVersion message : toWrite) {
-                                    writeMessage(message);
-                                    written.add(message.message());
-                                    nextWriteOffset++;
-                                    nextReadOffset++;
+                            if (!toWrite.isEmpty()) {
+                                if (nextReadOffset + toWrite.size() > curMaxAllowedOffset) {
+                                    log.trace("ScribeThread can't write the next batch " +
+                                        "of messages because the next offset would exceed " +
+                                        "{}.", curMaxAllowedOffset);
+                                } else {
+                                    List<ApiMessage> written = new ArrayList<>();
+                                    for (ApiMessageAndVersion message : toWrite) {
+                                        writeMessage(message);
+                                        written.add(message.message());
+                                        nextWriteOffset++;
+                                        nextReadOffset++;
+                                    }
+                                    toWrite.clear();
+                                    listener.handleCommits(nextReadOffset - 1, written);
                                 }
-                                listener.handleCommits(nextReadOffset - 1, written);
                             }
                             break;
                     }
@@ -682,6 +712,26 @@ public final class LocalLogManager implements MetaLogManager {
             }
             this.listener = listener;
         }
+
+        void setMaxAllowedOffset(long maxAllowedOffset) {
+            log.info("setting maximum allowed offset to {}.", maxAllowedOffset);
+            lock.lock();
+            try {
+                this.maxAllowedOffset = maxAllowedOffset;
+                maxAllowedOffsetCond.signal();
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        LeaderInfo leaderInfo() {
+            lock.lock();
+            try {
+                return new LeaderInfo(leaderInfo.nodeId, leaderInfo.epoch);
+            } finally {
+                lock.unlock();
+            }
+        }
     }
 
     class WatcherThread extends KafkaThread {
@@ -785,6 +835,11 @@ public final class LocalLogManager implements MetaLogManager {
         leadershipClaimerThread.beginShutdown();
     }
 
+    @Override
+    public int activeNode() {
+        return scribeThread.leaderInfo().nodeId;
+    }
+
     int nodeId() {
         return nodeId;
     }
@@ -802,5 +857,9 @@ public final class LocalLogManager implements MetaLogManager {
         Utils.closeQuietly(leadershipClaimerThread.leaderChannel, "leaderChannel");
         Utils.closeQuietly(scribeThread.logChannel, "logPath");
         Utils.closeQuietly(watcherThread.watchService, "watchService");
+    }
+
+    public void setMaxAllowedOffset(long maxAllowedOffset) {
+        scribeThread.setMaxAllowedOffset(maxAllowedOffset);
     }
 }

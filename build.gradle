@@ -241,7 +241,7 @@ subprojects {
     }
   }
 
-  def shouldUseJUnit5 = ["tools", "raft"].contains(it.project.name)
+  def shouldUseJUnit5 = ["metadata", "raft", "tools"].contains(it.project.name)
   def testLoggingEvents = ["passed", "skipped", "failed"]
   def testShowStandardStreams = false
   def testExceptionFormat = 'full'
@@ -739,6 +739,7 @@ project(':core') {
     compile project(':clients')
     compile project(':metadata')
     compile project(':raft')
+    compile libs.argparse4j
     compile libs.jacksonDatabind
     compile libs.jacksonModuleScala
     compile libs.jacksonDataformatCsv
@@ -987,8 +988,7 @@ project(':metadata') {
     compile libs.jacksonDatabind
     compile libs.jacksonJDK8Datatypes
     compileOnly libs.log4j
-    testCompile libs.junitJupiterApi
-    testCompile libs.junitVintageEngine
+    testCompile libs.junitJupiter
     testCompile libs.hamcrest
     testCompile libs.slf4jlog4j
     testCompile project(':clients').sourceSets.test.output // for org.apache.kafka.test.IntegrationTest
@@ -1259,7 +1259,7 @@ project(':raft') {
   }
 
   javadoc {
-    include "**/org/apache/kafka/raft/*"
+    enabled = false
   }
 }
 

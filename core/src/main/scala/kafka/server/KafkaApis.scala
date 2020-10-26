@@ -97,7 +97,7 @@ import kafka.coordinator.group.GroupOverview
 class KafkaApis(val requestChannel: RequestChannel,
                 val apisUtils: ApisUtils,
                 val replicaManager: ReplicaManager,
-                val adminManager: AdminManager,
+                val adminManager: LegacyAdminManager,
                 val groupCoordinator: GroupCoordinator,
                 val txnCoordinator: TransactionCoordinator,
                 val controller: KafkaController,
@@ -112,7 +112,11 @@ class KafkaApis(val requestChannel: RequestChannel,
                 brokerTopicStats: BrokerTopicStats,
                 val clusterId: String,
                 time: Time,
-                val tokenManager: DelegationTokenManager) extends ApiRequestHandler with Logging {
+                val tokenManager: DelegationTokenManager,
+                val brokerFeatures: BrokerFeatures,
+                val finalizedFeatureCache: FinalizedFeatureCache) extends ApiRequestHandler with Logging {
+
+  val apisUtils = new ApisUtils(requestChannel, authorizer, quotas, time)
 
   type FetchResponseStats = Map[TopicPartition, RecordConversionStats]
   this.logIdent = "[KafkaApi-%d] ".format(brokerId)
@@ -185,15 +189,17 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS => handleDescribeUserScramCredentialsRequest(request)
         case ApiKeys.ALTER_USER_SCRAM_CREDENTIALS => handleAlterUserScramCredentialsRequest(request)
         case ApiKeys.ALTER_ISR => handleAlterIsrRequest(request)
-
+        case ApiKeys.UPDATE_FEATURES => handleUpdateFeatures(request)
         // Until we are ready to integrate the Raft layer, these APIs are treated as
         // unexpected and we just close the connection.
         case ApiKeys.VOTE => requestChannel.closeConnection(request, util.Collections.emptyMap())
         case ApiKeys.BEGIN_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
         case ApiKeys.END_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
         case ApiKeys.DESCRIBE_QUORUM => requestChannel.closeConnection(request, util.Collections.emptyMap())
+
+        // Handle requests that should have been sent to the KIP-500 controller.
+        case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartbeat(request)
-        case ApiKeys.CONTROLLER_HEARTBEAT => handleControllerHeartbeat(request)
       }
     } catch {
       case e: FatalExitError => throw e
@@ -1007,6 +1013,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val correlationId = request.header.correlationId
     val clientId = request.header.clientId
     val offsetRequest = request.body[ListOffsetRequest]
+    val version = request.header.apiVersion
 
     def buildErrorResponse(e: Errors, partition: ListOffsetPartition): ListOffsetPartitionResponse = {
       new ListOffsetPartitionResponse()
@@ -1055,7 +1062,7 @@ class KafkaApis(val requestChannel: RequestChannel,
                   .setErrorCode(Errors.NONE.code)
                   .setTimestamp(found.timestamp)
                   .setOffset(found.offset)
-                if (found.leaderEpoch.isPresent)
+                if (found.leaderEpoch.isPresent && version >= 4)
                   partitionResponse.setLeaderEpoch(found.leaderEpoch.get)
                 partitionResponse
               case None =>
@@ -1734,20 +1741,19 @@ class KafkaApis(val requestChannel: RequestChannel,
       else if (!apiVersionRequest.isValid)
         apiVersionRequest.getErrorResponse(requestThrottleMs, Errors.INVALID_REQUEST.exception)
       else {
-        val supportedFeatures = SupportedFeatures.get
-        val finalizedFeatures = FinalizedFeatureCache.get
-        if (finalizedFeatures.isEmpty) {
-          ApiVersionsResponse.apiVersionsResponse(
-            requestThrottleMs,
-            config.interBrokerProtocolVersion.recordVersion.value,
-            supportedFeatures)
-        } else {
-          ApiVersionsResponse.apiVersionsResponse(
+        val supportedFeatures = brokerFeatures.supportedFeatures
+        val finalizedFeaturesOpt = finalizedFeatureCache.get
+        finalizedFeaturesOpt match {
+          case Some(finalizedFeatures) => ApiVersionsResponse.apiVersionsResponse(
             requestThrottleMs,
             config.interBrokerProtocolVersion.recordVersion.value,
             supportedFeatures,
-            finalizedFeatures.get.features,
-            finalizedFeatures.get.epoch)
+            finalizedFeatures.features,
+            finalizedFeatures.epoch)
+          case None => ApiVersionsResponse.apiVersionsResponse(
+            requestThrottleMs,
+            config.interBrokerProtocolVersion.recordVersion.value,
+            supportedFeatures)
         }
       }
     }
@@ -3110,32 +3116,50 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
-  def handleBrokerHeartbeat(request: RequestChannel.Request): Unit = {
-    val brokerHeartbeatRequest = request.body[BrokerHeartbeatRequest]
+  def handleUpdateFeatures(request: RequestChannel.Request): Unit = {
+    val updateFeaturesRequest = request.body[UpdateFeaturesRequest]
 
-    if (apisUtils.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
-      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-        brokerHeartbeatRequest.getErrorResponse(requestThrottleMs,
-          Errors.UNSUPPORTED_VERSION.exception))
+    def sendResponseCallback(errors: Either[ApiError, Map[String, ApiError]]): Unit = {
+      def createResponse(throttleTimeMs: Int): UpdateFeaturesResponse = {
+        errors match {
+          case Left(topLevelError) =>
+            UpdateFeaturesResponse.createWithErrors(
+              topLevelError,
+              Collections.emptyMap(),
+              throttleTimeMs)
+          case Right(featureUpdateErrors) =>
+            UpdateFeaturesResponse.createWithErrors(
+              ApiError.NONE,
+              featureUpdateErrors.asJava,
+              throttleTimeMs)
+        }
+      }
+      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs => createResponse(requestThrottleMs))
+    }
+
+    if (!apisUtils.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
+      sendResponseCallback(Left(new ApiError(Errors.CLUSTER_AUTHORIZATION_FAILED)))
+    } else if (!controller.isActive) {
+      sendResponseCallback(Left(new ApiError(Errors.NOT_CONTROLLER)))
+    } else if (!config.isFeatureVersioningSupported) {
+      sendResponseCallback(Left(new ApiError(Errors.INVALID_REQUEST, "Feature versioning system is disabled.")))
     } else {
-      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-        brokerHeartbeatRequest.getErrorResponse(requestThrottleMs,
-          Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+      controller.updateFeatures(updateFeaturesRequest, sendResponseCallback)
     }
   }
 
-  def handleControllerHeartbeat(request: RequestChannel.Request): Unit = {
-    val controllerHeartbeatRequest = request.body[ControllerHeartbeatRequest]
+  def handleBrokerRegistration(request: RequestChannel.Request): Unit = {
+    val registrationRequest = request.body[BrokerRegistrationRequest]
+    apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+      registrationRequest.getErrorResponse(requestThrottleMs,
+        Errors.NOT_CONTROLLER.exception))
+  }
 
-    if (apisUtils.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
-      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-        controllerHeartbeatRequest.getErrorResponse(requestThrottleMs,
-          Errors.UNSUPPORTED_VERSION.exception))
-    } else {
-      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-        controllerHeartbeatRequest.getErrorResponse(requestThrottleMs,
-          Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
-    }
+  def handleBrokerHeartbeat(request: RequestChannel.Request): Unit = {
+    val heartbeatRequest = request.body[BrokerHeartbeatRequest]
+    apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+      heartbeatRequest.getErrorResponse(requestThrottleMs,
+        Errors.NOT_CONTROLLER.exception))
   }
 
   // private package for testing

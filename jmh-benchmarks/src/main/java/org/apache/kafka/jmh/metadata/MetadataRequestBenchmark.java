@@ -21,15 +21,17 @@ import kafka.controller.KafkaController;
 import kafka.coordinator.group.GroupCoordinator;
 import kafka.coordinator.transaction.TransactionCoordinator;
 import kafka.network.RequestChannel;
-import kafka.server.AdminManager;
+import kafka.server.BrokerFeatures;
 import kafka.server.BrokerTopicStats;
 import kafka.server.ClientQuotaManager;
 import kafka.server.ClientRequestQuotaManager;
 import kafka.server.ControllerMutationQuotaManager;
 import kafka.server.FetchManager;
+import kafka.server.FinalizedFeatureCache;
 import kafka.server.KafkaApis;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
+import kafka.server.LegacyAdminManager;
 import kafka.server.MetadataCache;
 import kafka.server.QuotaFactory;
 import kafka.server.ReplicaManager;
@@ -94,7 +96,7 @@ public class MetadataRequestBenchmark {
     private RequestChannel.Metrics requestChannelMetrics = Mockito.mock(RequestChannel.Metrics.class);
     private ReplicaManager replicaManager = Mockito.mock(ReplicaManager.class);
     private GroupCoordinator groupCoordinator = Mockito.mock(GroupCoordinator.class);
-    private AdminManager adminManager = Mockito.mock(AdminManager.class);
+    private LegacyAdminManager adminManager = Mockito.mock(LegacyAdminManager.class);
     private TransactionCoordinator transactionCoordinator = Mockito.mock(TransactionCoordinator.class);
     private KafkaController kafkaController = Mockito.mock(KafkaController.class);
     private KafkaZkClient kafkaZkClient = Mockito.mock(KafkaZkClient.class);
@@ -166,6 +168,7 @@ public class MetadataRequestBenchmark {
         Properties kafkaProps =  new Properties();
         kafkaProps.put(KafkaConfig$.MODULE$.ZkConnectProp(), "zk");
         kafkaProps.put(KafkaConfig$.MODULE$.BrokerIdProp(), brokerId + "");
+        BrokerFeatures brokerFeatures = BrokerFeatures.createDefault();
         Time time = new SystemTime();
         return new KafkaApis(requestChannel,
             new ApisUtils(requestChannel, Option.empty(), quotaManagers, time),
@@ -185,7 +188,9 @@ public class MetadataRequestBenchmark {
             brokerTopicStats,
             "clusterId",
             time,
-            null);
+            null,
+            brokerFeatures,
+            new FinalizedFeatureCache(brokerFeatures));
     }
 
     @TearDown(Level.Trial)

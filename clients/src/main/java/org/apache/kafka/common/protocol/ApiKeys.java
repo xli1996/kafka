@@ -39,6 +39,8 @@ import org.apache.kafka.common.message.BeginQuorumEpochRequestData;
 import org.apache.kafka.common.message.BeginQuorumEpochResponseData;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerHeartbeatResponseData;
+import org.apache.kafka.common.message.BrokerRegistrationRequestData;
+import org.apache.kafka.common.message.BrokerRegistrationResponseData;
 import org.apache.kafka.common.message.ControlledShutdownRequestData;
 import org.apache.kafka.common.message.ControlledShutdownResponseData;
 import org.apache.kafka.common.message.ControllerHeartbeatRequestData;
@@ -125,6 +127,8 @@ import org.apache.kafka.common.message.SyncGroupRequestData;
 import org.apache.kafka.common.message.SyncGroupResponseData;
 import org.apache.kafka.common.message.TxnOffsetCommitRequestData;
 import org.apache.kafka.common.message.TxnOffsetCommitResponseData;
+import org.apache.kafka.common.message.UpdateFeaturesRequestData;
+import org.apache.kafka.common.message.UpdateFeaturesResponseData;
 import org.apache.kafka.common.message.UpdateMetadataRequestData;
 import org.apache.kafka.common.message.UpdateMetadataResponseData;
 import org.apache.kafka.common.message.VoteRequestData;
@@ -252,10 +256,12 @@ public enum ApiKeys {
     DESCRIBE_QUORUM(55, "DescribeQuorum", true, false,
         DescribeQuorumRequestData.SCHEMAS, DescribeQuorumResponseData.SCHEMAS),
     ALTER_ISR(56, "AlterIsr", AlterIsrRequestData.SCHEMAS, AlterIsrResponseData.SCHEMAS),
-    BROKER_HEARTBEAT(57, "BrokerHeartbeat", BrokerHeartbeatRequestData.SCHEMAS,
-            BrokerHeartbeatResponseData.SCHEMAS),
-    CONTROLLER_HEARTBEAT(58, "ControllerHeartbeat", ControllerHeartbeatRequestData.SCHEMAS,
-            ControllerHeartbeatResponseData.SCHEMAS);
+    UPDATE_FEATURES(57, "UpdateFeatures",
+        UpdateFeaturesRequestData.SCHEMAS, UpdateFeaturesResponseData.SCHEMAS),
+    BROKER_REGISTRATION(58, "BrokerRegistration", BrokerRegistrationRequestData.SCHEMAS,
+            BrokerRegistrationResponseData.SCHEMAS),
+    BROKER_HEARTBEAT(59, "BrokerHeartbeat", BrokerHeartbeatRequestData.SCHEMAS,
+            BrokerHeartbeatResponseData.SCHEMAS);
 
     private static final ApiKeys[] ID_TO_TYPE;
     private static final int MIN_API_KEY = 0;

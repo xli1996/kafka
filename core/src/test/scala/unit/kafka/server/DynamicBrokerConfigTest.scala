@@ -322,22 +322,24 @@ class DynamicBrokerConfigTest {
   def testDynamicListenerConfig(): Unit = {
     val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 9092)
     val oldConfig =  KafkaConfig.fromProps(props)
-    val kafkaServer: KafkaServer = EasyMock.createMock(classOf[kafka.server.KafkaServer])
+    val kafkaServer: LegacyBroker = EasyMock.createMock(classOf[kafka.server.LegacyBroker])
     EasyMock.expect(kafkaServer.config).andReturn(oldConfig).anyTimes()
     EasyMock.replay(kafkaServer)
 
     props.put(KafkaConfig.ListenersProp, "PLAINTEXT://hostname:9092,SASL_PLAINTEXT://hostname:9093")
-    val newConfig = KafkaConfig(props)
+    new DynamicListenerConfig(kafkaServer).validateReconfiguration(KafkaConfig(props))
 
+    // it is illegal to update non-reconfiguable configs of existent listeners
+    props.put("listener.name.plaintext.you.should.not.pass", "failure")
     val dynamicListenerConfig = new DynamicListenerConfig(kafkaServer)
-    dynamicListenerConfig.validateReconfiguration(newConfig)
+    assertThrows(classOf[ConfigException], () => dynamicListenerConfig.validateReconfiguration(KafkaConfig(props)))
   }
 
   @Test
   def testAuthorizerConfig(): Unit = {
     val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 9092)
     val oldConfig =  KafkaConfig.fromProps(props)
-    val kafkaServer: KafkaServer = EasyMock.createMock(classOf[kafka.server.KafkaServer])
+    val kafkaServer: LegacyBroker = EasyMock.createMock(classOf[kafka.server.LegacyBroker])
 
     class TestAuthorizer extends Authorizer with Reconfigurable {
       @volatile var superUsers = ""

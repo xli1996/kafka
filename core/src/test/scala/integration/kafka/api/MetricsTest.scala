@@ -15,7 +15,7 @@ package kafka.api
 import java.util.{Locale, Properties}
 
 import kafka.log.LogConfig
-import kafka.server.{KafkaConfig, KafkaServer}
+import kafka.server.{KafkaConfig, KafkaBroker}
 import kafka.utils.{JaasTestUtils, TestUtils}
 import com.yammer.metrics.core.{Gauge, Histogram, Meter}
 import kafka.metrics.KafkaYammerMetrics
@@ -26,6 +26,7 @@ import org.apache.kafka.common.config.SaslConfigs
 import org.apache.kafka.common.errors.InvalidTopicException
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
+import org.apache.kafka.common.security.authenticator.TestJaasConfig
 import org.junit.{After, Before, Test}
 import org.junit.Assert._
 import org.scalatest.Assertions.fail
@@ -113,8 +114,8 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
   // Create a producer that fails authentication to verify authentication failure metrics
   private def generateAuthenticationFailure(tp: TopicPartition): Unit = {
     val saslProps = new Properties()
-     // Temporary limit to reduce blocking before KIP-152 client-side changes are merged
-    saslProps.put(SaslConfigs.SASL_MECHANISM, "SCRAM-SHA-256")
+    saslProps.put(SaslConfigs.SASL_MECHANISM, kafkaClientSaslMechanism)
+    saslProps.put(SaslConfigs.SASL_JAAS_CONFIG, TestJaasConfig.jaasConfigProperty(kafkaClientSaslMechanism, "badUser", "badPass"))
     // Use acks=0 to verify error metric when connection is closed without a response
     val producer = TestUtils.createProducer(brokerList,
       acks = 0,
@@ -179,7 +180,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     }
   }
 
-  private def verifyBrokerAuthenticationMetrics(server: KafkaServer): Unit = {
+  private def verifyBrokerAuthenticationMetrics(server: KafkaBroker): Unit = {
     val metrics = server.metrics.metrics
     TestUtils.waitUntilTrue(() =>
       maxKafkaMetricValue("failed-authentication-total", metrics, "Broker", Some("socket-server-metrics")) > 0,
@@ -190,7 +191,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     verifyKafkaMetricRecorded("failed-authentication-total", metrics, "Broker", Some("socket-server-metrics"))
   }
 
-  private def verifyBrokerMessageConversionMetrics(server: KafkaServer, recordSize: Int, tp: TopicPartition): Unit = {
+  private def verifyBrokerMessageConversionMetrics(server: KafkaBroker, recordSize: Int, tp: TopicPartition): Unit = {
     val requestMetricsPrefix = "kafka.network:type=RequestMetrics"
     val requestBytes = verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=RequestBytes,request=Produce")
     val tempBytes = verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=TemporaryMemoryBytes,request=Produce")
@@ -206,7 +207,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     verifyYammerMetricRecorded(s"$requestMetricsPrefix,name=RequestBytes,request=Metadata")
   }
 
-  private def verifyBrokerZkMetrics(server: KafkaServer, topic: String): Unit = {
+  private def verifyBrokerZkMetrics(server: KafkaBroker, topic: String): Unit = {
     val histogram = yammerHistogram("kafka.server:type=ZooKeeperClientMetrics,name=ZooKeeperRequestLatencyMs")
     // Latency is rounded to milliseconds, so check the count instead
     val initialCount = histogram.count
@@ -220,7 +221,7 @@ class MetricsTest extends IntegrationTestHarness with SaslSetup {
     assertEquals(s"Unexpected ZK state", "CONNECTED", yammerMetricValue("SessionState"))
   }
 
-  private def verifyBrokerErrorMetrics(server: KafkaServer): Unit = {
+  private def verifyBrokerErrorMetrics(server: KafkaBroker): Unit = {
 
     def errorMetricCount = KafkaYammerMetrics.defaultRegistry.allMetrics.keySet.asScala.filter(_.getName == "ErrorsPerSec").size
 

@@ -218,16 +218,26 @@ class KafkaConfigTest {
     props.put(KafkaConfig.ZkConnectProp, "localhost:2181")
 
     // listeners with duplicate port
-    props.put(KafkaConfig.ListenersProp, "PLAINTEXT://localhost:9091,TRACE://localhost:9091")
-    assertFalse(isValidKafkaConfig(props))
+    props.put(KafkaConfig.ListenersProp, "PLAINTEXT://localhost:9091,SSL://localhost:9091")
+    var caught = intercept[IllegalArgumentException] { KafkaConfig.fromProps(props) }
+    assertTrue(caught.getMessage.contains("Each listener must have a different port"))
 
-    // listeners with duplicate protocol
+    // listeners with duplicate name
     props.put(KafkaConfig.ListenersProp, "PLAINTEXT://localhost:9091,PLAINTEXT://localhost:9092")
-    assertFalse(isValidKafkaConfig(props))
+    caught = intercept[IllegalArgumentException] { KafkaConfig.fromProps(props) }
+    assertTrue(caught.getMessage.contains("Each listener must have a different name"))
 
-    // advertised listeners with duplicate port
-    props.put(KafkaConfig.AdvertisedListenersProp, "PLAINTEXT://localhost:9091,TRACE://localhost:9091")
-    assertFalse(isValidKafkaConfig(props))
+    // advertised listeners can have duplicate ports
+    props.put(KafkaConfig.ListenerSecurityProtocolMapProp, "HOST:SASL_SSL,LB:SASL_SSL")
+    props.put(KafkaConfig.InterBrokerListenerNameProp, "HOST")
+    props.put(KafkaConfig.ListenersProp, "HOST://localhost:9091,LB://localhost:9092")
+    props.put(KafkaConfig.AdvertisedListenersProp, "HOST://localhost:9091,LB://localhost:9091")
+    assertTrue(isValidKafkaConfig(props))
+
+    // but not duplicate names
+    props.put(KafkaConfig.AdvertisedListenersProp, "HOST://localhost:9091,HOST://localhost:9091")
+    caught = intercept[IllegalArgumentException] { KafkaConfig.fromProps(props) }
+    assertTrue(caught.getMessage.contains("Each listener must have a different name"))
   }
 
   @Test
@@ -567,9 +577,12 @@ class KafkaConfigTest {
     val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 8181)
     props.put(KafkaConfig.ListenersProp, "TRACE://localhost:9091,SSL://localhost:9093")
     props.put(KafkaConfig.AdvertisedListenersProp, "PLAINTEXT://localhost:9092")
-    intercept[IllegalArgumentException] {
-      KafkaConfig.fromProps(props)
-    }
+    var caught = intercept[IllegalArgumentException] { KafkaConfig.fromProps(props) }
+    assertTrue(caught.getMessage.contains("No security protocol defined for listener TRACE"))
+
+    props.put(KafkaConfig.ListenerSecurityProtocolMapProp, "PLAINTEXT:PLAINTEXT,TRACE:PLAINTEXT,SSL:SSL")
+    caught = intercept[IllegalArgumentException] { KafkaConfig.fromProps(props) }
+    assertTrue(caught.getMessage.contains("advertised.listeners listener names must be equal to or a subset of the ones defined in listeners"))
   }
 
   @Test
@@ -642,6 +655,8 @@ class KafkaConfigTest {
         case KafkaConfig.ConnectionSetupTimeoutMaxMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
         case KafkaConfig.ProcessRolesProp => // ignore string
         case KafkaConfig.ControllerConnectProp => // ignore string
+        case KafkaConfig.RegistrationHeartbeatIntervalMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
+        case KafkaConfig.RegistrationLeaseTimeoutMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
 
         case KafkaConfig.AuthorizerClassNameProp => //ignore string
         case KafkaConfig.CreateTopicPolicyClassNameProp => //ignore string
@@ -661,6 +676,7 @@ class KafkaConfigTest {
         case KafkaConfig.NumPartitionsProp => assertPropertyInvalid(baseProperties, name, "not_a_number", "0")
         case KafkaConfig.LogDirsProp => // ignore string
         case KafkaConfig.LogDirProp => // ignore string
+        case KafkaConfig.MetadataLogDirProp => // ignore string
         case KafkaConfig.LogSegmentBytesProp => assertPropertyInvalid(baseProperties, name, "not_a_number", Records.LOG_OVERHEAD - 1)
 
         case KafkaConfig.LogRollTimeMillisProp => assertPropertyInvalid(baseProperties, name, "not_a_number", "0")
@@ -754,9 +770,12 @@ class KafkaConfigTest {
         case KafkaConfig.SslKeystoreLocationProp => // ignore string
         case KafkaConfig.SslKeystorePasswordProp => // ignore string
         case KafkaConfig.SslKeyPasswordProp => // ignore string
+        case KafkaConfig.SslKeystoreCertificateChainProp => // ignore string
+        case KafkaConfig.SslKeystoreKeyProp => // ignore string
         case KafkaConfig.SslTruststoreTypeProp => // ignore string
         case KafkaConfig.SslTruststorePasswordProp => // ignore string
         case KafkaConfig.SslTruststoreLocationProp => // ignore string
+        case KafkaConfig.SslTruststoreCertificatesProp => // ignore string
         case KafkaConfig.SslKeyManagerAlgorithmProp =>
         case KafkaConfig.SslTrustManagerAlgorithmProp =>
         case KafkaConfig.SslClientAuthProp => // ignore string
@@ -964,8 +983,12 @@ class KafkaConfigTest {
     values.foreach((value) => {
       val props = validRequiredProps
       props.setProperty(name, value.toString)
-      intercept[Exception] {
-        KafkaConfig.fromProps(props)
+      try {
+        intercept[Exception] {
+          KafkaConfig.fromProps(props)
+        }
+      } catch {
+        case e: Throwable => throw new RuntimeException(s"error handling propert $name", e)
       }
     })
   }

@@ -87,7 +87,7 @@ class KafkaApisTest {
   private val requestChannelMetrics: RequestChannel.Metrics = EasyMock.createNiceMock(classOf[RequestChannel.Metrics])
   private val replicaManager: ReplicaManager = EasyMock.createNiceMock(classOf[ReplicaManager])
   private val groupCoordinator: GroupCoordinator = EasyMock.createNiceMock(classOf[GroupCoordinator])
-  private val adminManager: AdminManager = EasyMock.createNiceMock(classOf[AdminManager])
+  private val adminManager: LegacyAdminManager = EasyMock.createNiceMock(classOf[LegacyAdminManager])
   private val txnCoordinator: TransactionCoordinator = EasyMock.createNiceMock(classOf[TransactionCoordinator])
   private val controller: KafkaController = EasyMock.createNiceMock(classOf[KafkaController])
   private val zkClient: KafkaZkClient = EasyMock.createNiceMock(classOf[KafkaZkClient])
@@ -115,6 +115,8 @@ class KafkaApisTest {
 
   def createKafkaApis(interBrokerProtocolVersion: ApiVersion = ApiVersion.latestVersion,
                       authorizer: Option[Authorizer] = None): KafkaApis = {
+    val brokerFeatures = BrokerFeatures.createDefault()
+    val cache = new FinalizedFeatureCache(brokerFeatures)
     val properties = TestUtils.createBrokerConfig(brokerId, "zk")
     properties.put(KafkaConfig.InterBrokerProtocolVersionProp, interBrokerProtocolVersion.toString)
     properties.put(KafkaConfig.LogMessageFormatVersionProp, interBrokerProtocolVersion.toString)
@@ -136,8 +138,9 @@ class KafkaApisTest {
       brokerTopicStats,
       clusterId,
       time,
-      null
-    )
+      null,
+      brokerFeatures,
+      cache)
   }
 
   @Test

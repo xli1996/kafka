@@ -57,10 +57,10 @@ import org.apache.kafka.common.utils.Sanitizer
 import scala.collection.{Map, mutable, _}
 import scala.jdk.CollectionConverters._
 
-class AdminManager(val config: KafkaConfig,
-                   val metrics: Metrics,
-                   val metadataCache: MetadataCache,
-                   val zkClient: KafkaZkClient) extends Logging with KafkaMetricsGroup {
+class LegacyAdminManager(val config: KafkaConfig,
+                         val metrics: Metrics,
+                         val metadataCache: MetadataCache,
+                         val zkClient: KafkaZkClient) extends Logging with KafkaMetricsGroup {
 
   this.logIdent = "[Admin Manager on Broker " + config.brokerId + "]: "
 
@@ -116,7 +116,7 @@ class AdminManager(val config: KafkaConfig,
                                               configs: Properties,
                                               assignments: Map[Int, Seq[Int]]): Unit = {
     metadataAndConfigs.get(topicName).foreach { result =>
-      val logConfig = LogConfig.fromProps(KafkaServer.copyKafkaConfigToLog(config), configs)
+      val logConfig = LogConfig.fromProps(KafkaBroker.copyKafkaConfigToLog(config), configs)
       val createEntry = createTopicConfigEntry(logConfig, configs, includeSynonyms = false, includeDocumentation = false)(_, _)
       val topicConfigs = logConfig.values.asScala.map { case (k, v) =>
         val entry = createEntry(k, v)
@@ -410,7 +410,7 @@ class AdminManager(val config: KafkaConfig,
             if (metadataCache.contains(topic)) {
               // Consider optimizing this by caching the configs or retrieving them from the `Log` when possible
               val topicProps = adminZkClient.fetchEntityConfig(ConfigType.Topic, topic)
-              val logConfig = LogConfig.fromProps(KafkaServer.copyKafkaConfigToLog(config), topicProps)
+              val logConfig = LogConfig.fromProps(KafkaBroker.copyKafkaConfigToLog(config), topicProps)
               createResponseConfig(allConfigs(logConfig), createTopicConfigEntry(logConfig, topicProps, includeSynonyms, includeDocumentation))
             } else {
               new DescribeConfigsResponseData.DescribeConfigsResult().setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code)
@@ -764,7 +764,7 @@ class AdminManager(val config: KafkaConfig,
     val source = if (allSynonyms.isEmpty) ConfigSource.DEFAULT_CONFIG.id else allSynonyms.head.source
     val synonyms = if (!includeSynonyms) List.empty else allSynonyms
     val dataType = configResponseType(configEntryType)
-    val configDocumentation = if (includeDocumentation) brokerDocumentation(name) else null
+    val configDocumentation = if (includeDocumentation) logConfig.documentationOf(name) else null
     new DescribeConfigsResponseData.DescribeConfigsResourceResult()
       .setName(name).setValue(valueAsString).setConfigSource(source)
       .setIsSensitive(isSensitive).setReadOnly(false).setSynonyms(synonyms.asJava)

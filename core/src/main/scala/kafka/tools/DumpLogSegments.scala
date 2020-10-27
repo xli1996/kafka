@@ -19,6 +19,7 @@ package kafka.tools
 
 import java.io._
 
+import com.fasterxml.jackson.databind.node.{JsonNodeFactory, ObjectNode, TextNode}
 import kafka.coordinator.group.GroupMetadataManager
 import kafka.coordinator.transaction.TransactionLog
 import kafka.log._
@@ -26,7 +27,7 @@ import kafka.serializer.Decoder
 import kafka.utils._
 import kafka.utils.Implicits._
 import org.apache.kafka.common.metadata.{AccessControlRecord, AccessControlRecordJsonConverter, BrokerRecord, BrokerRecordJsonConverter, ConfigRecord, ConfigRecordJsonConverter, FenceBrokerRecord, FenceBrokerRecordJsonConverter, IsrChangeRecord, IsrChangeRecordJsonConverter, MetadataRecordType, PartitionRecord, PartitionRecordJsonConverter, TopicRecord, TopicRecordJsonConverter}
-import org.apache.kafka.common.protocol.{ApiMessage, ByteBufferAccessor}
+import org.apache.kafka.common.protocol.ByteBufferAccessor
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.Utils
 
@@ -377,23 +378,36 @@ object DumpLogSegments {
 
   private class MetadataLogMessageParser extends MessageParser[String, String] {
     override def parse(record: Record): (Option[String], Option[String]) = {
+      // Per KIP-631, the value format is: int16 (api key), int16 (api version), bytes (encoded ApiMessage)
       val buf = record.value
       val apiKey = buf.getShort
       val apiVersion = buf.getShort
       val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
       val reader = new ByteBufferAccessor(buf)
       message.read(reader, apiVersion)
-      val json = apiKey match {
-        case 0 => BrokerRecordJsonConverter.write(message.asInstanceOf[BrokerRecord], apiVersion).toPrettyString
-        case 1 => TopicRecordJsonConverter.write(message.asInstanceOf[TopicRecord], apiVersion).toPrettyString
-        case 2 => PartitionRecordJsonConverter.write(message.asInstanceOf[PartitionRecord], apiVersion).toPrettyString
-        case 3 => ConfigRecordJsonConverter.write(message.asInstanceOf[ConfigRecord], apiVersion).toPrettyString
-        case 4 => IsrChangeRecordJsonConverter.write(message.asInstanceOf[IsrChangeRecord], apiVersion).toPrettyString
-        case 5 => AccessControlRecordJsonConverter.write(message.asInstanceOf[AccessControlRecord], apiVersion).toPrettyString
-        case 6 => FenceBrokerRecordJsonConverter.write(message.asInstanceOf[FenceBrokerRecord], apiVersion).toPrettyString
-        case _ => s"Unknown metadata record type $apiKey"
+      val maybeJson = apiKey match {
+        // TODO maybe move this switch into MetadataRecordType
+        case 0 => Some(BrokerRecordJsonConverter.write(message.asInstanceOf[BrokerRecord], apiVersion))
+        case 1 => Some(TopicRecordJsonConverter.write(message.asInstanceOf[TopicRecord], apiVersion))
+        case 2 => Some(PartitionRecordJsonConverter.write(message.asInstanceOf[PartitionRecord], apiVersion))
+        case 3 => Some(ConfigRecordJsonConverter.write(message.asInstanceOf[ConfigRecord], apiVersion))
+        case 4 => Some(IsrChangeRecordJsonConverter.write(message.asInstanceOf[IsrChangeRecord], apiVersion))
+        case 5 => Some(AccessControlRecordJsonConverter.write(message.asInstanceOf[AccessControlRecord], apiVersion))
+        case 6 => Some(FenceBrokerRecordJsonConverter.write(message.asInstanceOf[FenceBrokerRecord], apiVersion))
+        case _ =>
+          System.err.println(s"Unknown metadata record type $apiKey at offset ${record.offset}, skipping.")
+          None
       }
-      (None, Some(json))
+
+      val outputJson = maybeJson.map(json => {
+        val parent = new ObjectNode(JsonNodeFactory.instance)
+        parent.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
+        parent.set("data", json)
+        parent.toPrettyString
+      })
+
+      // No keys for metadata records
+      (None, outputJson)
     }
   }
 

@@ -19,7 +19,7 @@
   "name": "RemoveTopicRecord",
   "validVersions": "0",
   "fields": [
-    { "name": "Id", "type": "uuid", "versions": "0+",
+    { "name": "TopicId", "type": "uuid", "versions": "0+",
       "about": "The topic to remove. All associated partitions will be removed as well." }
   ]
 }

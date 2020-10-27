@@ -77,7 +77,7 @@ import scala.jdk.CollectionConverters._
  *
  * Appearance of PartitionRecord in the metadata log:
  *     Update metadata about the indicated topic-partition and its leader/replicas.
- *     Stop/start applicable replica fetchers.
+ *     Become leader or follower or stop replica as required.
  *
  * Appearance of UnfenceBrokerRecord in the metadata log:
  *     Mark the indicated broker as being alive.
@@ -284,6 +284,9 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     // The value is the current leader epoch, or LeaderAndIsr.EpochDuringDelete if we are no longer hosting it
     val topicPartitionsNeedingStopReplica: mutable.Map[TopicPartition, Int] = mutable.Map.empty
 
+    // Collect information about which Leader/Follower changes we need to make for the local broker
+    // and process it at the end since it requires acquisition of a write lock.
+    val topicPartitionsNeedingLeaderFollowerChanges: mutable.Map[TopicPartition, LeaderAndIsrPartitionState] = mutable.Map.empty
   }
 
   override def process(apiMessages: List[ApiMessage]): Unit = {
@@ -297,9 +300,9 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     var numBrokersFencing = 0
     var numTopicsAdding = 0
     apiMessages.foreach(msg => msg match {
-      case _ : BrokerRecord | _ : UnfenceBrokerRecord => numBrokersAdding += 1
-      case _ : FenceBrokerRecord => numBrokersFencing += 1
-      case topic : TopicRecord if !topic.deleting() => numTopicsAdding += 1
+      case _: BrokerRecord | _: UnfenceBrokerRecord => numBrokersAdding += 1
+      case _: FenceBrokerRecord => numBrokersFencing += 1
+      case topic: TopicRecord => if (!topic.deleting()) numTopicsAdding += 1
     })
 
     val mgr = MetadataMgr(numBrokersAdding, numTopicsAdding: Int, numBrokersFencing)
@@ -349,10 +352,10 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
         }
       }
     }
-    // update replicas if necessary
+    // send stop replica as required
     if (mgr.topicPartitionsNeedingStopReplica.nonEmpty) {
       val correlationId = -1 // remove after bridge release
-      val controllerId = -1 // remove after bridge release
+      val controllerId = mgr.getMetadataSnapshot().controllerId.getOrElse(-1)
       val controllerEpoch = replicaManager.controllerEpoch // requirement is it can't go backwards, so use current value
       val brokerEpoch = 0 // unused, so provide an arbitrary number
       val partitionStates: Map[TopicPartition, StopReplicaPartitionState] =
@@ -384,6 +387,23 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
         }
       }
       CoreUtils.swallow(replicaManager.getReplicaFetcherManager().shutdownIdleFetcherThreads(), this)
+    }
+    // become leader or follower as required
+    if (mgr.topicPartitionsNeedingLeaderFollowerChanges.nonEmpty) {
+      val controllerId = mgr.getMetadataSnapshot().controllerId.getOrElse(-1)
+      val controllerEpoch = replicaManager.controllerEpoch // can't go backwards, so use the current one
+      val liveLeaders: util.Collection[Node] = Collections.emptyList() // I think this is not used?
+      val leaderAndIsrRequest = new LeaderAndIsrRequest.Builder(
+        ApiKeys.LEADER_AND_ISR.latestVersion(),
+        controllerId, controllerEpoch, brokerEpoch,
+        mgr.topicPartitionsNeedingLeaderFollowerChanges.values.toList.asJava,
+        liveLeaders).build()
+      val correlationId = -1 // just pick any value
+      // no need to log results since they already get logged
+      replicaManager.becomeLeaderOrFollower(correlationId,
+        leaderAndIsrRequest,
+        OnLeadershipChange(groupCoordinator, txnCoordinator).onLeadershipChange,
+        mgr.getCurrentAliveBrokers().values.toSeq)
     }
   }
 
@@ -560,7 +580,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
    * Handle Partition Record
    *
    * Update metadata about the indicated topic-partition and its leader/replicas.
-   * Stop/start applicable replica fetchers.
+   * Become leader or follower or stop replica as required.
    *
    * @param partition the record to process
    * @param mgr the current state to use
@@ -571,17 +591,76 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       error(s"Unable to process PartitionRecord due to unknown topicId: $partition")
     } else {
       // add or update the partition info, being sure to copy the data structure first if necessary
-      MetadataCache.addOrUpdatePartitionInfo(mgr.getCopiedPartitionStates(), topicName, partition.partitionId(),
+      val partitionId = partition.partitionId()
+      MetadataCache.addOrUpdatePartitionInfo(mgr.getCopiedPartitionStates(), topicName, partitionId,
         new UpdateMetadataPartitionState()
-          .setPartitionIndex(partition.partitionId())
-          // ignore controllerEpoch?
+          .setPartitionIndex(partitionId)
+          .setControllerEpoch(replicaManager.controllerEpoch)
           .setLeader(partition.leader())
           .setLeaderEpoch(partition.leaderEpoch())
           .setIsr(partition.isr())
           .setReplicas(partition.replicas())
         // TODO: ignore offline replicas until we support the JBOD disk failure use case
       )
-      // TODO: stop/start replicas as required
+      val brokerId = kafkaConfig.brokerId
+      if (partition.removingReplicas().contains(brokerId)) {
+        // add it to the map so that we will stop the replica and delete the log directory later
+        val tp = new TopicPartition(topicName, partitionId)
+        mgr.topicPartitionsNeedingStopReplica(tp) = LeaderAndIsr.EpochDuringDelete
+        // cancel any request to become leader or follower that may have already appeared in this batch
+        mgr.topicPartitionsNeedingLeaderFollowerChanges.remove(tp)
+      } else if (partition.addingReplicas().contains(brokerId)) {
+        // schedule a change to leader or follower as required, being sure to keep any "isNew" status
+        // and remembering all the added and deleted replicas
+        // in case we are seeing this partition multiple times in the same batch
+        val tp = new TopicPartition(topicName, partitionId)
+        val currentStateChangeRequest = mgr.topicPartitionsNeedingLeaderFollowerChanges.get(tp)
+        // default is to be considered a new partition for this broker, so it's new unless it already isn't
+        val isNewPartition = currentStateChangeRequest.isEmpty || currentStateChangeRequest.get.isNew
+        val replicasAlreadyAddedInThisBatch: util.List[Integer] =
+          if (currentStateChangeRequest.isDefined) {
+            currentStateChangeRequest.get.addingReplicas()
+          } else {
+            Collections.emptyList()
+          }
+        val replicasAlreadyRemovedInThisBatch: util.List[Integer] = {
+          if (currentStateChangeRequest.isDefined) {
+            currentStateChangeRequest.get.removingReplicas()
+          } else {
+            Collections.emptyList()
+          }
+        }
+        val allReplicasAddedInThisBatch = if (replicasAlreadyRemovedInThisBatch.isEmpty) {
+          partition.addingReplicas()
+        } else {
+          val retval = new util.ArrayList[Integer](partition.addingReplicas())
+          retval.removeAll(replicasAlreadyRemovedInThisBatch)
+          retval
+        }
+        val allReplicasRemovedInThisBatch =
+          if (replicasAlreadyAddedInThisBatch.isEmpty) {
+            partition.removingReplicas()
+          } else {
+            val retval = new util.ArrayList[Integer](partition.removingReplicas())
+            retval.removeAll(replicasAlreadyAddedInThisBatch)
+            retval
+          }
+        val controllerEpoch = replicaManager.controllerEpoch // can't go backwards, so use the current one
+        mgr.topicPartitionsNeedingLeaderFollowerChanges(tp) =
+          new LeaderAndIsrPartitionState()
+            .setAddingReplicas(allReplicasAddedInThisBatch)
+            .setControllerEpoch(controllerEpoch)
+            .setIsNew(isNewPartition)
+            .setIsr(partition.isr())
+            .setLeader(partition.leader())
+            .setLeaderEpoch(partition.leaderEpoch())
+            .setPartitionIndex(partitionId)
+            .setRemovingReplicas(allReplicasRemovedInThisBatch)
+            .setReplicas(partition.replicas())
+            .setTopicName(topicName)
+        // cancel any request to remove the local replica that may have already appeared in this batch
+        mgr.topicPartitionsNeedingStopReplica.remove(tp)
+      }
     }
   }
 
@@ -595,10 +674,82 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
    * @param mgr the current state to use
    */
   private def process(isrChange: IsrChangeRecord, mgr: MetadataMgr): Unit = {
-    // TODO
+    val topicName = mgr.getCurrentTopicIdMap().get(isrChange.topicId())
+    if (topicName == null) {
+      error(s"Unable to process IsrChangeRecord due to unknown topicId: $isrChange")
+    } else {
+      // add or update the partition info, being sure to copy the data structure first if necessary
+      val partitionStates = mgr.getCopiedPartitionStates()
+      val currentPartitionStatesForTopic = partitionStates.get(topicName)
+      if (currentPartitionStatesForTopic.isEmpty) {
+        error(s"Unable to process IsrChangeRecord due to unknown partition state for topic: $isrChange")
+      } else {
+        val partitionId = isrChange.partitionId()
+        val currentPartitionState = currentPartitionStatesForTopic.get.get(partitionId)
+        if (currentPartitionState.isEmpty) {
+          error(s"Unable to process IsrChangeRecord due to unknown partition state within topic: $isrChange")
+        } else {
+          val currentLeader = currentPartitionState.get.leader()
+          val newLeader = isrChange.leader()
+          val newLeaderEpoch = isrChange.leaderEpoch()
+          val newIsr = isrChange.isr()
+          val replicas = currentPartitionState.get.replicas()
+          MetadataCache.addOrUpdatePartitionInfo(partitionStates, topicName, partitionId,
+            new UpdateMetadataPartitionState()
+              .setPartitionIndex(partitionId)
+              .setControllerEpoch(replicaManager.controllerEpoch)
+              .setLeader(newLeader)
+              .setLeaderEpoch(newLeaderEpoch)
+              .setIsr(newIsr)
+              .setReplicas(replicas)
+            // TODO: ignore offline replicas until we support the JBOD disk failure use case
+          )
+          val brokerId = kafkaConfig.brokerId
+          if (replicas.contains(brokerId)) {
+            // we only need to invoke the logic to become a leader or a follower if our role is changing
+            if (currentLeader != newLeader && (currentLeader == brokerId || newLeader == brokerId)) {
+              // schedule a change to leader or follower as required, being sure to keep any "isNew" status
+              // and remembering all the added and deleted replicas
+              // in case we are seeing this partition multiple times in the same batch
+              val tp = new TopicPartition(topicName, partitionId)
+              val currentStateChangeRequest = mgr.topicPartitionsNeedingLeaderFollowerChanges.get(tp)
+              // default is to not be considered a new partition for this broker, so it's only new if already is
+              val isNewPartition = currentStateChangeRequest.isDefined && currentStateChangeRequest.get.isNew
+              val replicasAlreadyAddedInThisBatch: util.List[Integer] =
+                if (currentStateChangeRequest.isDefined) {
+                  currentStateChangeRequest.get.addingReplicas()
+                } else {
+                  Collections.emptyList()
+                }
+              val replicasAlreadyRemovedInThisBatch: util.List[Integer] =
+                if (currentStateChangeRequest.isDefined) {
+                  currentStateChangeRequest.get.removingReplicas()
+                } else {
+                  Collections.emptyList()
+                }
+              val controllerEpoch = replicaManager.controllerEpoch // can't go backwards, so use the current one
+              mgr.topicPartitionsNeedingLeaderFollowerChanges(tp) =
+                new LeaderAndIsrPartitionState()
+                  .setAddingReplicas(replicasAlreadyAddedInThisBatch)
+                  .setControllerEpoch(controllerEpoch)
+                  .setIsNew(isNewPartition)
+                  .setIsr(newIsr)
+                  .setLeader(newLeader)
+                  .setLeaderEpoch(newLeaderEpoch)
+                  .setPartitionIndex(partitionId)
+                  .setRemovingReplicas(replicasAlreadyRemovedInThisBatch)
+                  .setReplicas(replicas)
+                  .setTopicName(topicName)
+              // cancel any request to remove the local replica that may have already appeared in this batch
+              mgr.topicPartitionsNeedingStopReplica.remove(tp)
+            }
+          }
+        }
+      }
+    }
   }
 
-    /**
+  /**
    * Handle Remove Topic Record
    *
    * Remove the Topic UUID from the metadata.
@@ -661,7 +812,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
         aliveNodesCopy.remove(brokerId)
         // no need to change the broker epoch since the existing one will be the one that is fenced
 
-        // Remove the current broker from leadership (leader will be unknown).
+        // Remove the current broker from all leadership (leader will be unknown).
         // No need to log errors since they are already logged.
         removeAllLeadershipForLocalBroker(mgr)
         metadataCache.writeState(
@@ -678,34 +829,28 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
   }
 
   private def removeAllLeadershipForLocalBroker(mgr: MetadataMgr) = {
-    val unknownLeader = -1
-    val partitionStates: util.List[LeaderAndIsrPartitionState] = new util.LinkedList()
-    mgr.getCurrentPartitionStates().values.foreach(map =>
-      map.values.foreach(partition =>
-        if (partition.leader() == kafkaConfig.brokerId) {
-          partitionStates.add(new LeaderAndIsrPartitionState()
-            .setControllerEpoch(partition.controllerEpoch())
-            .setIsNew(false)
-            .setIsr(partition.isr())
-            .setLeader(unknownLeader)
-            .setLeaderEpoch(partition.leaderEpoch())
-            .setPartitionIndex(partition.partitionIndex())
-            .setReplicas(partition.replicas())
-            .setTopicName(partition.topicName())
-          )
-        }))
-    val controllerId = mgr.getMetadataSnapshot().controllerId.getOrElse(-1)
-    val controllerEpoch = replicaManager.controllerEpoch // can't go backwards, so use the current one
-    val liveLeaders: util.Collection[Node] = Collections.emptyList()
-    val leaderAndIsrRequest = new LeaderAndIsrRequest.Builder(
-      ApiKeys.LEADER_AND_ISR.latestVersion(),
-      controllerId, controllerEpoch, brokerEpoch,
-      partitionStates,
-      liveLeaders).build()
-    val correlationId = -1 // just pick any value
-    replicaManager.becomeLeaderOrFollower(correlationId,
-      leaderAndIsrRequest,
-      OnLeadershipChange(groupCoordinator, txnCoordinator).onLeadershipChange,
-      mgr.getCopiedAliveBrokers().values.toSeq)
+    /*
+     We have to accomplish the following for each affected partition:
+
+     1) Update the metadata to set the leader to unknown
+     2) Make the broker stop accepting requests -- either consume or produce
+     3) Complete any delayed requests via replicaManager.completeDelayedFetchOrProduceRequests()
+
+     We currently have no way to accomplish (2), so this will require some more discussion.
+     One possibility is to make KafkaApis reject certain types of requests when the broker is fenced.
+
+     For now we will just do (1).
+     */
+
+    val brokerId = kafkaConfig.brokerId
+    mgr.getCopiedPartitionStates().values.foreach(map =>
+      map.values.foreach(partition => {
+        if (partition.leader() == brokerId) {
+          partition.setLeader(-1) // unknown
+        }
+      }))
+
+    // TODO: remove leadership/complete delayed requests
+    error("Do not yet know how to remove leadership")
   }
 }

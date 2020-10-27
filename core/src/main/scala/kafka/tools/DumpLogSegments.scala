@@ -25,6 +25,8 @@ import kafka.log._
 import kafka.serializer.Decoder
 import kafka.utils._
 import kafka.utils.Implicits._
+import org.apache.kafka.common.metadata.{AccessControlRecord, AccessControlRecordJsonConverter, BrokerRecord, BrokerRecordJsonConverter, ConfigRecord, ConfigRecordJsonConverter, FenceBrokerRecord, FenceBrokerRecordJsonConverter, IsrChangeRecord, IsrChangeRecordJsonConverter, MetadataRecordType, PartitionRecord, PartitionRecordJsonConverter, TopicRecord, TopicRecordJsonConverter}
+import org.apache.kafka.common.protocol.{ApiMessage, ByteBufferAccessor}
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.Utils
 
@@ -373,6 +375,28 @@ object DumpLogSegments {
     }
   }
 
+  private class MetadataLogMessageParser extends MessageParser[String, String] {
+    override def parse(record: Record): (Option[String], Option[String]) = {
+      val buf = record.value
+      val apiKey = buf.getShort
+      val apiVersion = buf.getShort
+      val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
+      val reader = new ByteBufferAccessor(buf)
+      message.read(reader, apiVersion)
+      val json = apiKey match {
+        case 0 => BrokerRecordJsonConverter.write(message.asInstanceOf[BrokerRecord], apiVersion).toPrettyString
+        case 1 => TopicRecordJsonConverter.write(message.asInstanceOf[TopicRecord], apiVersion).toPrettyString
+        case 2 => PartitionRecordJsonConverter.write(message.asInstanceOf[PartitionRecord], apiVersion).toPrettyString
+        case 3 => ConfigRecordJsonConverter.write(message.asInstanceOf[ConfigRecord], apiVersion).toPrettyString
+        case 4 => IsrChangeRecordJsonConverter.write(message.asInstanceOf[IsrChangeRecord], apiVersion).toPrettyString
+        case 5 => AccessControlRecordJsonConverter.write(message.asInstanceOf[AccessControlRecord], apiVersion).toPrettyString
+        case 6 => FenceBrokerRecordJsonConverter.write(message.asInstanceOf[FenceBrokerRecord], apiVersion).toPrettyString
+        case _ => s"Unknown metadata record type $apiKey"
+      }
+      (None, Some(json))
+    }
+  }
+
   private class DumpLogSegmentsOptions(args: Array[String]) extends CommandDefaultOptions(args) {
     val printOpt = parser.accepts("print-data-log", "if set, printing the messages content when dumping data logs. Automatically set if any decoder option is specified.")
     val verifyOpt = parser.accepts("verify-index-only", "if set, just verify the index log without printing its content.")
@@ -400,6 +424,7 @@ object DumpLogSegments {
       "__consumer_offsets topic.")
     val transactionLogOpt = parser.accepts("transaction-log-decoder", "if set, log data will be parsed as " +
       "transaction metadata from the __transaction_state topic.")
+    val metadataOpt = parser.accepts("metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
     options = parser.parse(args : _*)
 
     def messageParser: MessageParser[_, _] =
@@ -407,6 +432,8 @@ object DumpLogSegments {
         new OffsetsMessageParser
       } else if (options.has(transactionLogOpt)) {
         new TransactionLogMessageParser
+      } else if (options.has(metadataOpt)) {
+        new MetadataLogMessageParser
       } else {
         val valueDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
         val keyDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(keyDecoderOpt), new VerifiableProperties)

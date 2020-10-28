@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import com.yammer.metrics.core.{Histogram, MetricName}
 import kafka.metrics.KafkaYammerMetrics
 import kafka.server.KafkaConfig
-import kafka.server.metadata.{BrokerMetadataListener, BrokerMetadataEventProcessor, MetadataEvent, MetadataEventProcessor}
 import kafka.utils.TestUtils
 import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.MockTime
@@ -54,7 +53,7 @@ class BrokerMetadataListenerTest {
     }
 
     val time = new MockTime()
-    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, mock(classOf[BrokerMetadataEventProcessor]))
+    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, mock(classOf[BrokerMetadataProcessor]))
     brokerMetadataListener.start()
     assertTrue(allEventManagerMetrics.nonEmpty)
 
@@ -68,7 +67,7 @@ class BrokerMetadataListenerTest {
     val processedEvents = mutable.Buffer.empty[List[ApiMessage]]
     val startupEvent = List(mock(classOf[ApiMessage]), mock(classOf[ApiMessage]))
 
-    val eventProcessor = new MetadataEventProcessor {
+    val brokerMetadataProcessor = new BrokerMetadataEventProcessor {
       override def currentMetadataOffset(): Long = -1
       override def processStartup(): Unit = {
         processedEvents += startupEvent
@@ -80,7 +79,7 @@ class BrokerMetadataListenerTest {
       def process(registerLocalBrokerEvent: kafka.server.metadata.OutOfBandRegisterLocalBrokerEvent): Unit = {}
     }
 
-    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, eventProcessor)
+    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, brokerMetadataProcessor)
     brokerMetadataListener.start()
 
     val apiMessagesEvent = List(mock(classOf[ApiMessage]))
@@ -99,7 +98,7 @@ class BrokerMetadataListenerTest {
     val outOfBandFenceLocalBrokerEvent = List(mock(classOf[ApiMessage]), mock(classOf[ApiMessage]), mock(classOf[ApiMessage]))
     val countDownLatch = new CountDownLatch(1)
 
-    val eventProcessor = new MetadataEventProcessor {
+    val brokerMetadataProcessor = new BrokerMetadataEventProcessor {
       override def currentMetadataOffset(): Long = -1
       override def processStartup(): Unit = {}
       override def process(apiMessages: List[ApiMessage], lastMetadataOffset: Long): Unit = {
@@ -116,7 +115,7 @@ class BrokerMetadataListenerTest {
       }
     }
 
-    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, eventProcessor)
+    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, brokerMetadataProcessor)
     brokerMetadataListener.start()
 
     val apiMessagesEvent1 = List(mock(classOf[ApiMessage]))
@@ -143,7 +142,7 @@ class BrokerMetadataListenerTest {
     val latch = new CountDownLatch(1)
     val processedEvents = new AtomicInteger()
 
-    val eventProcessor = new MetadataEventProcessor {
+    val brokerMetadataProcessor = new BrokerMetadataEventProcessor {
       override def currentMetadataOffset(): Long = -1
       override def processStartup(): Unit = {}
       override def process(apiMessages: List[ApiMessage], lastMetadataOffset: Long): Unit = {
@@ -160,7 +159,7 @@ class BrokerMetadataListenerTest {
       k.getMBeanName == metricName
     }.values.isEmpty)
 
-    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, eventProcessor)
+    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, brokerMetadataProcessor)
     brokerMetadataListener.start()
 
     val apiMessagesEvent = List(mock(classOf[ApiMessage]))
@@ -186,7 +185,7 @@ class BrokerMetadataListenerTest {
     val time = new MockTime()
     val processedEvents = new AtomicInteger()
 
-    val eventProcessor = new MetadataEventProcessor {
+    val brokerMetadataProcessor = new BrokerMetadataEventProcessor {
       override def currentMetadataOffset(): Long = -1
       override def processStartup(): Unit = {}
       override def process(apiMessages: List[ApiMessage], lastMetadataOffset: Long): Unit = {
@@ -196,7 +195,7 @@ class BrokerMetadataListenerTest {
       def process(registerLocalBrokerEvent: kafka.server.metadata.OutOfBandRegisterLocalBrokerEvent): Unit = {}
     }
 
-    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, eventProcessor,
+    brokerMetadataListener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), time, brokerMetadataProcessor,
     1) // set short timeout so we don't have to wait too long for success
     brokerMetadataListener.start()
 

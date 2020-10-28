@@ -25,7 +25,7 @@ import org.mockito.Mockito.mock
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-class BrokerMetadataEventProcessorTest {
+class BrokerMetadataProcessorTest {
   val initialMetadataOffset = -1
   val processor1Key = "processor1"
   val processor2Key = "processor2"
@@ -41,17 +41,17 @@ class BrokerMetadataEventProcessorTest {
       outOfBandRegisterLocalBrokerInvocations.put(key, ListBuffer.empty)
       outOfbandFenceLocalBrokerInvocations.put(key, ListBuffer.empty)
     })
-    BrokerMetadataEventProcessor.currentMetadataOffset = initialMetadataOffset
+    BrokerMetadataProcessor.currentMetadataOffset = initialMetadataOffset
   }
 
   @Test(expected = classOf[IllegalArgumentException])
   def testEmptyApiMessageProcessors(): Unit = {
-    new BrokerMetadataEventProcessor(List.empty)
+    new BrokerMetadataProcessor(List.empty)
   }
 
   @Test
   def testInitialAndSubsequentMetadataOffsets(): Unit = {
-    val processor = new BrokerMetadataEventProcessor(allProcessorsCountInvocations(processorKeys))
+    val processor = new BrokerMetadataProcessor(allProcessorsCountInvocations(processorKeys))
     assertEquals(initialMetadataOffset, processor.currentMetadataOffset())
 
     val nextMetadataOffset = initialMetadataOffset + 2
@@ -74,7 +74,7 @@ class BrokerMetadataEventProcessorTest {
 
   @Test
   def testOutOfBandHeartbeatMessages(): Unit = {
-    val processor = new BrokerMetadataEventProcessor(allProcessorsCountInvocations(processorKeys))
+    val processor = new BrokerMetadataProcessor(allProcessorsCountInvocations(processorKeys))
     assertEquals(initialMetadataOffset, processor.currentMetadataOffset())
 
     val msg0 = OutOfBandRegisterLocalBrokerEvent(1)
@@ -97,7 +97,7 @@ class BrokerMetadataEventProcessorTest {
 
   @Test
   def testBadMetadataOffsets(): Unit = {
-    val processor = new BrokerMetadataEventProcessor(allProcessorsCountInvocations(processorKeys))
+    val processor = new BrokerMetadataProcessor(allProcessorsCountInvocations(processorKeys))
 
     val nextMetadataOffset = processor.currentMetadataOffset() - 1 // too low
     val msg0 = mock(classOf[ApiMessage])

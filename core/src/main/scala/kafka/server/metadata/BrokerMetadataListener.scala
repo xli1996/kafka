@@ -83,7 +83,7 @@ class QueuedEvent(val event: BrokerMetadataEvent, val enqueueTimeMs: Long) {
   }
 }
 
-trait MetadataEventProcessor {
+trait BrokerMetadataEventProcessor {
   def currentMetadataOffset(): Long
   def processStartup(): Unit
   def process(apiMessages: List[ApiMessage], lastMetadataOffset: Long): Unit
@@ -93,7 +93,7 @@ trait MetadataEventProcessor {
 
 class BrokerMetadataListener(config: KafkaConfig,
                              time: Time,
-                             processor: MetadataEventProcessor,
+                             processor: BrokerMetadataEventProcessor,
                              eventQueueTimeHistogramTimeoutMs: Long = 300000) extends KafkaMetricsGroup {
 
   private val blockingQueue = new LinkedBlockingQueue[QueuedEvent]

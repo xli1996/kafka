@@ -33,7 +33,7 @@ import kafka.log.{LogConfig, LogManager}
 import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter, KafkaYammerMetrics, LinuxIoMetricsCollector}
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
-import kafka.server.metadata.{BrokerMetadataListener, BrokerMetadataEventProcessor}
+import kafka.server.metadata.{BrokerMetadataListener, BrokerMetadataProcessor}
 import kafka.utils._
 import kafka.zk.{BrokerInfo, KafkaZkClient}
 import org.apache.kafka.clients.{ApiVersions, ClientDnsLookup, CommonClientConfigs, ManualMetadataUpdater, NetworkClient, NetworkClientUtils}
@@ -349,7 +349,7 @@ abstract class KafkaBroker(val config: KafkaConfig,
 
         brokerMetadataListener = new BrokerMetadataListener(
           config, time,
-          new BrokerMetadataEventProcessor(BrokerMetadataEventProcessor.defaultProcessors(
+          new BrokerMetadataProcessor(BrokerMetadataProcessor.defaultProcessors(
             config, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator)))
         brokerMetadataListener.start()
 

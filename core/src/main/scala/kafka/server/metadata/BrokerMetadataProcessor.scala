@@ -50,7 +50,7 @@ trait ApiMessageProcessor {
   def process(fencerLocalBrokerEvent: OutOfBandFenceLocalBrokerEvent): Unit
 }
 
-object BrokerMetadataEventProcessor {
+object BrokerMetadataProcessor {
   // visible for testing
   @volatile private[metadata] var currentMetadataOffset: Long = -1
 
@@ -66,13 +66,13 @@ object BrokerMetadataEventProcessor {
   }
 }
 
-class BrokerMetadataEventProcessor(processors: List[ApiMessageProcessor])
-  extends MetadataEventProcessor with Logging {
+class BrokerMetadataProcessor(processors: List[ApiMessageProcessor])
+  extends BrokerMetadataEventProcessor with Logging {
   if (processors.isEmpty) {
     throw new IllegalArgumentException(s"Empty ApiMessageProcessor list!")
   }
 
-  override def currentMetadataOffset(): Long = BrokerMetadataEventProcessor.currentMetadataOffset
+  override def currentMetadataOffset(): Long = BrokerMetadataProcessor.currentMetadataOffset
 
   override def processStartup(): Unit = {}
 
@@ -105,7 +105,7 @@ class BrokerMetadataEventProcessor(processors: List[ApiMessageProcessor])
       if (isTraceEnabled) {
         trace(s"Setting current metadata offset to $lastMetadataOffset after handling metadata messages: $apiMessages")
       }
-      BrokerMetadataEventProcessor.currentMetadataOffset = lastMetadataOffset
+      BrokerMetadataProcessor.currentMetadataOffset = lastMetadataOffset
     } catch {
       case e: FatalExitError => throw e
       case e: Exception => error(s"Error when handling metadata messages: $apiMessages", e)

@@ -24,7 +24,7 @@ import kafka.api.LeaderAndIsr
 import kafka.cluster.{Broker, EndPoint}
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
-import kafka.server.{KafkaConfig, MetadataCache, MetadataSnapshot, OnLeadershipChange, QuotaFactory, ReplicaManager}
+import kafka.server.{ApisUtils, KafkaConfig, MetadataCache, MetadataSnapshot, QuotaFactory, ReplicaManager}
 import kafka.utils.Implicits.MapExtensionMethods
 import kafka.utils.{CoreUtils, Logging}
 import org.apache.kafka.common.internals.Topic
@@ -67,8 +67,8 @@ import scala.jdk.CollectionConverters._
  * Appearance of TopicRecord in the metadata log with Delete=false
  *     Create the topic in the metadata with no partitions (yet)
  *
- * Appearance of ConfigRecord in the metadata log for a topic:
- *     TODO
+ * Appearance of ConfigRecord in the metadata log
+ *     Update config as indicated
  *
  * Appearance of TopicRecord in the metadata log with Delete=true
  *     Remove all topic-partitions for the indicated topic from the metadata.
@@ -105,9 +105,13 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  quotaManagers: QuotaFactory.QuotaManagers,
                                  replicaManager: ReplicaManager,
                                  txnCoordinator: TransactionCoordinator) extends ApiMessageProcessor with Logging {
+  // used only for onLeadershipChange()
+  private val apisUtils = new ApisUtils(null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
+
   // visible for testing
   private[metadata] var brokerEpoch: Long = -1
 
+  // visible for testing
   private[metadata] object MetadataMgr {
     def apply() =
       new MetadataMgr(0, 0, 0)
@@ -115,6 +119,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       new MetadataMgr(numBrokersAdding, numTopicsAdding, numBrokersFencing)
   }
 
+  // visible for testing
   private[metadata] class MetadataMgr(numBrokersAdding : Int, numTopicsAdding: Int, numBrokersFencing: Int) {
     // define functions to retrieve and copy stuff on-demand
     private var metadataSnapshot: Option[MetadataSnapshot] = None
@@ -308,15 +313,20 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     val mgr = MetadataMgr(numBrokersAdding, numTopicsAdding: Int, numBrokersFencing)
 
     // Iterate over all messages again to process them
-    apiMessages.foreach(msg => msg match {
-      case brokerRecord: BrokerRecord => process(brokerRecord, mgr)
-      case fenceBroker: FenceBrokerRecord => process(fenceBroker, mgr)
-      case unfenceBroker: UnfenceBrokerRecord => process(unfenceBroker, mgr)
-      case topicRecord: TopicRecord => process(topicRecord, mgr)
-      case removeTopicRecord: RemoveTopicRecord => process(removeTopicRecord, mgr)
-      case partitionRecord: PartitionRecord => process(partitionRecord, mgr)
-      case isrChangeRecord: IsrChangeRecord => process(isrChangeRecord, mgr)
-    })
+    apiMessages.foreach(msg =>
+      try {
+        msg match {
+          case brokerRecord: BrokerRecord => process(brokerRecord, mgr)
+          case fenceBroker: FenceBrokerRecord => process(fenceBroker, mgr)
+          case unfenceBroker: UnfenceBrokerRecord => process(unfenceBroker, mgr)
+          case topicRecord: TopicRecord => process(topicRecord, mgr)
+          case removeTopicRecord: RemoveTopicRecord => process(removeTopicRecord, mgr)
+          case partitionRecord: PartitionRecord => process(partitionRecord, mgr)
+          case isrChangeRecord: IsrChangeRecord => process(isrChangeRecord, mgr)
+        }
+      } catch {
+        case e: Exception => error(s"Uncaught error processing metadata message: $msg", e)
+      })
     // We're done iterating through the batch and applying messages as required to data structure copies
     // (which may or may not have caused any changes).
     // Apply any changes we've made and perform any additional logging or notification as necessary
@@ -402,7 +412,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       // no need to log results since they already get logged
       replicaManager.becomeLeaderOrFollower(correlationId,
         leaderAndIsrRequest,
-        OnLeadershipChange(groupCoordinator, txnCoordinator).onLeadershipChange,
+        apisUtils.onLeadershipChange,
         mgr.getCurrentAliveBrokers().values.toSeq)
     }
   }

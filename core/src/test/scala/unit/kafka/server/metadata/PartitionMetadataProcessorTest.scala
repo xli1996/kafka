@@ -34,6 +34,7 @@ import org.junit.Assert.{assertEquals, assertFalse, assertTrue}
 import org.junit.Test
 import org.mockito.ArgumentMatchers
 import org.mockito.Mockito.{mock, times, verify, when}
+import org.scalatest.Matchers.assertThrows
 
 import scala.collection.mutable
 
@@ -204,12 +205,12 @@ class PartitionMetadataProcessorTest {
     assertEquals(brokerEpoch, processor.MetadataMgr().getCurrentBrokerEpochs().get(0).get)
   }
 
-  @Test(expected = classOf[IllegalArgumentException])
+  @Test
   def testDisallowChangeBrokerEpoch(): Unit = {
     val processor = createSimpleProcessor()
     val brokerEpoch = 1
     processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch))
-    processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch + 1)) // should be disallowed
+    assertThrows[IllegalArgumentException] { processor.process(OutOfBandRegisterLocalBrokerEvent(brokerEpoch + 1)) }
   }
 
   @Test(expected = classOf[IllegalArgumentException])

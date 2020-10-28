@@ -403,7 +403,7 @@ object DumpLogSegments {
         val parent = new ObjectNode(JsonNodeFactory.instance)
         parent.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
         parent.set("data", json)
-        parent.toPrettyString
+        parent.toString
       })
 
       // No keys for metadata records
@@ -457,6 +457,7 @@ object DumpLogSegments {
     lazy val shouldPrintDataLog: Boolean = options.has(printOpt) ||
       options.has(offsetsOpt) ||
       options.has(transactionLogOpt) ||
+      options.has(metadataOpt) ||
       options.has(valueDecoderOpt) ||
       options.has(keyDecoderOpt)
 

@@ -33,7 +33,7 @@ import kafka.log.{LogConfig, LogManager}
 import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter, KafkaYammerMetrics, LinuxIoMetricsCollector}
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
-import kafka.server.metadata.{BrokerMetadataEventManager, BrokerMetadataEventProcessor}
+import kafka.server.metadata.{BrokerMetadataListener, BrokerMetadataEventProcessor}
 import kafka.utils._
 import kafka.zk.{BrokerInfo, KafkaZkClient}
 import org.apache.kafka.clients.{ApiVersions, ClientDnsLookup, CommonClientConfigs, ManualMetadataUpdater, NetworkClient, NetworkClientUtils}
@@ -179,7 +179,7 @@ abstract class KafkaBroker(val config: KafkaConfig,
 
   var kafkaController: KafkaController = null
 
-  var metadataEventManager: BrokerMetadataEventManager = null
+  var brokerMetadataListener: BrokerMetadataListener = null
 
   var brokerToControllerChannelManager: BrokerToControllerChannelManager = null
 
@@ -347,11 +347,11 @@ abstract class KafkaBroker(val config: KafkaConfig,
         transactionCoordinator = TransactionCoordinator(config, replicaManager, new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"), zkClient, metrics, metadataCache, Time.SYSTEM)
         transactionCoordinator.startup()
 
-        metadataEventManager = new BrokerMetadataEventManager(
+        brokerMetadataListener = new BrokerMetadataListener(
           config, time,
           new BrokerMetadataEventProcessor(BrokerMetadataEventProcessor.defaultProcessors(
             config, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator)))
-        metadataEventManager.start()
+        brokerMetadataListener.start()
 
         /* Get the authorizer and initialize it if one is specified.*/
         authorizer = config.authorizer
@@ -674,8 +674,8 @@ abstract class KafkaBroker(val config: KafkaConfig,
         CoreUtils.swallow(controlledShutdown(), this)
         brokerState.newState(BrokerShuttingDown)
 
-        if (metadataEventManager != null)
-          metadataEventManager.close()
+        if (brokerMetadataListener != null)
+          brokerMetadataListener.close()
 
         if (dynamicConfigManager != null)
           CoreUtils.swallow(dynamicConfigManager.shutdown(), this)

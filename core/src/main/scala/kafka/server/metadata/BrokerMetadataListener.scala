@@ -26,9 +26,9 @@ import kafka.utils.ShutdownableThread
 import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.Time
 
-object BrokerMetadataEventManager {
-  val BrokerMetadataEventThreadNamePrefix = "broker-"
-  val BrokerMetadataEventThreadNameSuffix = "-metadata-event-thread"
+object BrokerMetadataListener {
+  val ThreadNamePrefix = "broker-"
+  val ThreadNameSuffix = "-metadata-event-thread"
   val EventQueueTimeMetricName = "EventQueueTimeMs"
   val EventQueueSizeMetricName = "EventQueueSize"
 }
@@ -91,10 +91,10 @@ trait MetadataEventProcessor {
   def process(fenceLocalBrokerEvent: OutOfBandFenceLocalBrokerEvent): Unit
 }
 
-class BrokerMetadataEventManager(config: KafkaConfig,
-                                 time: Time,
-                                 processor: MetadataEventProcessor,
-                                 eventQueueTimeHistogramTimeoutMs: Long = 300000) extends KafkaMetricsGroup {
+class BrokerMetadataListener(config: KafkaConfig,
+                             time: Time,
+                             processor: MetadataEventProcessor,
+                             eventQueueTimeHistogramTimeoutMs: Long = 300000) extends KafkaMetricsGroup {
 
   private val blockingQueue = new LinkedBlockingQueue[QueuedEvent]
   private val bufferQueue: util.Queue[QueuedEvent] = new util.ArrayDeque[QueuedEvent]
@@ -102,11 +102,11 @@ class BrokerMetadataEventManager(config: KafkaConfig,
   @volatile private var totalQueueSize: Int = 0
 
   private val thread = new BrokerMetadataEventThread(
-    s"${BrokerMetadataEventManager.BrokerMetadataEventThreadNamePrefix}${config.brokerId}${BrokerMetadataEventManager.BrokerMetadataEventThreadNameSuffix}")
+    s"${BrokerMetadataListener.ThreadNamePrefix}${config.brokerId}${BrokerMetadataListener.ThreadNameSuffix}")
 
   // metrics
-  private val eventQueueTimeHist = newHistogram(BrokerMetadataEventManager.EventQueueTimeMetricName)
-  newGauge(BrokerMetadataEventManager.EventQueueSizeMetricName, () => totalQueueSize)
+  private val eventQueueTimeHist = newHistogram(BrokerMetadataListener.EventQueueTimeMetricName)
+  newGauge(BrokerMetadataListener.EventQueueSizeMetricName, () => totalQueueSize)
 
   def start(): Unit = {
     put(StartupEvent)
@@ -119,8 +119,8 @@ class BrokerMetadataEventManager(config: KafkaConfig,
       put(WakeupEvent) // wake up the thread in case it is blocked on queue.take()
       thread.awaitShutdown()
     } finally {
-      removeMetric(BrokerMetadataEventManager.EventQueueTimeMetricName)
-      removeMetric(BrokerMetadataEventManager.EventQueueSizeMetricName)
+      removeMetric(BrokerMetadataListener.EventQueueTimeMetricName)
+      removeMetric(BrokerMetadataListener.EventQueueSizeMetricName)
     }
   }
 

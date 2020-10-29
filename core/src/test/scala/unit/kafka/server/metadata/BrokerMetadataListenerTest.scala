@@ -113,7 +113,7 @@ class BrokerMetadataListenerTest {
 
     listener.put(MetadataLogEvent(metadataLogEventIndicator, 1))
     TestUtils.waitUntilTrue(() => processedEvents.size == 2,
-      "Failed to process expected event before timing out", 5000)
+      s"Failed to process expected event before timing out; processed events = ${processedEvents.size}", 5000)
     assertEquals(startupEventIndicator, processedEvents(0))
     assertEquals(metadataLogEventIndicator, processedEvents(1))
   }
@@ -121,7 +121,7 @@ class BrokerMetadataListenerTest {
   @Test
   def testInitialAndSubsequentMetadataOffsets(): Unit = {
     val listener = start(new BrokerMetadataListener(mock(classOf[KafkaConfig]), new MockTime(),
-      allProcessorsCountInvocations(processorKeys)))
+      twoProcessorsCountingInvocations(processorKeys)))
     assertEquals(expectedInitialMetadataOffset, listener.currentMetadataOffset())
 
     val nextMetadataOffset = expectedInitialMetadataOffset + 2
@@ -133,7 +133,7 @@ class BrokerMetadataListenerTest {
 
     val expectedNumEventsProcessedPerKey = 2 // 1 successful message + 1 startup
     TestUtils.waitUntilTrue(() => numEventsProcessed == processorKeys.size * expectedNumEventsProcessedPerKey,
-      "Failed to process expected event before timing out", 5000)
+      s"Failed to process expected event before timing out; processed events = $numEventsProcessed", 5000)
 
     // offset should be updated
     assertEquals(nextMetadataOffset, listener.currentMetadataOffset())
@@ -153,7 +153,7 @@ class BrokerMetadataListenerTest {
   @Test
   def testOutOfBandHeartbeatMessages(): Unit = {
     val listener = start(new BrokerMetadataListener(mock(classOf[KafkaConfig]), new MockTime(),
-      allProcessorsCountInvocations(processorKeys)))
+      twoProcessorsCountingInvocations(processorKeys)))
     assertEquals(expectedInitialMetadataOffset, listener.currentMetadataOffset())
 
     val msg0 = OutOfBandRegisterLocalBrokerEvent(1)
@@ -163,7 +163,7 @@ class BrokerMetadataListenerTest {
 
     val expectedNumEventsProcessedPerKey = 3 // 2 successful messages + 1 startup
     TestUtils.waitUntilTrue(() => numEventsProcessed == processorKeys.size * expectedNumEventsProcessedPerKey,
-      "Failed to process expected event before timing out", 5000)
+      s"Failed to process expected event before timing out; processed events = $numEventsProcessed", 5000)
 
     // offset should not be updated
     assertEquals(expectedInitialMetadataOffset, listener.currentMetadataOffset())
@@ -181,7 +181,7 @@ class BrokerMetadataListenerTest {
   @Test
   def testBadMetadataOffset(): Unit = {
     val listener = start(new BrokerMetadataListener(mock(classOf[KafkaConfig]), new MockTime(),
-      allProcessorsCountInvocations(processorKeys)))
+      twoProcessorsCountingInvocations(processorKeys)))
     assertEquals(expectedInitialMetadataOffset, listener.currentMetadataOffset())
 
     val badMetadataOffset = listener.currentMetadataOffset() - 1 // too low
@@ -189,12 +189,12 @@ class BrokerMetadataListenerTest {
 
     val expectedNumEventsProcessedPerKey = 1 // 0 successful messages + 1 startup
     TestUtils.waitUntilTrue(() => numEventsProcessed == processorKeys.size * expectedNumEventsProcessedPerKey,
-      "Failed to process expected event before timing out", 5000)
+      s"Failed to process expected event before timing out; processed events = $numEventsProcessed", 5000)
 
     // error count metric should increase by 1 since it is a badd metadata offset and therefore no processors see it
     // we have to wait for it to occur since it is the last event and the wait above only waits for the startup events
     TestUtils.waitUntilTrue(() => errorCountGauge().value() == 1,
-      "Failed to see error count gauge increase when there was an error", 5000)
+      s"Failed to see error count gauge increase when there was an error; error count = ${errorCountGauge().value()}", 5000)
 
     // offset should be unchanged
     assertEquals(expectedInitialMetadataOffset, listener.currentMetadataOffset())
@@ -210,7 +210,7 @@ class BrokerMetadataListenerTest {
   @Test
   def testMetricsCleanedOnClose(): Unit = {
     val listener = start(new BrokerMetadataListener(mock(classOf[KafkaConfig]), new MockTime(),
-      allProcessorsCountInvocations(processorKeys)))
+      twoProcessorsCountingInvocations(processorKeys)))
     assertTrue(allRegisteredMetricNames.nonEmpty)
 
     listener.close()
@@ -252,7 +252,7 @@ class BrokerMetadataListenerTest {
     listener.put(OutOfBandFenceLocalBrokerEvent(1))
     countDownLatch.countDown()
     TestUtils.waitUntilTrue(() => processedEvents.size == 4,
-      "Failed to process expected event before timing out", 5000)
+      s"Failed to process expected event before timing out; processed events = ${processedEvents.size}", 5000)
     // make sure out-of-band messages processed before the second batch
     assertEquals(apiMessagesEvent1, processedEvents(0))
     assertEquals(outOfBandRegisterLocalBrokerEventIndicator, processedEvents(1))
@@ -291,7 +291,7 @@ class BrokerMetadataListenerTest {
     latch.countDown()
 
     TestUtils.waitUntilTrue(() => processedEvents.get() == 2,
-      "Timed out waiting for processing of all events")
+      s"Timed out waiting for processing of all events; processed events = ${processedEvents.get()}", 5000)
 
     val histogram = queueTimeHistogram()
     assertEquals(2, histogram.count)
@@ -322,14 +322,14 @@ class BrokerMetadataListenerTest {
     listener.put(MetadataLogEvent(apiMessagesEvent, 2))
 
     TestUtils.waitUntilTrue(() => processedEvents.get() == 2,
-      "Timed out waiting for processing of all events")
+      s"Timed out waiting for processing of all events; processed eents = ${processedEvents.get()}", 5000)
 
     // we know from previous tests that the histogram count at this point will be 2
 
     // wait for the timeout/reset
     val histogram = queueTimeHistogram()
     TestUtils.waitUntilTrue(() => histogram.count == 0,
-      s"Timed out on resetting $expectedEventQueueTimeMsMetricName Histogram")
+      s"Timed out on resetting $expectedEventQueueTimeMsMetricName Histogram; count=${histogram.count}", 5000)
     assertEquals(0, histogram.min, 0.1)
     assertEquals(0, histogram.max, 0.1)
   }
@@ -340,7 +340,7 @@ class BrokerMetadataListenerTest {
     brokerMetadataListener
   }
 
-  def allProcessorsCountInvocations(processorKeys: List[String]): List[BrokerMetadataProcessor] = {
+  def twoProcessorsCountingInvocations(processorKeys: List[String]): List[BrokerMetadataProcessor] = {
     processorKeys.map(key => new BrokerMetadataProcessor {
       override def process(metadataLogEvent: MetadataLogEvent): Unit = {
         metadataLogEventInvocations.get(key).get += metadataLogEvent

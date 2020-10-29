@@ -18,7 +18,8 @@
 package kafka.server.metadata
 
 import java.util
-import java.util.concurrent.{ConcurrentLinkedQueue, LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.TimeUnit
 
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
@@ -28,6 +29,8 @@ import kafka.utils.ShutdownableThread
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.Time
+
+import scala.collection.mutable.ListBuffer
 
 object BrokerMetadataListener {
   val ThreadNamePrefix = "broker-"
@@ -116,10 +119,11 @@ class BrokerMetadataListener(config: KafkaConfig,
     throw new IllegalArgumentException(s"Empty processors list!")
   }
 
-  private val blockingQueue = new LinkedBlockingQueue[QueuedEvent]
-  private val bufferQueue: util.Queue[QueuedEvent] = new util.ArrayDeque[QueuedEvent]
-  private val outOfBandQueue = new ConcurrentLinkedQueue[QueuedEvent]
-  @volatile private var totalQueueSize: Int = 0
+  private val deque = new util.LinkedList[QueuedEvent]
+  private val dequeLock = new ReentrantLock()
+  private val dequeNonEmptyCondition = dequeLock.newCondition()
+
+  @volatile private var dequeSize: Int = 0
   @volatile private var errorCount: Int = 0
 
   private val thread = new BrokerMetadataEventThread(
@@ -127,7 +131,7 @@ class BrokerMetadataListener(config: KafkaConfig,
 
   // metrics
   private val eventQueueTimeHist = newHistogram(BrokerMetadataListener.EventQueueTimeMetricName)
-  newGauge(BrokerMetadataListener.EventQueueSizeMetricName, () => totalQueueSize)
+  newGauge(BrokerMetadataListener.EventQueueSizeMetricName, () => dequeSize)
   newGauge(BrokerMetadataListener.ErrorCountMetricName, () => errorCount)
 
   @volatile private var _currentMetadataOffset: Long = -1
@@ -151,12 +155,37 @@ class BrokerMetadataListener(config: KafkaConfig,
 
   def put(event: BrokerMetadataEvent): QueuedEvent = {
     val queuedEvent = new QueuedEvent(event, time.nanoseconds())
-    event match {
-      case _: OutOfBandRegisterLocalBrokerEvent |
-           _: OutOfBandFenceLocalBrokerEvent =>
-        outOfBandQueue.add(queuedEvent)
-        blockingQueue.add(new QueuedEvent(WakeupEvent, queuedEvent.enqueueTimeNanos))
-      case _ => blockingQueue.put(queuedEvent)
+    dequeLock.lock()
+    try {
+      event match {
+        case _: OutOfBandRegisterLocalBrokerEvent |
+             _: OutOfBandFenceLocalBrokerEvent =>
+          // we have to check to see if any out-of-band events are already at the front of the deque;
+          // if so, then we need to add this event after those
+          val listBuffer: ListBuffer[QueuedEvent] = new ListBuffer()
+          var nextEvent = deque.peekFirst()
+          while (nextEvent != null && {
+            nextEvent.event match {
+              case _: OutOfBandRegisterLocalBrokerEvent |
+                   _: OutOfBandFenceLocalBrokerEvent => true
+              case _ => false
+            }}) {
+            listBuffer += deque.pollFirst()
+            nextEvent = deque.peekFirst()
+          }
+          // we've removed any out-of-band events that were there
+          // so now add the one we want to add
+          deque.addFirst(queuedEvent)
+          // and then put back any out-of-band events that were there before (keeping their order unchanged)
+          listBuffer.reverseIterator.foreach(eventAlreadyThere => deque.addFirst(eventAlreadyThere))
+        case _ =>
+          // add this non-out-of-band message to the end of the deque
+          deque.addLast(queuedEvent)
+      }
+      dequeNonEmptyCondition.signal()
+      dequeSize += 1
+    } finally {
+      dequeLock.unlock()
     }
     queuedEvent
   }
@@ -241,31 +270,29 @@ class BrokerMetadataListener(config: KafkaConfig,
     }
 
     private def pollFromEventQueue(): QueuedEvent = {
-      val outOfBandEvent = outOfBandQueue.poll()
-      if (outOfBandEvent != null) {
-        return outOfBandEvent
-      }
-      val bufferedEvent = bufferQueue.poll()
-      if (bufferedEvent != null) {
-        totalQueueSize = blockingQueue.size() + bufferQueue.size()
-        return bufferedEvent
-      }
-      val numBuffered = blockingQueue.drainTo(bufferQueue)
-      if (numBuffered != 0) {
-        totalQueueSize = blockingQueue.size() + bufferQueue.size() - 1 // we're going to pull an event off and return it
-        return bufferQueue.poll()
-      }
-      val hasRecordedValue = eventQueueTimeHist.count() > 0
-      if (!hasRecordedValue) {
-        blockingQueue.take()
-      } else {
-        val event = blockingQueue.poll(eventQueueTimeHistogramTimeoutMs, TimeUnit.MILLISECONDS)
-        if (event != null) {
-          event
-        } else {
-          eventQueueTimeHist.clear()
-          blockingQueue.take()
+      dequeLock.lock()
+      try {
+        var nanosRemaining = TimeUnit.NANOSECONDS.convert(eventQueueTimeHistogramTimeoutMs, TimeUnit.MILLISECONDS)
+        while (deque.isEmpty()) { // takes care of spurious wakeups
+          val hasRecordedValue = eventQueueTimeHist.count() > 0
+          if (!hasRecordedValue) {
+            // wait indefinitely for something to appear
+            dequeNonEmptyCondition.await()
+          } else {
+            if (nanosRemaining <= 0) {
+              // no time left, so clear the histogram and wait indefinitely
+              eventQueueTimeHist.clear()
+              dequeNonEmptyCondition.await()
+            } else {
+              // wait only up until the timeout so we can clear the histogram if nothing appears
+              nanosRemaining = dequeNonEmptyCondition.awaitNanos(nanosRemaining)
+            }
+          }
         }
+        dequeSize -= 1
+        deque.poll()
+      } finally {
+        dequeLock.unlock()
       }
     }
   }

@@ -189,7 +189,7 @@ class DumpLogSegmentsTest {
       new TopicRecord().setName("test-topic").setDeleting(false).setTopicId(UUID.randomUUID())
     )
 
-    metadataRecords.foreach(message => {
+    val records: Array[SimpleRecord] = metadataRecords.map(message => {
       val cache = new ObjectSerializationCache
       val size = message.size(cache, message.highestSupportedVersion)
       val buf = ByteBuffer.allocate(size + 4)
@@ -198,12 +198,14 @@ class DumpLogSegmentsTest {
       writer.writeShort(message.highestSupportedVersion)
       message.write(writer, cache, message.highestSupportedVersion)
       buf.flip()
-      log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(null, buf.array())), leaderEpoch = 1)
-    })
+      new SimpleRecord(null, buf.array)
+    }).toArray
+    log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 1)
     log.flush()
 
-    val output = runDumpLogSegments(Array("--metadata-decoder", "--files", logFilePath))
+    val output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD") && output.contains("BROKER_RECORD"))
+    println(output)
   }
 
   private def runDumpLogSegments(args: Array[String]): String = {

@@ -58,7 +58,7 @@ object DumpLogSegments {
       suffix match {
         case Log.LogFileSuffix =>
           dumpLog(file, opts.shouldPrintDataLog, nonConsecutivePairsForLogFilesMap, opts.isDeepIteration,
-            opts.maxMessageSize, opts.messageParser)
+            opts.maxMessageSize, opts.messageParser, opts.shouldPrintLogMetadata)
         case Log.IndexFileSuffix =>
           dumpIndex(file, opts.indexSanityOnly, opts.verifyOnly, misMatchesForIndexFilesMap, opts.maxMessageSize)
         case Log.TimeIndexFileSuffix =>
@@ -240,7 +240,8 @@ object DumpLogSegments {
                       nonConsecutivePairsForLogFilesMap: mutable.Map[String, List[(Long, Long)]],
                       isDeepIteration: Boolean,
                       maxMessageSize: Int,
-                      parser: MessageParser[_, _]): Unit = {
+                      parser: MessageParser[_, _],
+                      includeLogMetadata: Boolean): Unit = {
     val startOffset = file.getName.split("\\.")(0).toLong
     println("Starting offset: " + startOffset)
     val fileRecords = FileRecords.open(file, false)
@@ -261,25 +262,29 @@ object DumpLogSegments {
             }
             lastOffset = record.offset
 
-            print(s"$RecordIndent offset: ${record.offset} ${batch.timestampType}: ${record.timestamp} " +
-              s"keysize: ${record.keySize} valuesize: ${record.valueSize}")
+            if (includeLogMetadata) {
+              print(s"$RecordIndent offset: ${record.offset} ${batch.timestampType}: ${record.timestamp} " +
+                s"keysize: ${record.keySize} valuesize: ${record.valueSize}")
 
-            if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
-              print(" sequence: " + record.sequence + " headerKeys: " + record.headers.map(_.key).mkString("[", ",", "]"))
-            } else {
-              print(s" crc: ${record.checksumOrNull} isvalid: ${record.isValid}")
+              if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
+                print(" sequence: " + record.sequence + " headerKeys: " + record.headers.map(_.key).mkString("[", ",", "]"))
+              } else {
+                print(s" crc: ${record.checksumOrNull} isvalid: ${record.isValid}")
+              }
+
+              if (batch.isControlBatch) {
+                val controlTypeId = ControlRecordType.parseTypeId(record.key)
+                ControlRecordType.fromTypeId(controlTypeId) match {
+                  case ControlRecordType.ABORT | ControlRecordType.COMMIT =>
+                    val endTxnMarker = EndTransactionMarker.deserialize(record)
+                    print(s" endTxnMarker: ${endTxnMarker.controlType} coordinatorEpoch: ${endTxnMarker.coordinatorEpoch}")
+                  case controlType =>
+                    print(s" controlType: $controlType($controlTypeId)")
+                }
+              }
             }
 
-            if (batch.isControlBatch) {
-              val controlTypeId = ControlRecordType.parseTypeId(record.key)
-              ControlRecordType.fromTypeId(controlTypeId) match {
-                case ControlRecordType.ABORT | ControlRecordType.COMMIT =>
-                  val endTxnMarker = EndTransactionMarker.deserialize(record)
-                  print(s" endTxnMarker: ${endTxnMarker.controlType} coordinatorEpoch: ${endTxnMarker.coordinatorEpoch}")
-                case controlType =>
-                  print(s" controlType: $controlType($controlTypeId)")
-              }
-            } else if (printContents) {
+            if (printContents) {
               val (key, payload) = parser.parse(record)
               key.foreach(key => print(s" key: $key"))
               payload.foreach(payload => print(s" payload: $payload"))
@@ -433,7 +438,8 @@ object DumpLogSegments {
       "__consumer_offsets topic.")
     val transactionLogOpt = parser.accepts("transaction-log-decoder", "if set, log data will be parsed as " +
       "transaction metadata from the __transaction_state topic.")
-    val metadataOpt = parser.accepts("metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
+    val raftMetadataOpt = parser.accepts("metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
+    val noLogMetadataOpt = parser.accepts("no-log-metadata", "if set, omits the log metadata when printing the log records.")
     options = parser.parse(args : _*)
 
     def messageParser: MessageParser[_, _] =
@@ -441,7 +447,7 @@ object DumpLogSegments {
         new OffsetsMessageParser
       } else if (options.has(transactionLogOpt)) {
         new TransactionLogMessageParser
-      } else if (options.has(metadataOpt)) {
+      } else if (options.has(raftMetadataOpt)) {
         new MetadataLogMessageParser
       } else {
         val valueDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
@@ -452,9 +458,11 @@ object DumpLogSegments {
     lazy val shouldPrintDataLog: Boolean = options.has(printOpt) ||
       options.has(offsetsOpt) ||
       options.has(transactionLogOpt) ||
-      options.has(metadataOpt) ||
+      options.has(raftMetadataOpt) ||
       options.has(valueDecoderOpt) ||
       options.has(keyDecoderOpt)
+
+    lazy val shouldPrintLogMetadata: Boolean = shouldPrintDataLog && !options.has(noLogMetadataOpt)
 
     lazy val isDeepIteration: Boolean = options.has(deepIterationOpt) || shouldPrintDataLog
     lazy val verifyOnly: Boolean = options.has(verifyOpt)

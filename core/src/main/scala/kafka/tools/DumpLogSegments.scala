@@ -26,7 +26,7 @@ import kafka.log._
 import kafka.serializer.Decoder
 import kafka.utils._
 import kafka.utils.Implicits._
-import org.apache.kafka.common.metadata.{AccessControlRecord, AccessControlRecordJsonConverter, BrokerRecord, BrokerRecordJsonConverter, ConfigRecord, ConfigRecordJsonConverter, FenceBrokerRecord, FenceBrokerRecordJsonConverter, IsrChangeRecord, IsrChangeRecordJsonConverter, MetadataRecordType, PartitionRecord, PartitionRecordJsonConverter, TopicRecord, TopicRecordJsonConverter}
+import org.apache.kafka.common.metadata.MetadataRecordType
 import org.apache.kafka.common.protocol.ByteBufferAccessor
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.Utils
@@ -385,16 +385,11 @@ object DumpLogSegments {
       val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
       val reader = new ByteBufferAccessor(buf)
       message.read(reader, apiVersion)
-      val maybeJson = apiKey match {
-        // TODO maybe move this switch into MetadataRecordType
-        case 0 => Some(BrokerRecordJsonConverter.write(message.asInstanceOf[BrokerRecord], apiVersion))
-        case 1 => Some(TopicRecordJsonConverter.write(message.asInstanceOf[TopicRecord], apiVersion))
-        case 2 => Some(PartitionRecordJsonConverter.write(message.asInstanceOf[PartitionRecord], apiVersion))
-        case 3 => Some(ConfigRecordJsonConverter.write(message.asInstanceOf[ConfigRecord], apiVersion))
-        case 4 => Some(IsrChangeRecordJsonConverter.write(message.asInstanceOf[IsrChangeRecord], apiVersion))
-        case 5 => Some(AccessControlRecordJsonConverter.write(message.asInstanceOf[AccessControlRecord], apiVersion))
-        case 6 => Some(FenceBrokerRecordJsonConverter.write(message.asInstanceOf[FenceBrokerRecord], apiVersion))
-        case _ =>
+      val maybeJson = try {
+        Some(MetadataRecordType.writeJson(message, apiVersion))
+      } catch {
+        case _: Throwable =>
+          // Need to tolerate unknown record types
           System.err.println(s"Unknown metadata record type $apiKey at offset ${record.offset}, skipping.")
           None
       }

@@ -95,9 +95,9 @@ final case class OutOfBandFenceLocalBrokerEvent(brokerEpoch: Long) extends Broke
  */
 final case object WakeupEvent extends BrokerMetadataEvent
 
-class QueuedEvent(val event: BrokerMetadataEvent, val enqueueTimeMs: Long) {
+class QueuedEvent(val event: BrokerMetadataEvent, val enqueueTimeNanos: Long) {
   override def toString: String = {
-    s"QueuedEvent(event=$event, enqueueTimeMs=$enqueueTimeMs)"
+    s"QueuedEvent(event=$event, enqueueTimeNanos=$enqueueTimeNanos)"
   }
 }
 
@@ -150,12 +150,12 @@ class BrokerMetadataListener(config: KafkaConfig,
   }
 
   def put(event: BrokerMetadataEvent): QueuedEvent = {
-    val queuedEvent = new QueuedEvent(event, time.milliseconds())
+    val queuedEvent = new QueuedEvent(event, time.nanoseconds())
     event match {
       case _: OutOfBandRegisterLocalBrokerEvent |
            _: OutOfBandFenceLocalBrokerEvent =>
         outOfBandQueue.add(queuedEvent)
-        blockingQueue.add(new QueuedEvent(WakeupEvent, queuedEvent.enqueueTimeMs))
+        blockingQueue.add(new QueuedEvent(WakeupEvent, queuedEvent.enqueueTimeNanos))
       case _ => blockingQueue.put(queuedEvent)
     }
     queuedEvent
@@ -182,7 +182,7 @@ class BrokerMetadataListener(config: KafkaConfig,
               })
           case WakeupEvent => // Ignore since it serves solely to wake us up
           case metadataLogEvent: MetadataLogEvent =>
-            eventQueueTimeHist.update(time.milliseconds() - dequeued.enqueueTimeMs)
+            eventQueueTimeHist.update(TimeUnit.MILLISECONDS.convert(time.nanoseconds() - dequeued.enqueueTimeNanos, TimeUnit.NANOSECONDS))
 
             val currentOffset = currentMetadataOffset()
             if (metadataLogEvent.lastMetadataOffset < currentOffset + metadataLogEvent.apiMessages.size) {

@@ -385,18 +385,17 @@ object DumpLogSegments {
   private class MetadataLogMessageParser extends MessageParser[String, String] {
     override def parse(record: Record): (Option[String], Option[String]) = {
       // Per KIP-631, the value format is: unsigned varint (api key), unsigned varint (api version), bytes (encoded ApiMessage)
-      val buf = record.value
-      val reader = new ByteBufferAccessor(buf)
+      val reader = new ByteBufferAccessor(record.value)
       val apiKey = reader.readUnsignedVarint.shortValue
       val apiVersion = reader.readUnsignedVarint.shortValue
 
-      val outputJson = try {
+      val output = try {
         val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
         message.read(reader, apiVersion)
-        val parent = new ObjectNode(JsonNodeFactory.instance)
-        parent.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
-        parent.set("data", MetadataRecordType.writeJson(message, apiVersion))
-        parent.toString
+        val json = new ObjectNode(JsonNodeFactory.instance)
+        json.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
+        json.set("data", MetadataRecordType.writeJson(message, apiVersion))
+        json.toString
       } catch {
         case _: UnsupportedVersionException =>
           // Need to tolerate unknown record types
@@ -406,7 +405,7 @@ object DumpLogSegments {
       }
 
       // No keys for metadata records
-      (None, Some(outputJson))
+      (None, Some(output))
     }
   }
 
@@ -437,7 +436,7 @@ object DumpLogSegments {
       "__consumer_offsets topic.")
     val transactionLogOpt = parser.accepts("transaction-log-decoder", "if set, log data will be parsed as " +
       "transaction metadata from the __transaction_state topic.")
-    val raftMetadataOpt = parser.accepts("metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
+    val raftMetadataOpt = parser.accepts("raft-metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
     val noLogMetadataOpt = parser.accepts("no-log-metadata", "if set, omits the log metadata when printing the log records.")
     options = parser.parse(args : _*)
 
@@ -462,7 +461,6 @@ object DumpLogSegments {
       options.has(keyDecoderOpt)
 
     lazy val shouldPrintLogMetadata: Boolean = shouldPrintDataLog && !options.has(noLogMetadataOpt)
-
     lazy val isDeepIteration: Boolean = options.has(deepIterationOpt) || shouldPrintDataLog
     lazy val verifyOnly: Boolean = options.has(verifyOpt)
     lazy val indexSanityOnly: Boolean = options.has(indexSanityOpt)

@@ -62,7 +62,7 @@ class DumpLogSegmentsTest {
       logDirFailureChannel = new LogDirFailureChannel(10))
   }
 
-  def addStringRecords(): Unit = {
+  def addSimpleRecords(): Unit = {
     val now = System.currentTimeMillis()
     val firstBatchRecords = (0 until 10).map { i => new SimpleRecord(now + i * 2, s"message key $i".getBytes, s"message value $i".getBytes)}
     val batches = new ArrayBuffer[BatchInfo]
@@ -90,7 +90,7 @@ class DumpLogSegmentsTest {
 
   @Test
   def testPrintDataLog(): Unit = {
-    addStringRecords()
+    addSimpleRecords()
     def verifyRecordsInOutput(checkKeysAndValues: Boolean, args: Array[String]): Unit = {
       def isBatch(index: Int): Boolean = {
         var i = 0
@@ -160,7 +160,7 @@ class DumpLogSegmentsTest {
 
   @Test
   def testDumpIndexMismatches(): Unit = {
-    addStringRecords()
+    addSimpleRecords()
     val offsetMismatches = mutable.Map[String, List[(Long, Long)]]()
     DumpLogSegments.dumpIndex(new File(indexFilePath), indexSanityOnly = false, verifyOnly = true, offsetMismatches,
       Int.MaxValue)
@@ -169,7 +169,7 @@ class DumpLogSegmentsTest {
 
   @Test
   def testDumpTimeIndexErrors(): Unit = {
-    addStringRecords()
+    addSimpleRecords()
     val errors = new TimeIndexDumpErrors
     DumpLogSegments.dumpTimeIndex(new File(timeIndexFilePath), indexSanityOnly = false, verifyOnly = true, errors,
       Int.MaxValue)
@@ -191,6 +191,7 @@ class DumpLogSegmentsTest {
       new IsrChangeRecord().setTopicId(UUID.randomUUID()).setLeader(1).setPartitionId(0).setLeaderEpoch(100).setIsr(util.Arrays.asList(0, 1, 2))
     )
 
+    // TODO eventually replace this with whatever production code writes the metadata records to the log
     val records: Array[SimpleRecord] = metadataRecords.map(message => {
       val cache = new ObjectSerializationCache
       val size = message.size(cache, message.highestSupportedVersion)
@@ -205,11 +206,11 @@ class DumpLogSegmentsTest {
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 1)
     log.flush()
 
-    var output = runDumpLogSegments(Array("--metadata-decoder", "false", "--files", logFilePath))
+    var output = runDumpLogSegments(Array("--raft-metadata-decoder", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
 
-    output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    output = runDumpLogSegments(Array("--raft-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
 
@@ -221,7 +222,7 @@ class DumpLogSegmentsTest {
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(null, buf.array)), leaderEpoch = 2)
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 2)
 
-    output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    output = runDumpLogSegments(Array("--raft-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
     assert(output.contains("skipping"))

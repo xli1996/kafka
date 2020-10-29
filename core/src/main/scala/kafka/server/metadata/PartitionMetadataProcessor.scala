@@ -34,7 +34,7 @@ import org.apache.kafka.common.message.UpdateMetadataRequestData.UpdateMetadataP
 import org.apache.kafka.common.{Node, TopicPartition}
 import org.apache.kafka.common.metadata.{BrokerRecord, FenceBrokerRecord, IsrChangeRecord, PartitionRecord, RemoveTopicRecord, TopicRecord, UnfenceBrokerRecord}
 import org.apache.kafka.common.network.ListenerName
-import org.apache.kafka.common.protocol.{ApiKeys, ApiMessage, Errors}
+import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.LeaderAndIsrRequest
 import org.apache.kafka.common.security.auth.SecurityProtocol
 
@@ -104,7 +104,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  groupCoordinator: GroupCoordinator,
                                  quotaManagers: QuotaFactory.QuotaManagers,
                                  replicaManager: ReplicaManager,
-                                 txnCoordinator: TransactionCoordinator) extends ApiMessageProcessor with Logging {
+                                 txnCoordinator: TransactionCoordinator) extends BrokerMetadataProcessor with Logging {
   // used only for onLeadershipChange()
   private val apisUtils = new ApisUtils(null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
 
@@ -294,7 +294,9 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     val topicPartitionsNeedingLeaderFollowerChanges: mutable.Map[TopicPartition, LeaderAndIsrPartitionState] = mutable.Map.empty
   }
 
-  override def process(apiMessages: List[ApiMessage]): Unit = {
+  override def processStartup(): Unit = {}
+
+  override def process(metadataLogEvent: MetadataLogEvent): Unit = {
     // We have to copy any data structures that we are going to modify, and when we perform the copy
     // we want to define a new capacity that will be high enough to prevent additional internal copying, so
     // iterate over all messages once to determine new data structure capacities
@@ -304,7 +306,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     var numBrokersAdding = 0
     var numBrokersFencing = 0
     var numTopicsAdding = 0
-    apiMessages.foreach(msg => msg match {
+    metadataLogEvent.apiMessages.foreach(msg => msg match {
       case _: BrokerRecord | _: UnfenceBrokerRecord => numBrokersAdding += 1
       case _: FenceBrokerRecord => numBrokersFencing += 1
       case topic: TopicRecord => if (!topic.deleting()) numTopicsAdding += 1
@@ -313,7 +315,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     val mgr = MetadataMgr(numBrokersAdding, numTopicsAdding: Int, numBrokersFencing)
 
     // Iterate over all messages again to process them
-    apiMessages.foreach(msg =>
+    metadataLogEvent.apiMessages.foreach(msg =>
       try {
         msg match {
           case brokerRecord: BrokerRecord => process(brokerRecord, mgr)
@@ -692,12 +694,12 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       val partitionStates = mgr.getCopiedPartitionStates()
       val currentPartitionStatesForTopic = partitionStates.get(topicName)
       if (currentPartitionStatesForTopic.isEmpty) {
-        error(s"Unable to process IsrChangeRecord due to unknown partition state for topic: $isrChange")
+        error(s"Unable to process IsrChangeRecord due to no partition state for topic: $isrChange")
       } else {
         val partitionId = isrChange.partitionId()
         val currentPartitionState = currentPartitionStatesForTopic.get.get(partitionId)
         if (currentPartitionState.isEmpty) {
-          error(s"Unable to process IsrChangeRecord due to unknown partition state within topic: $isrChange")
+          error(s"Unable to process IsrChangeRecord due to no partition state within topic for partition: $isrChange")
         } else {
           val currentLeader = currentPartitionState.get.leader()
           val newLeader = isrChange.leader()
@@ -771,8 +773,8 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     mgr.getCopiedTopicIdMap().remove(removeTopic.topicId())
   }
 
-  override def process(registerLocalBrokerEvent: OutOfBandRegisterLocalBrokerEvent): Unit = {
-    val requestedBrokerEpoch = registerLocalBrokerEvent.brokerEpoch
+  override def process(outOfBandRegisterLocalBrokerEvent: OutOfBandRegisterLocalBrokerEvent): Unit = {
+    val requestedBrokerEpoch = outOfBandRegisterLocalBrokerEvent.brokerEpoch
     if (requestedBrokerEpoch < 0) {
       throw new IllegalArgumentException(s"Cannot change broker epoch to a negative value: $requestedBrokerEpoch")
     }
@@ -798,20 +800,20 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     }
   }
 
-  override def process(fenceLocalBrokerEvent: OutOfBandFenceLocalBrokerEvent): Unit = {
+  override def process(outOfBandFenceLocalBrokerEvent: OutOfBandFenceLocalBrokerEvent): Unit = {
     val numBrokersFencing = 1
     val mgr = MetadataMgr(0, 0, numBrokersFencing)
     val brokerId = kafkaConfig.brokerId
     // check the current state, whether copied already or not
     if (!mgr.getCurrentAliveBrokers().contains(brokerId)) {
       // The broker is not considered alive.
-      error(s"Skipping fence local broker heartbeat event because the broker is not considered alive: $fenceLocalBrokerEvent")
+      error(s"Skipping fence local broker heartbeat event because the broker is not considered alive: $outOfBandFenceLocalBrokerEvent")
     } else {
       // sanity-check the broker epoch
       val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().get(brokerId).getOrElse(Int.MinValue)
-      if (fenceLocalBrokerEvent.brokerEpoch != currentBrokerEpoch) {
+      if (outOfBandFenceLocalBrokerEvent.brokerEpoch != currentBrokerEpoch) {
         error(s"Skipping fence local broker heartbeat event because current broker epoch ($currentBrokerEpoch)" +
-          s" is not the epoch being fenced: $fenceLocalBrokerEvent")
+          s" is not the epoch being fenced: $outOfBandFenceLocalBrokerEvent")
       } else {
         // copy if necessary and update the copies
         // move the broker from alive to fenced

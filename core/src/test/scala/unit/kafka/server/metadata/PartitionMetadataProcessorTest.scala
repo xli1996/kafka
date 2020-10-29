@@ -104,7 +104,8 @@ class PartitionMetadataProcessorTest {
     assertEquals(0, metadataCache.readState().partitionStates.size)
     assertEquals(0, metadataCache.readState().topicIdMap.size)
 
-    processor.process(List(brokerRecord0, topicRecord0, brokerRecord1))
+    val initialMetadataOffset = -1
+    processor.process(MetadataLogEvent(List(brokerRecord0, topicRecord0, brokerRecord1), initialMetadataOffset + 10))
 
     // confirm broker-related changes
     assertEquals(2, metadataCache.readState().aliveBrokers.size)
@@ -170,7 +171,7 @@ class PartitionMetadataProcessorTest {
     assertTrue(metadataCache.readState().partitionStates.get(name0).isDefined)
     assertEquals(1, metadataCache.readState().partitionStates.get(name0).get.size)
 
-    processor.process(List(topicRecord0Deleting, topicRecord1))
+    processor.process(MetadataLogEvent(List(topicRecord0Deleting, topicRecord1), initialMetadataOffset + 20))
 
     // confirm still no broker-related changes from last update
     assertEquals(2, metadataCache.readState().aliveBrokers.size)

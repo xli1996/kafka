@@ -26,6 +26,7 @@ import kafka.log._
 import kafka.serializer.Decoder
 import kafka.utils._
 import kafka.utils.Implicits._
+import org.apache.kafka.common.errors.UnsupportedVersionException
 import org.apache.kafka.common.metadata.MetadataRecordType
 import org.apache.kafka.common.protocol.ByteBufferAccessor
 import org.apache.kafka.common.record._
@@ -383,31 +384,29 @@ object DumpLogSegments {
 
   private class MetadataLogMessageParser extends MessageParser[String, String] {
     override def parse(record: Record): (Option[String], Option[String]) = {
-      // Per KIP-631, the value format is: int16 (api key), int16 (api version), bytes (encoded ApiMessage)
+      // Per KIP-631, the value format is: unsigned varint (api key), unsigned varint (api version), bytes (encoded ApiMessage)
       val buf = record.value
-      val apiKey = buf.getShort
-      val apiVersion = buf.getShort
-      val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
       val reader = new ByteBufferAccessor(buf)
-      message.read(reader, apiVersion)
-      val maybeJson = try {
-        Some(MetadataRecordType.writeJson(message, apiVersion))
-      } catch {
-        case _: Throwable =>
-          // Need to tolerate unknown record types
-          System.err.println(s"Unknown metadata record type $apiKey at offset ${record.offset}, skipping.")
-          None
-      }
+      val apiKey = reader.readUnsignedVarint.shortValue
+      val apiVersion = reader.readUnsignedVarint.shortValue
 
-      val outputJson = maybeJson.map(json => {
+      val outputJson = try {
+        val message = MetadataRecordType.fromId(apiKey).newMetadataRecord()
+        message.read(reader, apiVersion)
         val parent = new ObjectNode(JsonNodeFactory.instance)
         parent.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
-        parent.set("data", json)
+        parent.set("data", MetadataRecordType.writeJson(message, apiVersion))
         parent.toString
-      })
+      } catch {
+        case _: UnsupportedVersionException =>
+          // Need to tolerate unknown record types
+          s"Unknown metadata record type $apiKey at offset ${record.offset}, skipping."
+        case t: Throwable =>
+          s"Error at ${record.offset}, skipping. ${t.getMessage}"
+      }
 
       // No keys for metadata records
-      (None, outputJson)
+      (None, Some(outputJson))
     }
   }
 

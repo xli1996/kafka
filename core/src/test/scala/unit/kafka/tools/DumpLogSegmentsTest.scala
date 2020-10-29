@@ -19,13 +19,14 @@ package kafka.tools
 
 import java.io.{ByteArrayOutputStream, File}
 import java.nio.ByteBuffer
+import java.util
 import java.util.{Properties, UUID}
 
 import kafka.log.{Log, LogConfig, LogManager, LogTest}
 import kafka.server.{BrokerTopicStats, LogDirFailureChannel}
 import kafka.tools.DumpLogSegments.TimeIndexDumpErrors
 import kafka.utils.{MockTime, TestUtils}
-import org.apache.kafka.common.metadata.{BrokerRecord, TopicRecord}
+import org.apache.kafka.common.metadata.{BrokerRecord, IsrChangeRecord, TopicRecord}
 import org.apache.kafka.common.protocol.{ByteBufferAccessor, ObjectSerializationCache}
 import org.apache.kafka.common.record.{CompressionType, MemoryRecords, SimpleRecord}
 import org.apache.kafka.common.utils.Utils
@@ -186,7 +187,8 @@ class DumpLogSegmentsTest {
     val metadataRecords = Seq(
       new BrokerRecord().setBrokerId(0).setBrokerEpoch(10),
       new BrokerRecord().setBrokerId(1).setBrokerEpoch(20),
-      new TopicRecord().setName("test-topic").setDeleting(false).setTopicId(UUID.randomUUID())
+      new TopicRecord().setName("test-topic").setDeleting(false).setTopicId(UUID.randomUUID()),
+      new IsrChangeRecord().setTopicId(UUID.randomUUID()).setLeader(1).setPartitionId(0).setLeaderEpoch(100).setIsr(util.Arrays.asList(0, 1, 2))
     )
 
     val records: Array[SimpleRecord] = metadataRecords.map(message => {
@@ -194,8 +196,8 @@ class DumpLogSegmentsTest {
       val size = message.size(cache, message.highestSupportedVersion)
       val buf = ByteBuffer.allocate(size + 4)
       val writer = new ByteBufferAccessor(buf)
-      writer.writeShort(message.apiKey)
-      writer.writeShort(message.highestSupportedVersion)
+      writer.writeUnsignedVarint(message.apiKey)
+      writer.writeUnsignedVarint(message.highestSupportedVersion)
       message.write(writer, cache, message.highestSupportedVersion)
       buf.flip()
       new SimpleRecord(null, buf.array)
@@ -203,9 +205,26 @@ class DumpLogSegmentsTest {
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 1)
     log.flush()
 
-    val output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
-    assert(output.contains("TOPIC_RECORD") && output.contains("BROKER_RECORD"))
-    println(output)
+    var output = runDumpLogSegments(Array("--metadata-decoder", "false", "--files", logFilePath))
+    assert(output.contains("TOPIC_RECORD"))
+    assert(output.contains("BROKER_RECORD"))
+
+    output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    assert(output.contains("TOPIC_RECORD"))
+    assert(output.contains("BROKER_RECORD"))
+
+    // Bogus metadata record
+    val buf = ByteBuffer.allocate(4)
+    val writer = new ByteBufferAccessor(buf)
+    writer.writeUnsignedVarint(10000)
+    writer.writeUnsignedVarint(10000)
+    log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(null, buf.array)), leaderEpoch = 2)
+    log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 2)
+
+    output = runDumpLogSegments(Array("--metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    assert(output.contains("TOPIC_RECORD"))
+    assert(output.contains("BROKER_RECORD"))
+    assert(output.contains("skipping"))
   }
 
   private def runDumpLogSegments(args: Array[String]): String = {

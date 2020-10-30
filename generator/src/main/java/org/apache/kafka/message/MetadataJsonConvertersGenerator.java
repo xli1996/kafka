@@ -15,8 +15,6 @@
  * limitations under the License.
  */
 
-// THIS CODE IS AUTOMATICALLY GENERATED.  DO NOT EDIT.
-
 package org.apache.kafka.message;
 
 import java.io.BufferedWriter;

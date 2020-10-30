@@ -285,7 +285,10 @@ object DumpLogSegments {
               }
             }
 
-            if (printContents) {
+            if (printContents && !batch.isControlBatch) {
+              if (!includeLogMetadata) {
+                print(s"$RecordIndent")
+              }
               val (key, payload) = parser.parse(record)
               key.foreach(key => print(s" key: $key"))
               payload.foreach(payload => print(s" payload: $payload"))
@@ -436,7 +439,7 @@ object DumpLogSegments {
       "__consumer_offsets topic.")
     val transactionLogOpt = parser.accepts("transaction-log-decoder", "if set, log data will be parsed as " +
       "transaction metadata from the __transaction_state topic.")
-    val raftMetadataOpt = parser.accepts("raft-metadata-decoder", "if set, log data will be parsed as metadata records from a raft topic.")
+    val clusterMetadataOpt = parser.accepts("cluster-metadata-decoder", "if set, log data will be parsed as cluster metadata records.")
     val noLogMetadataOpt = parser.accepts("no-log-metadata", "if set, omits the log metadata when printing the log records.")
     options = parser.parse(args : _*)
 
@@ -445,7 +448,7 @@ object DumpLogSegments {
         new OffsetsMessageParser
       } else if (options.has(transactionLogOpt)) {
         new TransactionLogMessageParser
-      } else if (options.has(raftMetadataOpt)) {
+      } else if (options.has(clusterMetadataOpt)) {
         new MetadataLogMessageParser
       } else {
         val valueDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
@@ -456,7 +459,7 @@ object DumpLogSegments {
     lazy val shouldPrintDataLog: Boolean = options.has(printOpt) ||
       options.has(offsetsOpt) ||
       options.has(transactionLogOpt) ||
-      options.has(raftMetadataOpt) ||
+      options.has(clusterMetadataOpt) ||
       options.has(valueDecoderOpt) ||
       options.has(keyDecoderOpt)
 

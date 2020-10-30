@@ -206,11 +206,11 @@ class DumpLogSegmentsTest {
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 1)
     log.flush()
 
-    var output = runDumpLogSegments(Array("--raft-metadata-decoder", "false", "--files", logFilePath))
+    var output = runDumpLogSegments(Array("--cluster-metadata-decoder", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
 
-    output = runDumpLogSegments(Array("--raft-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    output = runDumpLogSegments(Array("--cluster-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
 
@@ -222,7 +222,7 @@ class DumpLogSegmentsTest {
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, new SimpleRecord(null, buf.array)), leaderEpoch = 2)
     log.appendAsLeader(MemoryRecords.withRecords(CompressionType.NONE, records:_*), leaderEpoch = 2)
 
-    output = runDumpLogSegments(Array("--raft-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
+    output = runDumpLogSegments(Array("--cluster-metadata-decoder", "--no-log-metadata", "false", "--files", logFilePath))
     assert(output.contains("TOPIC_RECORD"))
     assert(output.contains("BROKER_RECORD"))
     assert(output.contains("skipping"))

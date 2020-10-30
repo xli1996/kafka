@@ -53,7 +53,7 @@ public final class MessageGenerator {
 
     static final String METADATA_RECORD_TYPE_JAVA = "MetadataRecordType.java";
 
-    static final String JSON_CONVERTERS_JAVA = "JsonConverters.java";
+    static final String METADATA_JSON_CONVERTERS_JAVA = "MetadataJsonConverters.java";
 
     static final String API_MESSAGE_CLASS = "org.apache.kafka.common.protocol.ApiMessage";
 
@@ -181,8 +181,8 @@ public final class MessageGenerator {
                 case "MetadataRecordTypeGenerator":
                     generators.add(new MetadataRecordTypeGenerator(packageName));
                     break;
-                case "JsonConvertersGenerator":
-                    generators.add(new JsonConvertersGenerator(packageName));
+                case "MetadataJsonConvertersGenerator":
+                    generators.add(new MetadataJsonConvertersGenerator(packageName));
                     break;
                 default:
                     throw new RuntimeException("Unknown type class generator type '" + type + "'");

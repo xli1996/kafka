@@ -27,7 +27,7 @@ import kafka.serializer.Decoder
 import kafka.utils._
 import kafka.utils.Implicits._
 import org.apache.kafka.common.errors.UnsupportedVersionException
-import org.apache.kafka.common.metadata.{JsonConverters, MetadataRecordType}
+import org.apache.kafka.common.metadata.{MetadataJsonConverters, MetadataRecordType}
 import org.apache.kafka.common.protocol.ByteBufferAccessor
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.utils.Utils
@@ -394,7 +394,7 @@ object DumpLogSegments {
         message.read(reader, apiVersion)
         val json = new ObjectNode(JsonNodeFactory.instance)
         json.set("type", new TextNode(MetadataRecordType.fromId(apiKey).toString))
-        json.set("data", JsonConverters.writeJson(message, apiVersion))
+        json.set("data", MetadataJsonConverters.writeJson(message, apiVersion))
         json.toString
       } catch {
         case _: UnsupportedVersionException =>

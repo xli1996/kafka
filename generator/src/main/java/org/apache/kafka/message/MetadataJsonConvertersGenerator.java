@@ -24,12 +24,12 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.TreeMap;
 
-public class JsonConvertersGenerator implements TypeClassGenerator {
+public class MetadataJsonConvertersGenerator implements TypeClassGenerator {
     private final HeaderGenerator headerGenerator;
     private final CodeBuffer buffer;
     private final TreeMap<Short, MessageSpec> apis;
 
-    public JsonConvertersGenerator(String packageName) {
+    public MetadataJsonConvertersGenerator(String packageName) {
         this.headerGenerator = new HeaderGenerator(packageName);
         this.apis = new TreeMap<>();
         this.buffer = new CodeBuffer();
@@ -37,7 +37,7 @@ public class JsonConvertersGenerator implements TypeClassGenerator {
 
     @Override
     public String outputName() {
-        return MessageGenerator.JSON_CONVERTERS_JAVA;
+        return MessageGenerator.METADATA_JSON_CONVERTERS_JAVA;
     }
 
     @Override
@@ -55,7 +55,7 @@ public class JsonConvertersGenerator implements TypeClassGenerator {
 
     @Override
     public void generateAndWrite(BufferedWriter writer) throws IOException {
-        buffer.printf("public class JsonConverters {%n");
+        buffer.printf("public class MetadataJsonConverters {%n");
         buffer.incrementIndent();
         generateWriteJson();
         buffer.printf("%n");

@@ -385,7 +385,7 @@ object DumpLogSegments {
     }
   }
 
-  private class MetadataLogMessageParser extends MessageParser[String, String] {
+  private class ClusterMetadataLogMessageParser extends MessageParser[String, String] {
     override def parse(record: Record): (Option[String], Option[String]) = {
       // Per KIP-631, the value format is: unsigned varint (api key), unsigned varint (api version), bytes (encoded ApiMessage)
       val reader = new ByteBufferAccessor(record.value)
@@ -449,7 +449,7 @@ object DumpLogSegments {
       } else if (options.has(transactionLogOpt)) {
         new TransactionLogMessageParser
       } else if (options.has(clusterMetadataOpt)) {
-        new MetadataLogMessageParser
+        new ClusterMetadataLogMessageParser
       } else {
         val valueDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(valueDecoderOpt), new VerifiableProperties)
         val keyDecoder: Decoder[_] = CoreUtils.createObject[Decoder[_]](options.valueOf(keyDecoderOpt), new VerifiableProperties)

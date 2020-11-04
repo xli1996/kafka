@@ -21,7 +21,7 @@ import java.io.{File, IOException}
 import java.net.{InetAddress, SocketTimeoutException}
 import java.util
 import java.util.concurrent._
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 
 import kafka.api.{KAFKA_0_9_0, KAFKA_2_2_IV0, KAFKA_2_4_IV1}
 import kafka.cluster.Broker
@@ -30,7 +30,7 @@ import kafka.controller.KafkaController
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.LogManager
-import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter, KafkaYammerMetrics, LinuxIoMetricsCollector}
+import kafka.metrics.{KafkaMetricsReporter, KafkaYammerMetrics}
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
 import kafka.server.metadata.BrokerMetadataListener
@@ -47,6 +47,7 @@ import org.apache.kafka.common.security.token.delegation.internals.DelegationTok
 import org.apache.kafka.common.security.{JaasContext, JaasUtils}
 import org.apache.kafka.common.utils.{AppInfoParser, LogContext, Time}
 import org.apache.kafka.common.{Endpoint, Node}
+import org.apache.kafka.metadata.BrokerState
 import org.apache.kafka.server.authorizer.Authorizer
 import org.apache.zookeeper.client.ZKClientConfig
 
@@ -83,8 +84,7 @@ object LegacyBroker {
 class LegacyBroker(val config: KafkaConfig,
                    time: Time = Time.SYSTEM,
                    threadNamePrefix: Option[String] = None,
-                   kafkaMetricsReporters: Seq[KafkaMetricsReporter] = List())
-                     extends KafkaBroker with Logging with KafkaMetricsGroup {
+                   kafkaMetricsReporters: Seq[KafkaMetricsReporter] = List()) extends KafkaBroker {
   import KafkaBroker._
 
   private val startupComplete = new AtomicBoolean(false)
@@ -99,7 +99,7 @@ class LegacyBroker(val config: KafkaConfig,
   var kafkaYammerMetrics: KafkaYammerMetrics = null
   var metrics: Metrics = null
 
-  val brokerState: BrokerState = new BrokerState
+  private val brokerState = new AtomicReference[BrokerState](BrokerState.NOT_RUNNING)
 
   var dataPlaneRequestProcessor: KafkaApis = null
   var controlPlaneRequestProcessor: KafkaApis = null
@@ -152,7 +152,7 @@ class LegacyBroker(val config: KafkaConfig,
 
   val featureCache: FinalizedFeatureCache = new FinalizedFeatureCache(brokerFeatures)
 
-  def clusterId: String = _clusterId
+  def clusterId(): String = _clusterId
 
   // Visible for testing
   private[kafka] def zkClient = _zkClient
@@ -160,17 +160,6 @@ class LegacyBroker(val config: KafkaConfig,
   private[kafka] def brokerTopicStats = _brokerTopicStats
 
   private[kafka] def featureChangeListener = _featureChangeListener
-
-  newGauge("BrokerState", () => brokerState.currentState)
-  newGauge("ClusterId", () => clusterId)
-  newGauge("yammer-metrics-count", () =>  KafkaYammerMetrics.defaultRegistry.allMetrics.size)
-
-  val linuxIoMetricsCollector = new LinuxIoMetricsCollector("/proc", time, logger.underlying)
-
-  if (linuxIoMetricsCollector.usable()) {
-    newGauge("linux-disk-read-bytes", () => linuxIoMetricsCollector.readBytes())
-    newGauge("linux-disk-write-bytes", () => linuxIoMetricsCollector.writeBytes())
-  }
 
   /**
    * Start up API for bringing up a single instance of the Kafka server.
@@ -188,7 +177,7 @@ class LegacyBroker(val config: KafkaConfig,
 
       val canStartup = isStartingUp.compareAndSet(false, true)
       if (canStartup) {
-        brokerState.newState(Starting)
+        brokerState.set(BrokerState.REGISTERING)
 
         /* setup zookeeper */
         initZkClient(time)
@@ -201,15 +190,15 @@ class LegacyBroker(val config: KafkaConfig,
 
         /* Get or create cluster_id */
         _clusterId = getOrGenerateClusterId(zkClient)
-        info(s"Cluster ID = $clusterId")
+        info(s"Cluster ID = ${_clusterId}")
 
         /* load metadata */
         val (preloadedBrokerMetadataCheckpoint, initialOfflineDirs) = getBrokerMetadataAndOfflineDirs
 
         /* check cluster id */
-        if (preloadedBrokerMetadataCheckpoint.clusterId.isDefined && preloadedBrokerMetadataCheckpoint.clusterId.get != clusterId)
+        if (preloadedBrokerMetadataCheckpoint.clusterId.isDefined && preloadedBrokerMetadataCheckpoint.clusterId.get != _clusterId)
           throw new InconsistentClusterIdException(
-            s"The Cluster ID ${clusterId} doesn't match stored clusterId ${preloadedBrokerMetadataCheckpoint.clusterId} in meta.properties. " +
+            s"The Cluster ID ${_clusterId} doesn't match stored clusterId ${preloadedBrokerMetadataCheckpoint.clusterId} in meta.properties. " +
             s"The broker is trying to join the wrong cluster. Configured zookeeper.connect may be wrong.")
 
         /* generate brokerId */
@@ -273,7 +262,7 @@ class LegacyBroker(val config: KafkaConfig,
         val brokerEpoch = zkClient.registerBroker(brokerInfo)
 
         // Now that the broker is successfully registered, checkpoint its metadata
-        checkpointBrokerMetadata(LegacyMetaProperties(config.brokerId, Some(clusterId)))
+        checkpointBrokerMetadata(LegacyMetaProperties(config.brokerId, Some(_clusterId)))
 
         /* start token manager */
         tokenManager = new DelegationTokenManager(config, tokenCache, time , zkClient)
@@ -298,7 +287,7 @@ class LegacyBroker(val config: KafkaConfig,
         brokerMetadataListener = new BrokerMetadataListener(
           config, time,
           BrokerMetadataListener.defaultProcessors(
-            config, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator))
+            config, _clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator))
         brokerMetadataListener.start()
 
         /* Get the authorizer and initialize it if one is specified.*/
@@ -306,7 +295,7 @@ class LegacyBroker(val config: KafkaConfig,
         authorizer.foreach(_.configure(config.originals))
         val authorizerFutures: Map[Endpoint, CompletableFuture[Void]] = authorizer match {
           case Some(authZ) =>
-            authZ.start(brokerInfo.broker.toServerInfo(clusterId, config)).asScala.map { case (ep, cs) =>
+            authZ.start(brokerInfo.broker.toServerInfo(_clusterId, config)).asScala.map { case (ep, cs) =>
               ep -> cs.toCompletableFuture
             }
           case None =>
@@ -323,7 +312,7 @@ class LegacyBroker(val config: KafkaConfig,
         dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
           replicaManager, adminManager, groupCoordinator, transactionCoordinator,
           kafkaController, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache)
+          fetchManager, brokerTopicStats, _clusterId, time, tokenManager, brokerFeatures, featureCache)
 
         dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
           config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
@@ -332,7 +321,7 @@ class LegacyBroker(val config: KafkaConfig,
           controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
             replicaManager, adminManager, groupCoordinator, transactionCoordinator,
             kafkaController, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-            fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache)
+            fetchManager, brokerTopicStats, _clusterId, time, tokenManager, brokerFeatures, featureCache)
 
           controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
             1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)
@@ -355,7 +344,7 @@ class LegacyBroker(val config: KafkaConfig,
 
         socketServer.startProcessingRequests(authorizerFutures)
 
-        brokerState.newState(RunningAsBroker)
+        brokerState.set(BrokerState.RUNNING)
         shutdownLatch = new CountDownLatch(1)
         startupComplete.set(true)
         isStartingUp.set(false)
@@ -595,7 +584,7 @@ class LegacyBroker(val config: KafkaConfig,
       // the shutdown.
       info("Starting controlled shutdown")
 
-      brokerState.newState(PendingControlledShutdown)
+      brokerState.set(BrokerState.PENDING_CONTROLLED_SHUTDOWN)
 
       val shutdownSucceeded = doControlledShutdown(config.controlledShutdownMaxRetries.intValue)
 
@@ -620,7 +609,7 @@ class LegacyBroker(val config: KafkaConfig,
       // `true` at the end of this method.
       if (shutdownLatch.getCount > 0 && isShuttingDown.compareAndSet(false, true)) {
         CoreUtils.swallow(controlledShutdown(), this)
-        brokerState.newState(BrokerShuttingDown)
+        brokerState.set(BrokerState.SHUTTING_DOWN)
 
         if (brokerMetadataListener != null)
           brokerMetadataListener.close()
@@ -689,7 +678,7 @@ class LegacyBroker(val config: KafkaConfig,
         // Clear all reconfigurable instances stored in DynamicBrokerConfig
         config.dynamicConfig.clear()
 
-        brokerState.newState(NotRunning)
+        brokerState.set(BrokerState.NOT_RUNNING)
 
         startupComplete.set(false)
         isShuttingDown.set(false)
@@ -811,4 +800,6 @@ class LegacyBroker(val config: KafkaConfig,
         throw new GenerateBrokerIdException("Failed to generate broker.id", e)
     }
   }
+
+  override def currentState(): BrokerState = brokerState.get()
 }

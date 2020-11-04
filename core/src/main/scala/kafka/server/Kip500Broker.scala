@@ -19,9 +19,9 @@ package kafka.server
 
 import java.util.concurrent.locks.ReentrantLock
 
-import kafka.metrics.{KafkaMetricsGroup, KafkaMetricsReporter}
-import kafka.utils.Logging
+import kafka.metrics.KafkaMetricsReporter
 import org.apache.kafka.common.utils.Time
+import org.apache.kafka.metadata
 
 /**
  * A KIP-500 Kafka broker.
@@ -29,8 +29,7 @@ import org.apache.kafka.common.utils.Time
 class Kip500Broker(config: KafkaConfig,
                    time: Time,
                    threadNamePrefix: Option[String],
-                   kafkaMetricsReporters: Seq[KafkaMetricsReporter])
-                      extends KafkaBroker with Logging with KafkaMetricsGroup {
+                   kafkaMetricsReporters: Seq[KafkaMetricsReporter]) extends KafkaBroker {
   import kafka.server.KafkaServerManager._
 
   val lock = new ReentrantLock()
@@ -87,4 +86,8 @@ class Kip500Broker(config: KafkaConfig,
   }
 
   override def metrics() = null
+
+  override def currentState(): metadata.BrokerState = null
+
+  override def clusterId(): String = null
 }

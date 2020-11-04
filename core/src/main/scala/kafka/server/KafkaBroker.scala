@@ -20,11 +20,16 @@ package kafka.server
 import java.util
 import java.util.concurrent._
 
+import com.yammer.metrics.{core => yammer}
 import kafka.log.LogConfig
+import kafka.metrics.{KafkaMetricsGroup, KafkaYammerMetrics, LinuxIoMetricsCollector}
+import kafka.utils.Logging
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.common.internals.ClusterResourceListeners
 import org.apache.kafka.common.metrics.{KafkaMetricsContext, MetricConfig, Metrics, MetricsReporter, Sensor}
 import org.apache.kafka.common.ClusterResource
+import org.apache.kafka.common.utils.Time
+import org.apache.kafka.metadata.BrokerState
 
 import scala.jdk.CollectionConverters._
 import scala.collection.Seq
@@ -108,9 +113,34 @@ object KafkaBroker {
  * Represents the lifecycle of a single Kafka broker. Handles all functionality required
  * to start up and shutdown a single Kafka node.
  */
-trait KafkaBroker {
+trait KafkaBroker extends Logging with KafkaMetricsGroup {
   def startup(): Unit
   def shutdown(): Unit
   def awaitShutdown(): Unit
   def metrics(): Metrics
+  def currentState(): BrokerState
+  def clusterId(): String
+
+  newKafkaServerGauge("BrokerState", () => currentState().value())
+  newKafkaServerGauge("ClusterId", () => clusterId())
+  newKafkaServerGauge("yammer-metrics-count", () =>  KafkaYammerMetrics.defaultRegistry.allMetrics.size)
+
+  val linuxIoMetricsCollector = new LinuxIoMetricsCollector("/proc", Time.SYSTEM, logger.underlying)
+
+  if (linuxIoMetricsCollector.usable()) {
+    newGauge("linux-disk-read-bytes", () => linuxIoMetricsCollector.readBytes())
+    newGauge("linux-disk-write-bytes", () => linuxIoMetricsCollector.writeBytes())
+  }
+
+  // For backwards compatibility, we need to keep older metrics tied
+  // to their original name when this class was named `KafkaServer`
+  private def newKafkaServerGauge[T](metricName: String, gauge: yammer.Gauge[T]): yammer.Gauge[T] = {
+    val explicitName = explicitMetricName(
+      group = "kafka.server",
+      typeName = "KafkaServer",
+      name = metricName,
+      tags = Map.empty
+    )
+    KafkaYammerMetrics.defaultRegistry().newGauge(explicitName, gauge)
+  }
 }

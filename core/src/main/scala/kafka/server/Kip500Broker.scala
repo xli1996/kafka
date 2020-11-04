@@ -87,7 +87,7 @@ class Kip500Broker(config: KafkaConfig,
 
   override def metrics() = null
 
-  override def currentState(): metadata.BrokerState = null
+  override def currentState(): BrokerState = null
 
   override def clusterId(): String = null
 }

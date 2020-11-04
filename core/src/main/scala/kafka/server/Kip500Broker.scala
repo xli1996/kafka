@@ -21,7 +21,7 @@ import java.util.concurrent.locks.ReentrantLock
 
 import kafka.metrics.KafkaMetricsReporter
 import org.apache.kafka.common.utils.Time
-import org.apache.kafka.metadata
+import org.apache.kafka.metadata.BrokerState
 
 /**
  * A KIP-500 Kafka broker.

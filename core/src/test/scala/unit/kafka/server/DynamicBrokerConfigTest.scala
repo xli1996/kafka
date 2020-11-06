@@ -322,8 +322,8 @@ class DynamicBrokerConfigTest {
   def testDynamicListenerConfig(): Unit = {
     val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 9092)
     val oldConfig =  KafkaConfig.fromProps(props)
-    val kafkaServer: LegacyBroker = EasyMock.createMock(classOf[kafka.server.LegacyBroker])
-    EasyMock.expect(kafkaServer.config).andReturn(oldConfig).anyTimes()
+    val kafkaServer: KafkaBroker = EasyMock.createMock(classOf[kafka.server.KafkaBroker])
+    EasyMock.expect(kafkaServer.getConfig()).andReturn(oldConfig).anyTimes()
     EasyMock.replay(kafkaServer)
 
     props.put(KafkaConfig.ListenersProp, "PLAINTEXT://hostname:9092,SASL_PLAINTEXT://hostname:9093")
@@ -339,7 +339,7 @@ class DynamicBrokerConfigTest {
   def testAuthorizerConfig(): Unit = {
     val props = TestUtils.createBrokerConfig(0, TestUtils.MockZkConnect, port = 9092)
     val oldConfig =  KafkaConfig.fromProps(props)
-    val kafkaServer: LegacyBroker = EasyMock.createMock(classOf[kafka.server.LegacyBroker])
+    val kafkaServer: KafkaBroker = EasyMock.createMock(classOf[kafka.server.KafkaBroker])
 
     class TestAuthorizer extends Authorizer with Reconfigurable {
       @volatile var superUsers = ""
@@ -358,17 +358,17 @@ class DynamicBrokerConfigTest {
     }
 
     val authorizer = new TestAuthorizer
-    EasyMock.expect(kafkaServer.config).andReturn(oldConfig).anyTimes()
-    EasyMock.expect(kafkaServer.authorizer).andReturn(Some(authorizer)).anyTimes()
+    EasyMock.expect(kafkaServer.getConfig()).andReturn(oldConfig).anyTimes()
+    EasyMock.expect(kafkaServer.getAuthorizer()).andReturn(Some(authorizer)).anyTimes()
     EasyMock.replay(kafkaServer)
     try {
-      kafkaServer.config.dynamicConfig.addReconfigurables(kafkaServer)
+      kafkaServer.getConfig().dynamicConfig.addReconfigurables(kafkaServer)
     } catch {
       case _: Throwable => // We are only testing authorizer reconfiguration, ignore any exceptions due to incomplete mock
     }
 
     props.put("super.users", "User:admin")
-    kafkaServer.config.dynamicConfig.updateBrokerConfig(0, props)
+    kafkaServer.getConfig().dynamicConfig.updateBrokerConfig(0, props)
     assertEquals("User:admin", authorizer.superUsers)
   }
 

@@ -44,7 +44,7 @@ class FeatureCommandTest extends BaseRequestTest {
                                       targetServers: Set[LegacyBroker]): Unit = {
     targetServers.foreach(s => {
       s.brokerFeatures.setSupportedFeatures(features)
-      s.zkClient.updateBrokerInfo(s.createBrokerInfo)
+      s.zkClient.updateBrokerInfo(s.createBrokerInfo())
     })
 
     // Wait until updates to all BrokerZNode supported features propagate to the controller.

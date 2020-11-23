@@ -1,164 +1,108 @@
+#!/usr/bin/env groovy
+
 /*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
- *  Licensed to the Apache Software Foundation (ASF) under one or more
- *  contributor license agreements.  See the NOTICE file distributed with
- *  this work for additional information regarding copyright ownership.
- *  The ASF licenses this file to You under the Apache License, Version 2.0
- *  (the "License"); you may not use this file except in compliance with
- *  the License.  You may obtain a copy of the License at
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
-def setupGradle() {
-  // Delete gradle cache to workaround cache corruption bugs, see KAFKA-3167
-  dir('.gradle') {
-    deleteDir()
-  }
-  sh './gradlew -version'
+def config = jobConfig {
+    cron = '@midnight'
+    nodeLabel = 'docker-oraclejdk8'
+    testResultSpecs = ['junit': '**/build/test-results/**/TEST-*.xml']
+    slackChannel = '#kafka-warn'
+    timeoutHours = 4
+    runMergeCheck = false
 }
 
-def doValidation() {
-  sh '''
-    ./gradlew -PscalaVersion=$SCALA_VERSION clean compileJava compileScala compileTestJava compileTestScala \
-        spotlessScalaCheck checkstyleMain checkstyleTest spotbugsMain rat \
-        --profile --no-daemon --continue -PxmlSpotBugsReport=true
-  '''
-}
 
-def doTest() {
-  sh '''
-    ./gradlew -PscalaVersion=$SCALA_VERSION unitTest integrationTest \
-        --profile --no-daemon --continue -PtestLoggingEvents=started,passed,skipped,failed \
-        -PignoreFailures=true -PmaxParallelForks=2 -PmaxTestRetries=1 -PmaxTestRetryFailures=5
-  '''
-  junit '**/build/test-results/**/TEST-*.xml'
-}
+def job = {
+    // https://github.com/confluentinc/common-tools/blob/master/confluent/config/dev/versions.json
+    def kafkaMuckrakeVersionMap = [
+            "2.4": "5.4.x",
+            "2.3": "5.3.x",
+            "trunk": "master",
+            "master": "master"
+    ]
 
-def doStreamsArchetype() {
-  echo 'Verify that Kafka Streams archetype compiles'
+    // Per KAFKA-7524, Scala 2.12 is the default, yet we currently support the previous minor version.
+    stage("Check compilation compatibility with Scala 2.11") {
+        sh "gradle"
+        sh "./gradlew clean compileJava compileScala compileTestJava compileTestScala " +
+                "--stacktrace -PscalaVersion=2.11"
+    }
 
-  sh '''
-    ./gradlew streams:install clients:install connect:json:install connect:api:install \
-         || { echo 'Could not install kafka-streams.jar (and dependencies) locally`'; exit 1; }
-  '''
+    stage("Compile and validate") {
+        sh "./gradlew clean assemble spotlessScalaCheck checkstyleMain checkstyleTest spotbugsMain " +
+                "--no-daemon --stacktrace --continue -PxmlSpotBugsReport=true"
+    }
 
-  VERSION = sh(script: 'grep "^version=" gradle.properties | cut -d= -f 2', returnStdout: true).trim()
-
-  dir('streams/quickstart') {
-    sh '''
-      mvn clean install -Dgpg.skip  \
-          || { echo 'Could not `mvn install` streams quickstart archetype'; exit 1; }
-    '''
-
-    dir('test-streams-archetype') {
-      // Note the double quotes for variable interpolation
-      sh """
-        echo "Y" | mvn archetype:generate \
-            -DarchetypeCatalog=local \
-            -DarchetypeGroupId=org.apache.kafka \
-            -DarchetypeArtifactId=streams-quickstart-java \
-            -DarchetypeVersion=${VERSION} \
-            -DgroupId=streams.examples \
-            -DartifactId=streams.examples \
-            -Dversion=0.1 \
-            -Dpackage=myapps \
-            || { echo 'Could not create new project using streams quickstart archetype'; exit 1; }
-      """
-
-      dir('streams.examples') {
-        sh '''
-          mvn compile \
-              || { echo 'Could not compile streams quickstart archetype project'; exit 1; }
-        '''
+    if (config.publish && config.isDevJob) {
+      withVaultFile([["gradle/artifactory_snapshots_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
+          stage("Publish to artifactory") {
+              sh "./gradlew --init-script ${GRADLE_NEXUS_SETTINGS} --no-daemon uploadArchivesAll"
+          }
       }
     }
-  }
-}
 
-def tryStreamsArchetype() {
-  try {
-    doStreamsArchetype()
-  } catch(err) {
-    echo 'Failed to build Kafka Streams archetype, marking this build UNSTABLE'
-    currentBuild.result = 'UNSTABLE'
-  }
-}
+    stage("Run Tests and build cp-downstream-builds") {
+        def testTargets = [
+                "Step run-tests"           : {
+                    echo "Running unit and integration tests"
+                    sh "./gradlew unitTest integrationTest " +
+                            "--no-daemon --stacktrace --continue -PtestLoggingEvents=started,passed,skipped,failed -PmaxParallelForks=4 -PignoreFailures=true"
+                },
+                "Step cp-downstream-builds": {
+                    echo "Building cp-downstream-builds"
+                    if (config.isPrJob) {
+                        def muckrakeBranch = kafkaMuckrakeVersionMap[env.CHANGE_TARGET]
+                        def forkRepo = "${env.CHANGE_FORK ?: "confluentinc"}/kafka.git"
+                        def forkBranch = env.CHANGE_BRANCH
+                        echo "Schedule test-cp-downstream-builds with :"
+                        echo "Muckrake branch : ${muckrakeBranch}"
+                        echo "PR fork repo : ${forkRepo}"
+                        echo "PR fork branch : ${forkBranch}"
+                        buildResult = build job: 'test-cp-downstream-builds', parameters: [
+                                [$class: 'StringParameterValue', name: 'BRANCH', value: muckrakeBranch],
+                                [$class: 'StringParameterValue', name: 'TEST_PATH', value: "muckrake/tests/dummy_test.py"],
+                                [$class: 'StringParameterValue', name: 'KAFKA_REPO', value: forkRepo],
+                                [$class: 'StringParameterValue', name: 'KAFKA_BRANCH', value: forkBranch]],
+                                propagate: true, wait: true
+                    }
+                }
+        ]
 
-
-pipeline {
-  agent none
-  stages {
-    stage('Build') {
-      parallel {
-        stage('JDK 8 and Scala 2.11') {
-          agent { label 'ubuntu' }
-          tools {
-            jdk 'JDK 1.8 (latest)'
-            maven 'Maven 3.6.3'
-          }
-          options {
-            timeout(time: 8, unit: 'HOURS')
-            timestamps()
-          }
-          environment {
-            SCALA_VERSION=2.11
-          }
-          steps {
-            setupGradle()
-            doValidation()
-            doTest()
-            tryStreamsArchetype()
-          }
-        }
-
-        stage('JDK 11 and Scala 2.12') {
-          agent { label 'ubuntu' }
-          tools {
-            jdk 'JDK 11 (latest)'
-          }
-          options {
-            timeout(time: 8, unit: 'HOURS')
-            timestamps()
-          }
-          environment {
-            SCALA_VERSION=2.12
-          }
-          steps {
-            setupGradle()
-            doValidation()
-            doTest()
-            echo 'Skipping Kafka Streams archetype test for Java 11'
-          }
-        }
-
-        stage('JDK 11 and Scala 2.13') {
-          agent { label 'ubuntu' }
-          tools {
-            jdk 'JDK 11 (latest)'
-          }
-          options {
-            timeout(time: 8, unit: 'HOURS')
-            timestamps()
-          }
-          environment {
-            SCALA_VERSION=2.13
-          }
-          steps {
-            setupGradle()
-            doValidation()
-            doTest()
-            echo 'Skipping Kafka Streams archetype test for Java 11'
-          }
-        }
-      }
+        parallel testTargets
+        return null
     }
-  }
 }
+
+def post = {
+    stage('Upload results') {
+        // Kafka failed test stdout files
+        archiveArtifacts artifacts: '**/testOutput/*.stdout', allowEmptyArchive: true
+
+        def summary = junit '**/build/test-results/**/TEST-*.xml'
+        def total = summary.getTotalCount()
+        def failed = summary.getFailCount()
+        def skipped = summary.getSkipCount()
+        summary = "Test results:\n\t"
+        summary = summary + ("Passed: " + (total - failed - skipped))
+        summary = summary + (", Failed: " + failed)
+        summary = summary + (", Skipped: " + skipped)
+        return summary;
+    }
+}
+
+runJob config, job, post

@@ -487,9 +487,10 @@ class TransactionStateManager(brokerId: Int,
   }
 
   private def validateTransactionTopicPartitionCountIsStable(): Unit = {
+    val alreadyDeterminedPartitionCount = transactionTopicPartitionCount
     val curTransactionTopicPartitionCount = transactionTopicPartitionCountFunc()
-    if (transactionTopicPartitionCount != curTransactionTopicPartitionCount)
-      throw new KafkaException(s"Transaction topic number of partitions has changed from $transactionTopicPartitionCount to $curTransactionTopicPartitionCount")
+    if (alreadyDeterminedPartitionCount != curTransactionTopicPartitionCount)
+      throw new KafkaException(s"Transaction topic number of partitions has changed from $alreadyDeterminedPartitionCount to $curTransactionTopicPartitionCount")
   }
 
   def appendTransactionToLog(transactionalId: String,

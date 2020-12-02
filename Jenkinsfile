@@ -37,7 +37,7 @@ def retryFlagsString(jobConfig) {
 def downstreamBuildFailureOutput = ""
 def publishStep(String vaultSecret) {
     withDockerServer([uri: dockerHost()]) {
-        withVaultFile([["gradle/artifactory_hotfix_settings", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
+        withVaultFile([["gradle/artifactory_hotfix_settings_6.1.0-beta201006024150", "settings_file", "${env.WORKSPACE}/init.gradle", "GRADLE_NEXUS_SETTINGS"]]) {
             writeFile file:'.ci/extract-iam-credential.sh', text:libraryResource('scripts/extract-iam-credential.sh')
             sh """
                 bash .ci/extract-iam-credential.sh && rm .ci/extract-iam-credential.sh
@@ -83,7 +83,7 @@ def job = {
             ciTool("ci-push-tag ${env.WORKSPACE} kafka")
         }
 
-        publishStep('artifactory_hotfix_settings')
+        publishStep('artifactory_hotfix_settings_6.1.0-beta201006024150')
       }
     }
 

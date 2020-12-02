@@ -106,7 +106,20 @@ class TransactionStateManager(brokerId: Int,
   private[transaction] val transactionMetadataCache: mutable.Map[Int, TxnMetadataCacheEntry] = mutable.Map()
 
   /** number of partitions for the transaction log topic */
-  private val transactionTopicPartitionCount = transactionTopicPartitionCountFunc()
+  private var _transactionTopicPartitionCount: Option[Int] = Option.empty // lazy, once-only evaluation
+  private def transactionTopicPartitionCount: Int = {
+    _transactionTopicPartitionCount match {
+      case Some(partitionCount) => partitionCount
+      case None => synchronized { // make sure we only invoke the function once
+        _transactionTopicPartitionCount match {
+          case Some(partitionCount) => partitionCount // another thread beat us to it
+          case None =>
+            _transactionTopicPartitionCount = Some(transactionTopicPartitionCountFunc())
+            _transactionTopicPartitionCount.get
+        }
+      }
+    }
+  }
 
   /** setup metrics*/
   private val partitionLoadSensor = metrics.sensor(TransactionStateManager.LoadTimeSensor)

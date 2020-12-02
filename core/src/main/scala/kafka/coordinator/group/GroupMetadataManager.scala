@@ -89,7 +89,20 @@ class GroupMetadataManager(brokerId: Int,
   private val shuttingDown = new AtomicBoolean(false)
 
   /* number of partitions for the consumer metadata topic */
-  private val groupMetadataTopicPartitionCount = groupMetadataTopicPartitionCountFunc()
+  private var _groupMetadataTopicPartitionCount: Option[Int] = Option.empty // lazy, once-only evaluation
+  private def groupMetadataTopicPartitionCount: Int = {
+    _groupMetadataTopicPartitionCount match {
+      case Some(partitionCount) => partitionCount
+      case None => synchronized { // make sure we only invoke the function once
+        _groupMetadataTopicPartitionCount match {
+          case Some(partitionCount) => partitionCount // another thread beat us to it
+          case None =>
+            _groupMetadataTopicPartitionCount = Some(groupMetadataTopicPartitionCountFunc())
+            _groupMetadataTopicPartitionCount.get
+        }
+      }
+    }
+  }
 
   /* single-thread scheduler to handle offset/group metadata cache loading and unloading */
   private val scheduler = new KafkaScheduler(threads = 1, threadNamePrefix = "group-metadata-manager-")

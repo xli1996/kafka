@@ -225,7 +225,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
     if (legacyController == null) {
-      throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
+      throw new UnsupportedVersionException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(leaderAndIsrRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
@@ -246,7 +246,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val stopReplicaRequest = request.body[StopReplicaRequest]
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
     if (legacyController == null) {
-      throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
+      throw new UnsupportedVersionException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(stopReplicaRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
@@ -304,7 +304,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
     if (legacyController == null) {
-      throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
+      throw new UnsupportedVersionException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(updateMetadataRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
@@ -349,7 +349,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val controlledShutdownRequest = request.body[ControlledShutdownRequest]
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
     if (legacyController == null) {
-      throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
+      throw new UnsupportedVersionException(s"Request $request should never happen in KIP-500 mode.")
     }
 
     def controlledShutdownCallback(controlledShutdownResult: Try[Set[TopicPartition]]): Unit = {

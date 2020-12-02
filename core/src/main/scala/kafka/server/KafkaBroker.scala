@@ -126,17 +126,17 @@ trait KafkaBroker extends Logging with KafkaMetricsGroup {
   def clusterId(): String
 
   // methods required for legacy/kip500-agnostic dynamic configuration
-  def getConfig(): KafkaConfig
-  def getAuthorizer(): Option[Authorizer]
-  def getKafkaYammerMetrics(): KafkaYammerMetrics
-  def getQuotaManagers(): QuotaFactory.QuotaManagers
-  def getDataPlaneRequestHandlerPool(): KafkaRequestHandlerPool
-  def getSocketServer(): SocketServer
-  def getReplicaManager(): ReplicaManager
-  def getLogManager(): LogManager
-  def getKafkaScheduler(): KafkaScheduler
-  def getKafkaController(): Option[KafkaController] = None // must override in legacy broker
-  def createBrokerInfo(): BrokerInfo = throw new UnsupportedOperationException("Unsupported in KIP-500 mode") // must override in legacy broker
+  def config: KafkaConfig
+  def authorizer: Option[Authorizer]
+  def kafkaYammerMetrics: KafkaYammerMetrics
+  def quotaManagers: QuotaFactory.QuotaManagers
+  def dataPlaneRequestHandlerPool: KafkaRequestHandlerPool
+  def socketServer: SocketServer
+  def replicaManager: ReplicaManager
+  def logManager: LogManager
+  def kafkaScheduler: KafkaScheduler
+  def legacyController: Option[KafkaController] = None // must override in legacy broker
+  def createBrokerInfo: BrokerInfo = throw new UnsupportedOperationException("Unsupported in KIP-500 mode") // must override in legacy broker
 
   newKafkaServerGauge("BrokerState", () => currentState().value())
   newKafkaServerGauge("ClusterId", () => clusterId())

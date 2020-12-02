@@ -154,15 +154,7 @@ class LegacyBroker(val config: KafkaConfig,
   // Visible for testing
   private[kafka] def zkClient = _zkClient
 
-  override def getConfig(): KafkaConfig = config
-  override def getAuthorizer(): Option[Authorizer] = authorizer
-  override def getKafkaYammerMetrics(): KafkaYammerMetrics = kafkaYammerMetrics
-  override def getQuotaManagers(): QuotaFactory.QuotaManagers = quotaManagers
-  override def getDataPlaneRequestHandlerPool(): KafkaRequestHandlerPool = dataPlaneRequestHandlerPool
-  override def getSocketServer(): SocketServer = socketServer
-  override def getReplicaManager(): ReplicaManager = replicaManager
-  override def getKafkaScheduler(): KafkaScheduler = kafkaScheduler
-  override def getKafkaController(): Option[KafkaController] = Some(kafkaController)
+  override def legacyController: Option[KafkaController] = Some(kafkaController)
 
   private[kafka] def brokerTopicStats = _brokerTopicStats
 
@@ -265,7 +257,7 @@ class LegacyBroker(val config: KafkaConfig,
         replicaManager.startup()
         brokerToControllerChannelManager.start()
 
-        val brokerInfo = createBrokerInfo()
+        val brokerInfo = createBrokerInfo
         val brokerEpoch = zkClient.registerBroker(brokerInfo)
 
         // Now that the broker is successfully registered, checkpoint its metadata
@@ -407,7 +399,7 @@ class LegacyBroker(val config: KafkaConfig,
     zkClient.getClusterId.getOrElse(zkClient.createOrGetClusterId(CoreUtils.generateUuidAsBase64()))
   }
 
-  override def createBrokerInfo(): BrokerInfo = {
+  override def createBrokerInfo: BrokerInfo = {
     val endPoints = config.advertisedListeners.map(e => s"${e.host}:${e.port}")
     zkClient.getAllBrokersInCluster.filter(_.id != config.brokerId).foreach { broker =>
       val commonEndPoints = broker.endPoints.map(e => s"${e.host}:${e.port}").intersect(endPoints)
@@ -697,8 +689,6 @@ class LegacyBroker(val config: KafkaConfig,
    * After calling shutdown(), use this API to wait until the shutdown is complete
    */
   def awaitShutdown(): Unit = shutdownLatch.await()
-
-  def getLogManager(): LogManager = logManager
 
   def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
 

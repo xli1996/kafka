@@ -250,20 +250,20 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
    * directly. They are provided both old and new configs.
    */
   def addReconfigurables(kafkaServer: KafkaBroker): Unit = {
-    kafkaServer.getAuthorizer() match {
+    kafkaServer.authorizer match {
       case Some(authz: Reconfigurable) => addReconfigurable(authz)
       case _ =>
     }
-    addReconfigurable(kafkaServer.getKafkaYammerMetrics())
+    addReconfigurable(kafkaServer.kafkaYammerMetrics)
     addReconfigurable(new DynamicMetricsReporters(kafkaConfig.brokerId, kafkaServer))
     addReconfigurable(new DynamicClientQuotaCallback(kafkaConfig.brokerId, kafkaServer))
 
     addBrokerReconfigurable(new DynamicThreadPool(kafkaServer))
-    if (kafkaServer.getLogManager().cleaner != null)
-      addBrokerReconfigurable(kafkaServer.getLogManager().cleaner)
-    addBrokerReconfigurable(new DynamicLogConfig(kafkaServer.getLogManager(), kafkaServer))
+    if (kafkaServer.logManager.cleaner != null)
+      addBrokerReconfigurable(kafkaServer.logManager.cleaner)
+    addBrokerReconfigurable(new DynamicLogConfig(kafkaServer.logManager, kafkaServer))
     addBrokerReconfigurable(new DynamicListenerConfig(kafkaServer))
-    addBrokerReconfigurable(kafkaServer.getSocketServer())
+    addBrokerReconfigurable(kafkaServer.socketServer)
   }
 
   def addReconfigurable(reconfigurable: Reconfigurable): Unit = CoreUtils.inWriteLock(lock) {
@@ -679,7 +679,7 @@ class DynamicLogConfig(logManager: LogManager, server: KafkaBroker) extends Brok
     updateLogsConfig(newBrokerDefaults.asScala)
 
     if (logManager.currentDefaultConfig.uncleanLeaderElectionEnable && !origUncleanLeaderElectionEnable) {
-      server.getKafkaController().foreach { _.enableDefaultUncleanLeaderElection() }
+      server.legacyController.foreach { _.enableDefaultUncleanLeaderElection() }
     }
   }
 }
@@ -719,24 +719,24 @@ class DynamicThreadPool(server: KafkaBroker) extends BrokerReconfigurable {
 
   override def reconfigure(oldConfig: KafkaConfig, newConfig: KafkaConfig): Unit = {
     if (newConfig.numIoThreads != oldConfig.numIoThreads)
-      server.getDataPlaneRequestHandlerPool().resizeThreadPool(newConfig.numIoThreads)
+      server.dataPlaneRequestHandlerPool.resizeThreadPool(newConfig.numIoThreads)
     if (newConfig.numNetworkThreads != oldConfig.numNetworkThreads)
-      server.getSocketServer().resizeThreadPool(oldConfig.numNetworkThreads, newConfig.numNetworkThreads)
+      server.socketServer.resizeThreadPool(oldConfig.numNetworkThreads, newConfig.numNetworkThreads)
     if (newConfig.numReplicaFetchers != oldConfig.numReplicaFetchers)
-      server.getReplicaManager().replicaFetcherManager.resizeThreadPool(newConfig.numReplicaFetchers)
+      server.replicaManager.replicaFetcherManager.resizeThreadPool(newConfig.numReplicaFetchers)
     if (newConfig.numRecoveryThreadsPerDataDir != oldConfig.numRecoveryThreadsPerDataDir)
-      server.getLogManager().resizeRecoveryThreadPool(newConfig.numRecoveryThreadsPerDataDir)
+      server.logManager.resizeRecoveryThreadPool(newConfig.numRecoveryThreadsPerDataDir)
     if (newConfig.backgroundThreads != oldConfig.backgroundThreads)
-      server.getKafkaScheduler().resizeThreadPool(newConfig.backgroundThreads)
+      server.kafkaScheduler.resizeThreadPool(newConfig.backgroundThreads)
   }
 
   private def currentValue(name: String): Int = {
     name match {
-      case KafkaConfig.NumIoThreadsProp => server.getConfig().numIoThreads
-      case KafkaConfig.NumNetworkThreadsProp => server.getConfig().numNetworkThreads
-      case KafkaConfig.NumReplicaFetchersProp => server.getConfig().numReplicaFetchers
-      case KafkaConfig.NumRecoveryThreadsPerDataDirProp => server.getConfig().numRecoveryThreadsPerDataDir
-      case KafkaConfig.BackgroundThreadsProp => server.getConfig().backgroundThreads
+      case KafkaConfig.NumIoThreadsProp => server.config.numIoThreads
+      case KafkaConfig.NumNetworkThreadsProp => server.config.numNetworkThreads
+      case KafkaConfig.NumReplicaFetchersProp => server.config.numReplicaFetchers
+      case KafkaConfig.NumRecoveryThreadsPerDataDirProp => server.config.numRecoveryThreadsPerDataDir
+      case KafkaConfig.BackgroundThreadsProp => server.config.backgroundThreads
       case n => throw new IllegalStateException(s"Unexpected config $n")
     }
   }
@@ -744,7 +744,7 @@ class DynamicThreadPool(server: KafkaBroker) extends BrokerReconfigurable {
 
 class DynamicMetricsReporters(brokerId: Int, server: KafkaBroker) extends Reconfigurable {
 
-  private val dynamicConfig = server.getConfig().dynamicConfig
+  private val dynamicConfig = server.config.dynamicConfig
   private val metrics = server.metrics()
   private val propsOverride = Map[String, AnyRef](KafkaConfig.BrokerIdProp -> brokerId.toString)
   private val currentReporters = mutable.Map[String, MetricsReporter]()
@@ -807,7 +807,7 @@ class DynamicMetricsReporters(brokerId: Int, server: KafkaBroker) extends Reconf
       currentReporters += reporter.getClass.getName -> reporter
     }
     KafkaBroker.notifyClusterListeners(server.clusterId(), reporters.asScala)
-    KafkaBroker.notifyMetricsReporters(server.clusterId(), server.getConfig(), reporters.asScala)
+    KafkaBroker.notifyMetricsReporters(server.clusterId(), server.config, reporters.asScala)
   }
 
   private def removeReporter(className: String): Unit = {
@@ -874,7 +874,7 @@ class DynamicClientQuotaCallback(brokerId: Int, server: KafkaBroker) extends Rec
 
   override def reconfigurableConfigs(): util.Set[String] = {
     val configs = new util.HashSet[String]()
-    server.getQuotaManagers().clientQuotaCallback.foreach {
+    server.quotaManagers.clientQuotaCallback.foreach {
       case callback: Reconfigurable => configs.addAll(callback.reconfigurableConfigs)
       case _ =>
     }
@@ -882,15 +882,15 @@ class DynamicClientQuotaCallback(brokerId: Int, server: KafkaBroker) extends Rec
   }
 
   override def validateReconfiguration(configs: util.Map[String, _]): Unit = {
-    server.getQuotaManagers().clientQuotaCallback.foreach {
+    server.quotaManagers.clientQuotaCallback.foreach {
       case callback: Reconfigurable => callback.validateReconfiguration(configs)
       case _ =>
     }
   }
 
   override def reconfigure(configs: util.Map[String, _]): Unit = {
-    val config = server.getConfig()
-    server.getQuotaManagers().clientQuotaCallback.foreach {
+    val config = server.config
+    server.quotaManagers.clientQuotaCallback.foreach {
       case callback: Reconfigurable =>
         config.dynamicConfig.maybeReconfigure(callback, config.dynamicConfig.currentKafkaConfig, configs)
         true
@@ -906,7 +906,7 @@ class DynamicListenerConfig(server: KafkaBroker) extends BrokerReconfigurable wi
   }
 
   def validateReconfiguration(newConfig: KafkaConfig): Unit = {
-    val oldConfig = server.getConfig()
+    val oldConfig = server.config
     val newListeners = listenersToMap(newConfig.listeners)
     val newAdvertisedListeners = listenersToMap(newConfig.advertisedListeners)
     val oldListeners = listenersToMap(oldConfig.listeners)
@@ -943,11 +943,11 @@ class DynamicListenerConfig(server: KafkaBroker) extends BrokerReconfigurable wi
     if (listenersAdded.nonEmpty || listenersRemoved.nonEmpty)
       LoginManager.closeAll()
 
-    server.getSocketServer().removeListeners(listenersRemoved)
+    server.socketServer.removeListeners(listenersRemoved)
     if (listenersAdded.nonEmpty)
-      server.getSocketServer().addListeners(listenersAdded)
+      server.socketServer.addListeners(listenersAdded)
 
-    server.getKafkaController().foreach { _.updateBrokerInfo(server.createBrokerInfo()) }
+    server.legacyController.foreach { _.updateBrokerInfo(server.createBrokerInfo) }
   }
 
   private def listenersToMap(listeners: Seq[EndPoint]): Map[ListenerName, EndPoint] =

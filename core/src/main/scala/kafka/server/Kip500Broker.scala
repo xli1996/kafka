@@ -125,15 +125,6 @@ class Kip500Broker(val config: KafkaConfig,
 
   var metaLogManager: MetaLogManager = null
 
-  override def getConfig(): KafkaConfig = config
-  override def getAuthorizer(): Option[Authorizer] = authorizer
-  override def getKafkaYammerMetrics(): KafkaYammerMetrics = kafkaYammerMetrics
-  override def getQuotaManagers(): QuotaFactory.QuotaManagers = quotaManagers
-  override def getDataPlaneRequestHandlerPool(): KafkaRequestHandlerPool = dataPlaneRequestHandlerPool
-  override def getSocketServer(): SocketServer = socketServer
-  override def getReplicaManager(): ReplicaManager = replicaManager
-  override def getKafkaScheduler(): KafkaScheduler = kafkaScheduler
-
   private[kafka] def brokerTopicStats = _brokerTopicStats
 
   private def maybeChangeStatus(from: ProcessStatus, to: ProcessStatus): Boolean = {
@@ -496,8 +487,6 @@ class Kip500Broker(val config: KafkaConfig,
       lock.unlock()
     }
   }
-
-  def getLogManager(): LogManager = logManager
 
   override def currentState(): BrokerState = {
     if (logManager == null) {

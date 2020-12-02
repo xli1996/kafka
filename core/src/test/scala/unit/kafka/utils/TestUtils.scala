@@ -24,7 +24,7 @@ import java.nio.file.{Files, StandardOpenOption}
 import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.{Arrays, Collections, Properties}
-import java.util.concurrent.{Callable, ExecutionException, Executors, TimeUnit}
+import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, Executors, TimeUnit}
 
 import javax.net.ssl.X509TrustManager
 import kafka.api._
@@ -1058,7 +1058,7 @@ object TestUtils extends Logging {
                    maxPidExpirationMs = 60 * 60 * 1000,
                    scheduler = time.scheduler,
                    time = time,
-                   cleanShutdownFunc = _ => {},
+                   cleanShutdownCompletableFuture = new CompletableFuture[Boolean](),
                    brokerTopicStats = new BrokerTopicStats,
                    logDirFailureChannel = new LogDirFailureChannel(logDirs.size))
   }

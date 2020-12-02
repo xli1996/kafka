@@ -53,8 +53,6 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import scala.Option;
 import scala.collection.JavaConverters;
-import scala.runtime.AbstractFunction1;
-import scala.runtime.BoxedUnit;
 
 import java.io.File;
 import java.io.IOException;
@@ -65,6 +63,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -85,13 +84,6 @@ public class PartitionMakeFollowerBenchmark {
     private OffsetCheckpoints offsetCheckpoints = Mockito.mock(OffsetCheckpoints.class);
     private DelayedOperations delayedOperations  = Mockito.mock(DelayedOperations.class);
     private ExecutorService executorService = Executors.newSingleThreadExecutor();
-
-    private AbstractFunction1<Object, BoxedUnit> cleanShutdownFunc = new AbstractFunction1<Object, BoxedUnit>() {
-        @Override
-        public BoxedUnit apply(Object v1) {
-            return null;
-        }
-    };
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -116,7 +108,7 @@ public class PartitionMakeFollowerBenchmark {
             1000L,
             60000,
             scheduler,
-            cleanShutdownFunc,
+            new CompletableFuture<>(),
             brokerTopicStats,
             logDirFailureChannel,
             Time.SYSTEM);

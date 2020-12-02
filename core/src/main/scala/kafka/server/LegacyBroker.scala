@@ -236,7 +236,11 @@ class LegacyBroker(val config: KafkaConfig,
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
         /* start log manager */
-        logManager = LogManager(config, initialOfflineDirs, zkClient, brokerState, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+        val cleanShutdownCompletableFuture = new CompletableFuture[Boolean]()
+        logManager = LogManager(config, initialOfflineDirs, Some(zkClient), cleanShutdownCompletableFuture, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+        if (!cleanShutdownCompletableFuture.get()) {
+          brokerState.set(BrokerState.RECOVERING_FROM_UNCLEAN_SHUTDOWN)
+        }
         logManager.startup()
 
         metadataCache = new MetadataCache(config.brokerId)

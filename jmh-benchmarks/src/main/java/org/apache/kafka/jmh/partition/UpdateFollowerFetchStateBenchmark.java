@@ -50,8 +50,6 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import scala.Option;
 import scala.collection.JavaConverters;
-import scala.runtime.AbstractFunction1;
-import scala.runtime.BoxedUnit;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -59,6 +57,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -77,13 +76,6 @@ public class UpdateFollowerFetchStateBenchmark {
     private LogManager logManager;
     private Partition partition;
 
-    private AbstractFunction1<Object, BoxedUnit> cleanShutdownFunc = new AbstractFunction1<Object, BoxedUnit>() {
-        @Override
-        public BoxedUnit apply(Object v1) {
-            return null;
-        }
-    };
-
     @Setup(Level.Trial)
     public void setUp() {
         scheduler.startup();
@@ -101,7 +93,7 @@ public class UpdateFollowerFetchStateBenchmark {
                 1000L,
                 60000,
                 scheduler,
-                cleanShutdownFunc,
+                new CompletableFuture<>(),
                 brokerTopicStats,
                 logDirFailureChannel,
                 Time.SYSTEM);

@@ -73,8 +73,6 @@ import scala.collection.Iterator;
 import scala.collection.JavaConverters;
 import scala.compat.java8.OptionConverters;
 import scala.collection.Map;
-import scala.runtime.AbstractFunction1;
-import scala.runtime.BoxedUnit;
 
 import java.io.File;
 import java.io.IOException;
@@ -87,6 +85,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -105,13 +104,6 @@ public class ReplicaFetcherThreadBenchmark {
     private File logDir = new File(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString());
     private KafkaScheduler scheduler = new KafkaScheduler(1, "scheduler", true);
     private Pool<TopicPartition, Partition> pool = new Pool<TopicPartition, Partition>(Option.empty());
-
-    private AbstractFunction1<Object, BoxedUnit> cleanShutdownFunc = new AbstractFunction1<Object, BoxedUnit>() {
-        @Override
-        public BoxedUnit apply(Object v1) {
-            return null;
-        }
-    };
 
     @Setup(Level.Trial)
     public void setup() throws IOException {
@@ -139,7 +131,7 @@ public class ReplicaFetcherThreadBenchmark {
                 1000L,
                 60000,
                 scheduler,
-                cleanShutdownFunc,
+                new CompletableFuture<>(),
                 brokerTopicStats,
                 logDirFailureChannel,
                 Time.SYSTEM);

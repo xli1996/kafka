@@ -30,11 +30,6 @@ import org.apache.kafka.common.record.RecordBatch
 import org.apache.kafka.common.requests.TransactionResult
 import org.apache.kafka.common.utils.{LogContext, ProducerIdAndEpoch, Time}
 
-trait ProducerIdMgr {
-  def generateProducerId(): Long
-  def shutdown() : Unit = {}
-}
-
 object TransactionCoordinator {
 
   def apply(config: KafkaConfig,
@@ -52,7 +47,7 @@ object TransactionCoordinator {
   def apply(config: KafkaConfig,
             replicaManager: ReplicaManager,
             scheduler: Scheduler,
-            producerIdMgr: ProducerIdMgr,
+            producerIdGenerator: ProducerIdGenerator,
             transactionTopicPartitionCountFunc: () => Int,
             metrics: Metrics,
             metadataCache: MetadataCache,
@@ -76,7 +71,7 @@ object TransactionCoordinator {
     val txnMarkerChannelManager = TransactionMarkerChannelManager(config, metrics, metadataCache, txnStateManager,
       time, logContext)
 
-    new TransactionCoordinator(txnConfig, scheduler, producerIdMgr, txnStateManager, txnMarkerChannelManager,
+    new TransactionCoordinator(txnConfig, scheduler, producerIdGenerator, txnStateManager, txnMarkerChannelManager,
       time, logContext)
   }
 
@@ -99,7 +94,7 @@ object TransactionCoordinator {
  */
 class TransactionCoordinator(txnConfig: TransactionConfig,
                              scheduler: Scheduler,
-                             producerIdManager: ProducerIdMgr,
+                             producerIdManager: ProducerIdGenerator,
                              txnManager: TransactionStateManager,
                              txnMarkerChannelManager: TransactionMarkerChannelManager,
                              time: Time,

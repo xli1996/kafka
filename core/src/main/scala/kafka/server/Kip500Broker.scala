@@ -27,7 +27,7 @@ import kafka.cluster.{Broker, EndPoint}
 import kafka.common.InconsistentBrokerMetadataException
 import kafka.controller.KafkaController
 import kafka.coordinator.group.GroupCoordinator
-import kafka.coordinator.transaction.{ProducerIdMgr, TransactionCoordinator}
+import kafka.coordinator.transaction.{ProducerIdGenerator, TransactionCoordinator}
 import kafka.log.LogManager
 import kafka.metrics.{KafkaMetricsReporter, KafkaYammerMetrics}
 import kafka.network.SocketServer
@@ -342,7 +342,7 @@ class Kip500Broker(val config: KafkaConfig,
     }
   }
 
-  class TemporaryProducerIdManager() extends ProducerIdMgr {
+  class TemporaryProducerIdManager() extends ProducerIdGenerator {
     val maxProducerIdsPerBrokerEpoch = 1000000
     var currentOffset = -1
     override def generateProducerId(): Long = {
@@ -355,7 +355,7 @@ class Kip500Broker(val config: KafkaConfig,
     }
   }
 
-  def createTemporaryProducerIdManager(): ProducerIdMgr = {
+  def createTemporaryProducerIdManager(): ProducerIdGenerator = {
     new TemporaryProducerIdManager()
   }
 

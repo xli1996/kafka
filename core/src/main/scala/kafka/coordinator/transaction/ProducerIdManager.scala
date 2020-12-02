@@ -70,7 +70,12 @@ case class ProducerIdBlock(brokerId: Int, blockStartId: Long, blockEndId: Long) 
   }
 }
 
-class ProducerIdManager(val brokerId: Int, val zkClient: KafkaZkClient) extends ProducerIdMgr with Logging {
+trait ProducerIdGenerator {
+  def generateProducerId(): Long
+  def shutdown() : Unit = {}
+}
+
+class ProducerIdManager(val brokerId: Int, val zkClient: KafkaZkClient) extends ProducerIdGenerator with Logging {
 
   this.logIdent = "[ProducerId Manager " + brokerId + "]: "
 

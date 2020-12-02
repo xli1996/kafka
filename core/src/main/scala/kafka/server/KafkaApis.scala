@@ -100,7 +100,7 @@ class KafkaApis(val requestChannel: RequestChannel,
                 val adminManager: LegacyAdminManager,
                 val groupCoordinator: GroupCoordinator,
                 val txnCoordinator: TransactionCoordinator,
-                val controller: KafkaController,
+                val legacyController: KafkaController,
                 val zkClient: KafkaZkClient,
                 val brokerId: Int,
                 val config: KafkaConfig,
@@ -224,14 +224,14 @@ class KafkaApis(val requestChannel: RequestChannel,
     val leaderAndIsrRequest = request.body[LeaderAndIsrRequest]
 
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(leaderAndIsrRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
       // for its previous generation so the broker should skip the stale request.
       info("Received LeaderAndIsr request with broker epoch " +
-        s"${leaderAndIsrRequest.brokerEpoch} smaller than the current broker epoch ${controller.brokerEpoch}")
+        s"${leaderAndIsrRequest.brokerEpoch} smaller than the current broker epoch ${legacyController.brokerEpoch}")
       apisUtils.sendResponseExemptThrottle(request, leaderAndIsrRequest.getErrorResponse(0, Errors.STALE_BROKER_EPOCH.exception))
     } else {
       val response = replicaManager.becomeLeaderOrFollower(correlationId, leaderAndIsrRequest, apisUtils.onLeadershipChange)
@@ -245,14 +245,14 @@ class KafkaApis(val requestChannel: RequestChannel,
     // stop serving data to clients for the topic being deleted
     val stopReplicaRequest = request.body[StopReplicaRequest]
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(stopReplicaRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
       // for its previous generation so the broker should skip the stale request.
       info("Received StopReplica request with broker epoch " +
-        s"${stopReplicaRequest.brokerEpoch} smaller than the current broker epoch ${controller.brokerEpoch}")
+        s"${stopReplicaRequest.brokerEpoch} smaller than the current broker epoch ${legacyController.brokerEpoch}")
       apisUtils.sendResponseExemptThrottle(request, new StopReplicaResponse(
         new StopReplicaResponseData().setErrorCode(Errors.STALE_BROKER_EPOCH.code)))
     } else {
@@ -303,14 +303,14 @@ class KafkaApis(val requestChannel: RequestChannel,
     val updateMetadataRequest = request.body[UpdateMetadataRequest]
 
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
     }
     if (isBrokerEpochStale(updateMetadataRequest.brokerEpoch)) {
       // When the broker restarts very quickly, it is possible for this broker to receive request intended
       // for its previous generation so the broker should skip the stale request.
       info("Received update metadata request with broker epoch " +
-        s"${updateMetadataRequest.brokerEpoch} smaller than the current broker epoch ${controller.brokerEpoch}")
+        s"${updateMetadataRequest.brokerEpoch} smaller than the current broker epoch ${legacyController.brokerEpoch}")
       apisUtils.sendResponseExemptThrottle(request,
         new UpdateMetadataResponse(new UpdateMetadataResponseData().setErrorCode(Errors.STALE_BROKER_EPOCH.code)))
     } else {
@@ -348,7 +348,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     // stop serving data to clients for the topic being deleted
     val controlledShutdownRequest = request.body[ControlledShutdownRequest]
     apisUtils.authorizeClusterOperation(request, CLUSTER_ACTION)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request should never happen in KIP-500 mode.")
     }
 
@@ -362,7 +362,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
       apisUtils.sendResponseExemptThrottle(request, response)
     }
-    controller.controlledShutdown(controlledShutdownRequest.data.brokerId, controlledShutdownRequest.data.brokerEpoch, controlledShutdownCallback)
+    legacyController.controlledShutdown(controlledShutdownRequest.data.brokerId, controlledShutdownRequest.data.brokerEpoch, controlledShutdownCallback)
   }
 
   /**
@@ -1781,7 +1781,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     val createTopicsRequest = request.body[CreateTopicsRequest]
     val results = new CreatableTopicResultCollection(createTopicsRequest.data.topics.size)
-    if (controller == null || !controller.isActive) {
+    if (legacyController == null || !legacyController.isActive) {
       createTopicsRequest.data.topics.forEach { topic =>
         results.add(new CreatableTopicResult().setName(topic.name)
           .setErrorCode(Errors.NOT_CONTROLLER.code))
@@ -1865,7 +1865,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       apisUtils.sendResponseMaybeThrottle(controllerMutationQuota, request, createResponse, onComplete = None)
     }
 
-    if (controller == null || !controller.isActive) {
+    if (legacyController == null || !legacyController.isActive) {
       val result = createPartitionsRequest.data.topics.asScala.map { topic =>
         (topic.name, new ApiError(Errors.NOT_CONTROLLER, null))
       }.toMap
@@ -1881,7 +1881,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         notDuped)(_.name)
 
       val (queuedForDeletion, valid) = authorized.partition { topic =>
-        controller.topicDeletionManager.isTopicQueuedUpForDeletion(topic.name)
+        legacyController.topicDeletionManager.isTopicQueuedUpForDeletion(topic.name)
       }
 
       val errors = dupes.map(_ -> new ApiError(Errors.INVALID_REQUEST, "Duplicate topic in request.")) ++
@@ -1915,7 +1915,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val deleteTopicRequest = request.body[DeleteTopicsRequest]
     val results = new DeletableTopicResultCollection(deleteTopicRequest.data.topicNames.size)
     val toDelete = mutable.Set[String]()
-    if (controller == null || !controller.isActive) {
+    if (legacyController == null || !legacyController.isActive) {
       deleteTopicRequest.data.topicNames.forEach { topic =>
         results.add(new DeletableTopicResult()
           .setName(topic)
@@ -2590,7 +2590,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
   def handleAlterPartitionReassignmentsRequest(request: RequestChannel.Request): Unit = {
     apisUtils.authorizeClusterOperation(request, ALTER)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request is not authorized in KIP-500 mode.")
     }
     val alterPartitionReassignmentsRequest = request.body[AlterPartitionReassignmentsRequest]
@@ -2629,12 +2629,12 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
     }.toMap
 
-    controller.alterPartitionReassignments(reassignments, sendResponseCallback)
+    legacyController.alterPartitionReassignments(reassignments, sendResponseCallback)
   }
 
   def handleListPartitionReassignmentsRequest(request: RequestChannel.Request): Unit = {
     apisUtils.authorizeClusterOperation(request, DESCRIBE)
-    if (controller == null) {
+    if (legacyController == null) {
       throw new ClusterAuthorizationException(s"Request $request is not authorized in KIP-500 mode.")
     }
     val listPartitionReassignmentsRequest = request.body[ListPartitionReassignmentsRequest]
@@ -2676,7 +2676,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       case _ => None
     }
 
-    controller.listPartitionReassignments(partitionsOpt, sendResponseCallback)
+    legacyController.listPartitionReassignments(partitionsOpt, sendResponseCallback)
   }
 
   private def configsAuthorizationApiError(resource: ConfigResource): ApiError = {
@@ -2986,7 +2986,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       })
     }
 
-    if (controller == null || !apisUtils.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
+    if (legacyController == null || !apisUtils.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
       val error = new ApiError(Errors.CLUSTER_AUTHORIZATION_FAILED, null)
       val partitionErrors: Map[TopicPartition, ApiError] =
         electionRequest.topicPartitions.iterator.map(partition => partition -> error).toMap
@@ -3000,7 +3000,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       replicaManager.electLeaders(
-        controller,
+        legacyController,
         partitions,
         electionRequest.electionType,
         sendResponseCallback(ApiError.NONE),
@@ -3116,7 +3116,7 @@ class KafkaApis(val requestChannel: RequestChannel,
   def handleAlterUserScramCredentialsRequest(request: RequestChannel.Request): Unit = {
     val alterUserScramCredentialsRequest = request.body[AlterUserScramCredentialsRequest]
 
-    if (controller == null || !controller.isActive) {
+    if (legacyController == null || !legacyController.isActive) {
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
         alterUserScramCredentialsRequest.getErrorResponse(requestThrottleMs, Errors.NOT_CONTROLLER.exception))
     } else if (apisUtils.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
@@ -3136,11 +3136,11 @@ class KafkaApis(val requestChannel: RequestChannel,
     if (!apisUtils.authorize(request.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
         alterIsrRequest.getErrorResponse(requestThrottleMs, Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
-    } else if (controller == null || !controller.isActive) {
+    } else if (legacyController == null || !legacyController.isActive) {
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
         alterIsrRequest.getErrorResponse(requestThrottleMs, Errors.NOT_CONTROLLER.exception()))
     } else {
-      controller.alterIsrs(alterIsrRequest.data,
+      legacyController.alterIsrs(alterIsrRequest.data,
         alterIsrResp => apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
           new AlterIsrResponse(alterIsrResp.setThrottleTimeMs(requestThrottleMs))
         )
@@ -3171,12 +3171,12 @@ class KafkaApis(val requestChannel: RequestChannel,
 
     if (!apisUtils.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
       sendResponseCallback(Left(new ApiError(Errors.CLUSTER_AUTHORIZATION_FAILED)))
-    } else if (controller == null || !controller.isActive) {
+    } else if (legacyController == null || !legacyController.isActive) {
       sendResponseCallback(Left(new ApiError(Errors.NOT_CONTROLLER)))
     } else if (!config.isFeatureVersioningSupported) {
       sendResponseCallback(Left(new ApiError(Errors.INVALID_REQUEST, "Feature versioning system is disabled.")))
     } else {
-      controller.updateFeatures(updateFeaturesRequest, sendResponseCallback)
+      legacyController.updateFeatures(updateFeaturesRequest, sendResponseCallback)
     }
   }
 
@@ -3276,7 +3276,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     else {
       // brokerEpochInRequest > controller.brokerEpoch is possible in rare scenarios where the controller gets notified
       // about the new broker epoch and sends a control request with this epoch before the broker learns about it
-      brokerEpochInRequest < controller.brokerEpoch
+      brokerEpochInRequest < legacyController.brokerEpoch
     }
   }
 

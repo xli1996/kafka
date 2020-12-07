@@ -99,9 +99,9 @@ class Kip500Broker(val config: KafkaConfig,
 
   var transactionCoordinator: TransactionCoordinator = null
 
-  var forwardingChannelManager: Kip500BrokerToControllerChannelManager = null
+  var forwardingChannelManager: BrokerToControllerChannelManager = null
 
-  var alterIsrChannelManager: Kip500BrokerToControllerChannelManager = null
+  var alterIsrChannelManager: BrokerToControllerChannelManager = null
 
   var kafkaScheduler: KafkaScheduler = null
 
@@ -211,9 +211,10 @@ class Kip500Broker(val config: KafkaConfig,
       replicaManager.startup()
 
       /* start broker-to-controller channel managers */
-      alterIsrChannelManager = new Kip500BrokerToControllerChannelManager(time, metrics, config, "alterIsrChannel", threadNamePrefix)
+      val controllerNodeProvider = new RaftControllerNodeProvider()
+      alterIsrChannelManager = new BrokerToControllerChannelManager(time, metrics, config, "alterIsrChannel", threadNamePrefix)
       alterIsrChannelManager.start()
-      forwardingChannelManager = new Kip500BrokerToControllerChannelManager(time, metrics, config, "forwardingChannel", threadNamePrefix)
+      forwardingChannelManager = new BrokerToControllerChannelManager(time, metrics, config, "forwardingChannel", threadNamePrefix)
       forwardingChannelManager.start()
       val forwardingManager = new ForwardingManager(forwardingChannelManager)
 

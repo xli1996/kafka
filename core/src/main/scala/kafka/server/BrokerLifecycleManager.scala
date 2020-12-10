@@ -45,12 +45,12 @@ import scala.concurrent.duration._
  * with the controller through the heartbeats.
  *
  * Expected state transitions when starting up are:
- * SHUTDOWN => REGISTERING => FENCED [=> RECOVERING_FROM_UNCLEAN_SHUTDOWN] => RUNNING
+ * NOT_RUNNING => REGISTERING => FENCED [=> RECOVERING_FROM_UNCLEAN_SHUTDOWN] => RUNNING
  *
  * We potentially transition from RUNNING to FENCED and back to RUNNING
  *
  * We eventually shutdown:
- * RUNNING [=> PENDING_CONTROLLED_SHUTDOWN] => SHUTDOWN
+ * RUNNING [=> PENDING_CONTROLLED_SHUTDOWN] => NOT_RUNNING
  */
 trait BrokerLifecycleManager {
 

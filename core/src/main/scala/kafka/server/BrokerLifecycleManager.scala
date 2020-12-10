@@ -44,6 +44,13 @@ import scala.concurrent.duration._
  * Explicit broker state transitions are performed by co-ordinating
  * with the controller through the heartbeats.
  *
+ * Expected state transitions when starting up are:
+ * NOT_RUNNING => REGISTERING => FENCED [=> RECOVERING_FROM_UNCLEAN_SHUTDOWN] => RUNNING
+ *
+ * We potentially transition from RUNNING to FENCED and back to RUNNING
+ *
+ * We eventually shutdown:
+ * RUNNING [=> PENDING_CONTROLLED_SHUTDOWN] => NOT_RUNNING
  */
 trait BrokerLifecycleManager {
 
@@ -84,7 +91,10 @@ trait BrokerLifecycleManager {
  * @param metadataOffset           - The last committed/processed metadata offset provider for this broker
  * @param brokerEpoch              - This broker's current epoch provider
  */
-class BrokerLifecycleManagerImpl(val brokerMetadataListener: BrokerMetadataListener, val config: KafkaConfig, val controllerChannelManager: BrokerToControllerChannelManager, val scheduler: Scheduler, val time: Time, val brokerID: Int, val rack: String, val metadataOffset: () => Long, val brokerEpoch: () => Long) extends BrokerLifecycleManager with Logging with KafkaMetricsGroup {
+class BrokerLifecycleManagerImpl(val brokerMetadataListener: BrokerMetadataListener,
+                                 val config: KafkaConfig, val controllerChannelManager: BrokerToControllerChannelManager,
+                                 val scheduler: Scheduler, val time: Time, val brokerID: Int, val rack: String,
+                                 val metadataOffset: () => Long, val brokerEpoch: () => Long) extends BrokerLifecycleManager with Logging with KafkaMetricsGroup {
 
   // Request queue
   private val requestQueue: util.Queue[(jmetadata.BrokerState, Promise[Unit])] = new ConcurrentLinkedQueue[(jmetadata.BrokerState, Promise[Unit])]()

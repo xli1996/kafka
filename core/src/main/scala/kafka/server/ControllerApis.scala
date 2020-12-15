@@ -20,7 +20,7 @@ package kafka.server
 import kafka.network.RequestChannel
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging
-import org.apache.kafka.common.acl.AclOperation.{CLUSTER_ACTION, DESCRIBE}
+import org.apache.kafka.common.acl.AclOperation.{ALTER_CONFIGS, CLUSTER_ACTION, DESCRIBE}
 import org.apache.kafka.common.errors.ApiException
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.message.ApiVersionsResponseData.{ApiVersionsResponseKey, FinalizedFeatureKey, SupportedFeatureKey}
@@ -81,7 +81,7 @@ class ControllerApis(val requestChannel: RequestChannel,
     //ApiKeys.ALTER_PARTITION_REASSIGNMENTS
     //ApiKeys.LIST_PARTITION_REASSIGNMENTS
     //ApiKeys.DESCRIBE_CLIENT_QUOTAS
-    //ApiKeys.ALTER_CLIENT_QUOTAS
+    ApiKeys.ALTER_CLIENT_QUOTAS,
     //ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS
     //ApiKeys.ALTER_USER_SCRAM_CREDENTIALS
     //ApiKeys.VOTE
@@ -102,7 +102,8 @@ class ControllerApis(val requestChannel: RequestChannel,
         case ApiKeys.ALTER_ISR => handleAlterIsrRequest(request)
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartBeatRequest(request)
         case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
-          // TODO other APIs
+        case ApiKeys.ALTER_CLIENT_QUOTAS => handleAlterClientQuotas(request)
+        // TODO other APIs
         case _ => throw new ApiException(s"Unsupported ApiKey ${request.context.header.apiKey()}")
       }
     } catch {
@@ -151,6 +152,7 @@ class ControllerApis(val requestChannel: RequestChannel,
         new ApiVersionsResponse(data)
       }
     }
+
     FutureConverters.toScala(controller.finalizedFeatures()).onComplete(
       result => result match {
         case Success(features) =>
@@ -163,6 +165,7 @@ class ControllerApis(val requestChannel: RequestChannel,
 
   def handleMetadataRequest(request: RequestChannel.Request): Unit = {
     val metadataRequest = request.body[MetadataRequest]
+
     def createResponseCallback(requestThrottleMs: Int): MetadataResponse = {
       val metadataResponseData = new MetadataResponseData()
       metadataResponseData.setThrottleTimeMs(requestThrottleMs)
@@ -191,6 +194,7 @@ class ControllerApis(val requestChannel: RequestChannel,
       metadataResponseData.setClusterAuthorizedOperations(clusterAuthorizedOperations)
       new MetadataResponse(metadataResponseData)
     }
+
     apisUtils.sendResponseMaybeThrottle(request,
       requestThrottleMs => createResponseCallback(requestThrottleMs))
   }
@@ -282,5 +286,19 @@ class ControllerApis(val requestChannel: RequestChannel,
       apisUtils.sendResponseMaybeThrottle(request,
         requestThrottleMs => createResponseCallback(requestThrottleMs, reply, err))
     })
+  }
+
+  def handleAlterClientQuotas(request: RequestChannel.Request): Unit = {
+    val quotaRequest = request.body[AlterClientQuotasRequest]
+    apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
+
+    FutureConverters.toScala(controller.alterClientQuotas(quotaRequest.entries(), quotaRequest.validateOnly()))
+      .onComplete {
+        case Success(quotaResults) =>
+          apisUtils.sendResponseMaybeThrottle(request,
+            requestThrottleMs => new AlterClientQuotasResponse(quotaResults, requestThrottleMs))
+        case Failure(e) => apisUtils.handleError(request, e)
+          apisUtils.handleError(request, e)
+      }
   }
 }

@@ -25,12 +25,15 @@ import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.quota.ClientQuotaAlteration;
+import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
 import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
 import org.apache.kafka.metadata.FeatureManager;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -132,6 +135,17 @@ public interface Controller extends AutoCloseable {
      */
     CompletableFuture<RegistrationReply> registerBroker(
         BrokerRegistrationRequestData request);
+
+    /**
+     * Perform some client quota changes
+     *
+     * @param quotaAlterations The list of quotas to alter
+     * @param validateOnly     True if we should validate the changes but not apply them.
+     * @return                 A future yielding a map of quota entities to error results.
+     */
+    CompletableFuture<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
+        Collection<ClientQuotaAlteration> quotaAlterations, boolean validateOnly
+    );
 
     /**
      * Begin shutting down, but don't block.  You must still call close to clean up all

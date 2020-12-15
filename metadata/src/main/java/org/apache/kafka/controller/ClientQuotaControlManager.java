@@ -14,6 +14,7 @@ import org.apache.kafka.timeline.SnapshotRegistry;
 import org.apache.kafka.timeline.TimelineHashMap;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,22 +25,23 @@ import java.util.stream.Collectors;
 
 public class ClientQuotaControlManager {
     private final SnapshotRegistry snapshotRegistry;
-    private final Map<String, ConfigDef> configDefs;
     private final TimelineHashMap<ClientQuotaEntity, TimelineHashMap<String, Double>> clientQuotaData;
 
-    ClientQuotaControlManager(SnapshotRegistry snapshotRegistry, Map<String, ConfigDef> configDefs) {
+    ClientQuotaControlManager(SnapshotRegistry snapshotRegistry) {
         this.snapshotRegistry = snapshotRegistry;
-        this.configDefs = configDefs;
         this.clientQuotaData = new TimelineHashMap<>(snapshotRegistry, 0);
     }
 
     /**
+     * Determine the result of applying a batch of client quota alteration.  Note
+     * that this method does not change the contents of memory.  It just generates a
+     * result, that you can replay later if you wish using replay().
      *
-     * @param quotaAlterations
-     * @return
+     * @param quotaAlterations  List of client quota alterations to evalutate
+     * @return                  The result.
      */
     ControllerResult<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
-            List<ClientQuotaAlteration> quotaAlterations) {
+            Collection<ClientQuotaAlteration> quotaAlterations) {
         List<ApiMessageAndVersion> outputRecords = new ArrayList<>();
         Map<ClientQuotaEntity, ApiError> outputResults = new HashMap<>();
 
@@ -70,10 +72,9 @@ public class ClientQuotaControlManager {
         Optional<String> user = Optional.ofNullable(sanitizedNames.get(ClientQuotaEntity.USER));
         Optional<String> clientId = Optional.ofNullable(sanitizedNames.get(ClientQuotaEntity.CLIENT_ID));
         if (user.isPresent()) {
-            // TODO get this string from somewhere. AdminManager got these ConfigDefs from DynamicConfig.User and DynamicConfig.Client
-            configKeys = configDefs.get("user").configKeys();
+            configKeys = QuotaConfigs.userConfigs().configKeys();
         } else if (clientId.isPresent()) {
-            configKeys = configDefs.get("client").configKeys();
+            configKeys = QuotaConfigs.clientConfigs().configKeys();
         } else {
             outputResults.put(entity, new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity"));
             throw new RuntimeException();

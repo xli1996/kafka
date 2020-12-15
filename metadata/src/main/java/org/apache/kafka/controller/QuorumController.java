@@ -36,6 +36,8 @@ import org.apache.kafka.common.metadata.RegisterBrokerRecord;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
+import org.apache.kafka.common.quota.ClientQuotaAlteration;
+import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.common.utils.EventQueue;
 import org.apache.kafka.common.utils.KafkaEventQueue;
@@ -509,6 +511,12 @@ public final class QuorumController implements Controller {
     private final ConfigurationControlManager configurationControl;
 
     /**
+     * An object which stores the controller's dynamic client quotas.
+     * This must be accessed only by the event queue thread.
+     */
+    private final ClientQuotaControlManager clientQuotaControlManager;
+
+    /**
      * An object which stores the controller's view of the cluster.
      * This must be accessed only by the event queue thread.
      */
@@ -570,6 +578,7 @@ public final class QuorumController implements Controller {
         this.purgatory = new ControllerPurgatory();
         this.configurationControl = new ConfigurationControlManager(snapshotRegistry,
             configDefs);
+        this.clientQuotaControlManager = new ClientQuotaControlManager(snapshotRegistry);
         this.clusterControl =
             new ClusterControlManager(time, snapshotRegistry, 18000, 9000);
         this.featureControl =
@@ -664,6 +673,27 @@ public final class QuorumController implements Controller {
             registerBroker(BrokerRegistrationRequestData request) {
         return appendWriteEvent("registerBroker", () ->
             clusterControl.registerBroker(request, writeOffset));
+    }
+
+    /**
+     * Perform some client quota changes
+     *
+     * @param quotaAlterations The list of quotas to alter
+     * @param validateOnly     True if we should validate the changes but not apply them.
+     * @return A future yielding a map of quota entities to error results.
+     */
+    @Override
+    public CompletableFuture<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
+            Collection<ClientQuotaAlteration> quotaAlterations, boolean validateOnly) {
+        return appendWriteEvent("alterClientQuotas", () -> {
+            ControllerResult<Map<ClientQuotaEntity, ApiError>> result =
+                clientQuotaControlManager.alterClientQuotas(quotaAlterations);
+            if (validateOnly) {
+                return result.withoutRecords();
+            } else {
+                return result;
+            }
+        });
     }
 
     @Override

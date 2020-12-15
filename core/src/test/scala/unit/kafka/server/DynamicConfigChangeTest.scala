@@ -20,7 +20,6 @@ import java.net.InetAddress
 import java.nio.charset.StandardCharsets
 import java.util.Properties
 import java.util.concurrent.ExecutionException
-
 import kafka.integration.KafkaServerTestHarness
 import kafka.log.LogConfig._
 import kafka.utils._
@@ -30,6 +29,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.admin.{Admin, AlterConfigOp, ConfigEntry}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.config.ConfigResource
+import org.apache.kafka.common.config.internals.QuotaConfigs
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException
 import org.apache.kafka.common.metrics.Quota
 import org.easymock.EasyMock
@@ -96,8 +96,8 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
     assertTrue("Should contain a ConfigHandler for " + rootEntityType ,
                this.servers.head.dynamicConfigHandlers.contains(rootEntityType))
     val props = new Properties()
-    props.put(DynamicConfig.Client.ProducerByteRateOverrideProp, "1000")
-    props.put(DynamicConfig.Client.ConsumerByteRateOverrideProp, "2000")
+    props.put(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, "1000")
+    props.put(QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, "2000")
 
     val quotaManagers = servers.head.dataPlaneRequestProcessor.quotas
     rootEntityType match {
@@ -169,14 +169,14 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
     val server = servers.head
     val clientIdProps = new Properties()
     server.shutdown()
-    clientIdProps.put(DynamicConfig.Client.ProducerByteRateOverrideProp, "1000")
-    clientIdProps.put(DynamicConfig.Client.ConsumerByteRateOverrideProp, "2000")
+    clientIdProps.put(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, "1000")
+    clientIdProps.put(QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, "2000")
     val userProps = new Properties()
-    userProps.put(DynamicConfig.Client.ProducerByteRateOverrideProp, "10000")
-    userProps.put(DynamicConfig.Client.ConsumerByteRateOverrideProp, "20000")
+    userProps.put(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, "10000")
+    userProps.put(QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, "20000")
     val userClientIdProps = new Properties()
-    userClientIdProps.put(DynamicConfig.Client.ProducerByteRateOverrideProp, "100000")
-    userClientIdProps.put(DynamicConfig.Client.ConsumerByteRateOverrideProp, "200000")
+    userClientIdProps.put(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, "100000")
+    userClientIdProps.put(QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, "200000")
 
     adminZkClient.changeClientIdConfig("overriddenClientId", clientIdProps)
     adminZkClient.changeUserOrUserClientIdConfig("overriddenUser", userProps)

@@ -1,6 +1,7 @@
 package org.apache.kafka.controller;
 
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.internals.QuotaConfigs;
 import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;

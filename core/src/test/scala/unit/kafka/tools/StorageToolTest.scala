@@ -23,11 +23,12 @@ import java.nio.file.Files
 import java.util
 import java.util.Properties
 
-import kafka.server.KafkaConfig
+import kafka.server.{KafkaConfig, MetaProperties}
 import kafka.utils.TestUtils
+import org.apache.kafka.common.Uuid
 import org.apache.kafka.common.utils.Utils
 import org.junit.Assert.assertEquals
-import org.junit.Test
+import org.junit.{Assert, Test}
 
 class StorageToolTest {
   private def newKip500Properties(): Properties = {
@@ -113,14 +114,14 @@ Found problem:
       Files.write(tempDir.toPath.resolve("meta.properties"),
         String.join("\n", util.Arrays.asList(
           "version=1",
-          "cluster.id=26c36907-4158-4a35-919d-6534229f5241")).
+          "cluster.id=XcZZOzUqS4yHOjhMQB6JLQ")).
             getBytes(StandardCharsets.UTF_8))
       assertEquals(1, StorageTool.
         infoCommand(new PrintStream(stream), false, Seq(tempDir.toString)))
       assertEquals(s"""Found log directory:
   ${tempDir.toString}
 
-Found metadata: MetaProperties(clusterId=26c36907-4158-4a35-919d-6534229f5241)
+Found metadata: {cluster.id=XcZZOzUqS4yHOjhMQB6JLQ, version=1}
 
 Found problem:
   The kafka configuration file appears to be for a legacy cluster, but the directories are formatted for kip-500.
@@ -147,7 +148,7 @@ Found problem:
       assertEquals(s"""Found log directory:
   ${tempDir.toString}
 
-Found metadata: LegacyMetaProperties(brokerId=1, clusterId=26c36907-4158-4a35-919d-6534229f5241)
+Found metadata: {broker.id=1, cluster.id=26c36907-4158-4a35-919d-6534229f5241, version=0}
 
 Found problem:
   The kafka configuration file appears to be for a kip-500 cluster, but the directories are formatted for legacy mode.
@@ -163,14 +164,15 @@ Found problem:
     val tempDir = TestUtils.tempDir()
     val clusterId = "26c36907-4158-4a35-919d-6534229f5241"
     try {
+      val metaProperties = MetaProperties(clusterId = Uuid.fromString(clusterId), brokerId = None, controllerId = None)
       val stream = new ByteArrayOutputStream()
       assertEquals(0, StorageTool.
-        formatCommand(new PrintStream(stream), Seq(tempDir.toString), clusterId, false))
+        formatCommand(new PrintStream(stream), Seq(tempDir.toString), metaProperties, false))
       assertEquals("Formatting %s%n".format(tempDir), stream.toString())
 
       try {
         assertEquals(1, StorageTool.
-          formatCommand(new PrintStream(new ByteArrayOutputStream()), Seq(tempDir.toString), clusterId, false))
+          formatCommand(new PrintStream(new ByteArrayOutputStream()), Seq(tempDir.toString), metaProperties, false))
       } catch {
         case e: TerseFailure => assertEquals(s"Log directory ${tempDir} is already " +
           "formatted. Use --ignore-formatted to ignore this directory and format the " +
@@ -179,7 +181,7 @@ Found problem:
 
       try {
         assertEquals(1, StorageTool.
-          formatCommand(new PrintStream(new ByteArrayOutputStream()), Seq(tempDir.toString), clusterId, true))
+          formatCommand(new PrintStream(new ByteArrayOutputStream()), Seq(tempDir.toString), metaProperties, true))
       } catch {
         case e: TerseFailure => assertEquals("All of the log directories are already " +
           "formatted.", e.getMessage)
@@ -191,17 +193,9 @@ Found problem:
 
   @Test
   def testFormatWithInvalidClusterId(): Unit = {
-    val tempDir = TestUtils.tempDir()
-    val clusterId = "invalid"
-    try {
-      assertEquals(1, StorageTool.
-        formatCommand(new PrintStream(new ByteArrayOutputStream()), Seq(tempDir.toString), clusterId, false))
-    } catch {
-      case e: TerseFailure =>
-        assertEquals("Cluster ID string invalid does not appear to be a valid UUID: " +
-          "Invalid UUID string: invalid", e.getMessage)
-    } finally {
-      Utils.delete(tempDir)
-    }
+    val config = new KafkaConfig(newKip500Properties())
+    assertEquals("Cluster ID string invalid does not appear to be a valid UUID: " +
+      "null", Assert.assertThrows(classOf[TerseFailure],
+        () => StorageTool.buildMetadataProperties("invalid", config)).getMessage)
   }
 }

@@ -21,9 +21,9 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 import kafka.api.LeaderAndIsr
-import kafka.server.{AlterIsrItem, AlterIsrManager, AlterIsrManagerImpl, BrokerToControllerChannelManager}
+import kafka.server.{AlterIsrItem, AlterIsrManager, AlterIsrManagerImpl, BrokerToControllerChannelManager, ControllerRequestCompletionHandler}
 import kafka.utils.{MockScheduler, MockTime}
-import org.apache.kafka.clients.{ClientResponse, RequestCompletionHandler}
+import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.message.AlterIsrResponseData
 import org.apache.kafka.common.metrics.Metrics
@@ -40,6 +40,7 @@ class AlterIsrManagerTest {
   val time = new MockTime
   val metrics = new Metrics
   val brokerId = 1
+  val requestTimeout = Long.MaxValue
 
   var brokerToController: BrokerToControllerChannelManager = _
 
@@ -54,7 +55,7 @@ class AlterIsrManagerTest {
 
   @Test
   def testBasic(): Unit = {
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.anyObject())).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.anyObject(), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -70,7 +71,7 @@ class AlterIsrManagerTest {
   @Test
   def testOverwriteWithinBatch(): Unit = {
     val capture = EasyMock.newCapture[AbstractRequest.Builder[AlterIsrRequest]]()
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.capture(capture), EasyMock.anyObject())).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.capture(capture), EasyMock.anyObject(), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -94,7 +95,7 @@ class AlterIsrManagerTest {
   @Test
   def testSingleBatch(): Unit = {
     val capture = EasyMock.newCapture[AbstractRequest.Builder[AlterIsrRequest]]()
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.capture(capture), EasyMock.anyObject())).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.capture(capture), EasyMock.anyObject(), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -146,9 +147,9 @@ class AlterIsrManagerTest {
   }
 
   def testTopLevelError(isrs: Seq[AlterIsrItem], error: Errors): AlterIsrManager = {
-    val callbackCapture = EasyMock.newCapture[RequestCompletionHandler]()
+    val callbackCapture = EasyMock.newCapture[ControllerRequestCompletionHandler]()
 
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture))).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -179,9 +180,9 @@ class AlterIsrManagerTest {
   }
 
   def testPartitionError(tp: TopicPartition, error: Errors): AlterIsrManager = {
-    val callbackCapture = EasyMock.newCapture[RequestCompletionHandler]()
+    val callbackCapture = EasyMock.newCapture[ControllerRequestCompletionHandler]()
     EasyMock.reset(brokerToController)
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture))).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -203,14 +204,14 @@ class AlterIsrManagerTest {
 
     EasyMock.verify(brokerToController)
 
-    val alterIsrResp = new AlterIsrResponse(new AlterIsrResponseData()
-      .setTopics(Collections.singletonList(
-        new AlterIsrResponseData.TopicData()
-          .setName(tp.topic())
-          .setPartitions(Collections.singletonList(
-            new AlterIsrResponseData.PartitionData()
-              .setPartitionIndex(tp.partition())
-              .setErrorCode(error.code))))))
+    val responseData = new AlterIsrResponseData()
+    responseData.topics.add(new AlterIsrResponseData.TopicData()
+      .setName(tp.topic())
+      .setPartitions(Collections.singletonList(
+        new AlterIsrResponseData.PartitionData()
+          .setPartitionIndex(tp.partition())
+          .setErrorCode(error.code))))
+    val alterIsrResp = new AlterIsrResponse(responseData)
     val resp = new ClientResponse(null, null, "", 0L, 0L,
       false, null, null, alterIsrResp)
     callbackCapture.getValue.onComplete(resp)
@@ -221,9 +222,9 @@ class AlterIsrManagerTest {
 
   @Test
   def testOneInFlight(): Unit = {
-    val callbackCapture = EasyMock.newCapture[RequestCompletionHandler]()
+    val callbackCapture = EasyMock.newCapture[ControllerRequestCompletionHandler]()
     EasyMock.reset(brokerToController)
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture))).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -250,7 +251,7 @@ class AlterIsrManagerTest {
     callbackCapture.getValue.onComplete(resp)
 
     EasyMock.reset(brokerToController)
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture))).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     time.sleep(100)
@@ -260,9 +261,9 @@ class AlterIsrManagerTest {
 
   @Test
   def testPartitionMissingInResponse(): Unit = {
-    val callbackCapture = EasyMock.newCapture[RequestCompletionHandler]()
+    val callbackCapture = EasyMock.newCapture[ControllerRequestCompletionHandler]()
     EasyMock.reset(brokerToController)
-    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture))).once()
+    EasyMock.expect(brokerToController.sendRequest(EasyMock.anyObject(), EasyMock.capture(callbackCapture), EasyMock.eq(requestTimeout))).once()
     EasyMock.replay(brokerToController)
 
     val scheduler = new MockScheduler(time)
@@ -285,14 +286,15 @@ class AlterIsrManagerTest {
     EasyMock.verify(brokerToController)
 
     // Three partitions were sent, but only one returned
-    val alterIsrResp = new AlterIsrResponse(new AlterIsrResponseData()
-      .setTopics(Collections.singletonList(
-        new AlterIsrResponseData.TopicData()
-          .setName(tp0.topic())
-          .setPartitions(Collections.singletonList(
-            new AlterIsrResponseData.PartitionData()
-              .setPartitionIndex(tp0.partition())
-              .setErrorCode(Errors.UNKNOWN_SERVER_ERROR.code()))))))
+    val responseData = new AlterIsrResponseData()
+    responseData.topics.add(new AlterIsrResponseData.TopicData()
+      .setName(tp0.topic())
+      .setPartitions(Collections.singletonList(
+        new AlterIsrResponseData.PartitionData()
+          .setPartitionIndex(tp0.partition())
+          .setErrorCode(Errors.UNKNOWN_SERVER_ERROR.code()))))
+    val alterIsrResp = new AlterIsrResponse(responseData)
+
     val resp = new ClientResponse(null, null, "", 0L, 0L,
       false, null, null, alterIsrResp)
     callbackCapture.getValue.onComplete(resp)

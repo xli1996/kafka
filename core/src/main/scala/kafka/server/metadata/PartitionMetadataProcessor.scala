@@ -38,6 +38,7 @@ import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.LeaderAndIsrRequest
 import org.apache.kafka.common.security.auth.SecurityProtocol
+import org.apache.kafka.common.utils.LogContext
 import org.apache.kafka.common.{Node, TopicPartition, Uuid}
 
 import scala.collection.mutable.ArrayBuffer
@@ -55,16 +56,13 @@ import scala.jdk.CollectionConverters._
  *     (we won't see those until we see the corresponding RegisterBrokerRecord in the metadata log).
  *
  * Out-of-band appearance of "fence local broker" message from broker heartbeat:
- *     Mark the local broker as not being alive, and remove it from all partition leadership (leader will be unknown)
- *     and ISRs (don't stop existing replica fetchers, if any).
+ *     This is a no-op for the broker because we perform one-sided (controller-only) fencing.
  *
  * Appearance of RegisterBrokerRecord in the metadata log:
  *     Update metadata about the indicated broker and its endpoints, and mark the broker as being alive.
  *
  * Appearance of FenceBrokerRecord in the metadata log:
  *     Mark the indicated broker as not being alive.
- *     If it is the local broker, update metadata to remove it from all partition leadership (leader will be unknown),
- *     but leave ISRs alone and don't stop existing replica fetchers, if any.
  *
  * Appearance of TopicRecord in the metadata log with Delete=false
  *     Create the topic in the metadata with no partitions (yet)
@@ -110,8 +108,9 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  txnCoordinator: TransactionCoordinator,
                                  configHandlers: Map[ConfigResource.Type, ConfigHandler]) extends BrokerMetadataProcessor
   with ConfigRepository with Logging {
-  // used only for onLeadershipChange()
-  private val apisUtils = new ApisUtils(null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
+  // used only for onLeadershipChange() (TODO: factor out?)
+  private val apisUtils = new ApisUtils(new LogContext(""),
+    null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
 
   // visible for testing
   private[metadata] var brokerEpoch: Long = -1
@@ -348,8 +347,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     event match {
       case metadataLogEvent: MetadataLogEvent => process(metadataLogEvent)
       case registerBrokerEvent: RegisterBrokerEvent => process(registerBrokerEvent)
-      case fenceBrokerEvent: FenceBrokerEvent => process(fenceBrokerEvent)
-      case _ =>
+      case _ => // no-op
     }
   }
 
@@ -401,18 +399,16 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       || mgr.hasFencedBrokerChanges() || mgr.hasBrokerEpochChanges()) {
       // Be sure to update metadata cache before potentially updating quota metric configs below
       // because the decision to update quota metric configs requires an accurate cluster metadata cache
-      metadataCache.writeState(
+      metadataCache.updatePartitionMetadata(
         // We know that at least one of these data structures has changed, but we don't want to copy
         // anything that hasn't changed already, so use the current version; this will
         // use the copy if there is one or the original if not.
-        MetadataSnapshot(
-          mgr.getCurrentPartitionStates(),
-          mgr.getMetadataSnapshot().controllerId,
-          mgr.getCurrentAliveBrokers(),
-          mgr.getCurrentAliveNodes(),
-          mgr.getCurrentTopicIdMap(),
-          mgr.getCurrentFencedBrokers(),
-          mgr.getCurrentBrokerEpochs()))
+        mgr.getCurrentPartitionStates(),
+        mgr.getCurrentAliveBrokers(),
+        mgr.getCurrentAliveNodes(),
+        mgr.getCurrentTopicIdMap(),
+        mgr.getCurrentFencedBrokers(),
+        mgr.getCurrentBrokerEpochs())
       if (mgr.requiresUpdateQuotaMetricConfigs) {
         quotaManagers.clientQuotaCallback.foreach { callback =>
           val listenerName = kafkaConfig.interBrokerListenerName // TODO: confirm that this is correct
@@ -531,17 +527,11 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     val brokerId = fenceBroker.id()
     // check the current state, whether copied already or not
     if (!mgr.getCurrentAliveBrokers().contains(brokerId)) {
-      // The broker is not considered alive.
-      // If it is this specific broker then the heartbeat mechanism has fenced it, so log that at INFO level;
-      // otherwise log at ERROR level because this state should not occur.
-      if (kafkaConfig.brokerId == brokerId) {
-        info(s"Skipping fence broker message because heartbeat already fenced this broker: $fenceBroker")
-      } else {
-        error(s"Skipping fence broker message because the broker is not considered alive: $fenceBroker")
-      }
+      // The broker is not considered alive.  Log at ERROR level because this state should not occur.
+      error(s"Skipping fence broker message because the broker is not considered alive: $fenceBroker")
     } else {
       // sanity-check the fenced broker epoch
-      val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().get(brokerId).getOrElse(Int.MinValue)
+      val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().getOrElse(brokerId, Int.MinValue)
       if (fenceBroker.epoch() != currentBrokerEpoch) {
         error(s"Skipping fence broker message because current broker epoch ($currentBrokerEpoch)" +
           s" is not the epoch being fenced: $fenceBroker")
@@ -554,14 +544,6 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
         mgr.getCopiedFencedBrokers()(brokerId) = aliveBrokersCopy.remove(brokerId).get
         aliveNodesCopy.remove(brokerId)
         // no need to change the broker epoch since the existing one will be the one that is fenced
-
-        // If this is the current broker, remove it from leadership (leader will be unknown).
-        // This is likely to have already been done by the heartbeat mechanism,
-        // but do it here anyway just in case.
-        if (brokerId == kafkaConfig.brokerId) {
-          // no need to log errors since they are already logged
-          removeAllLeadershipForLocalBroker(mgr)
-        }
       }
     }
   }
@@ -585,7 +567,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       error(s"Skipping unfence broker message because the broker is not considered fenced: $unfenceBroker")
     } else {
       // sanity-check the unfenced broker epoch
-      val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().get(brokerId).getOrElse(Int.MinValue)
+      val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().getOrElse(brokerId, Int.MinValue)
       if (unfenceBroker.epoch() != currentBrokerEpoch) {
         error(s"Skipping unfence broker message because current broker epoch ($currentBrokerEpoch)" +
           s" is not the epoch being unfenced: $unfenceBroker")
@@ -686,63 +668,27 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
         // TODO: ignore offline replicas until we support the JBOD disk failure use case
       )
       val brokerId = kafkaConfig.brokerId
-      if (partition.removingReplicas().contains(brokerId)) {
-        // add it to the map so that we will stop the replica and delete the log directory later
-        val tp = new TopicPartition(topicName, partitionId)
-        mgr.topicPartitionsNeedingStopReplica(tp) = LeaderAndIsr.EpochDuringDelete
-        // cancel any request to become leader or follower that may have already appeared in this batch
-        mgr.topicPartitionsNeedingLeaderFollowerChanges.remove(tp)
-      } else if (partition.addingReplicas().contains(brokerId)) {
-        // schedule a change to leader or follower as required, being sure to keep any "isNew" status
-        // and remembering all the added and deleted replicas
-        // in case we are seeing this partition multiple times in the same batch
-        val tp = new TopicPartition(topicName, partitionId)
-        val currentStateChangeRequest = mgr.topicPartitionsNeedingLeaderFollowerChanges.get(tp)
-        // default is to be considered a new partition for this broker, so it's new unless it already isn't
+      val isLeaderOrFollower = partition.leader == brokerId || partition.replicas.contains(brokerId)
+
+      if (isLeaderOrFollower) {
+        val topicPartition = new TopicPartition(topicName, partitionId)
+        val currentStateChangeRequest = mgr.topicPartitionsNeedingLeaderFollowerChanges.get(topicPartition)
         val isNewPartition = currentStateChangeRequest.isEmpty || currentStateChangeRequest.get.isNew
-        val replicasAlreadyAddedInThisBatch: util.List[Integer] =
-          if (currentStateChangeRequest.isDefined) {
-            currentStateChangeRequest.get.addingReplicas()
-          } else {
-            Collections.emptyList()
-          }
-        val replicasAlreadyRemovedInThisBatch: util.List[Integer] = {
-          if (currentStateChangeRequest.isDefined) {
-            currentStateChangeRequest.get.removingReplicas()
-          } else {
-            Collections.emptyList()
-          }
-        }
-        val allReplicasAddedInThisBatch = if (replicasAlreadyRemovedInThisBatch.isEmpty) {
-          partition.addingReplicas()
-        } else {
-          val retval = new util.ArrayList[Integer](partition.addingReplicas())
-          retval.removeAll(replicasAlreadyRemovedInThisBatch)
-          retval
-        }
-        val allReplicasRemovedInThisBatch =
-          if (replicasAlreadyAddedInThisBatch.isEmpty) {
-            partition.removingReplicas()
-          } else {
-            val retval = new util.ArrayList[Integer](partition.removingReplicas())
-            retval.removeAll(replicasAlreadyAddedInThisBatch)
-            retval
-          }
         val controllerEpoch = replicaManager.controllerEpoch // can't go backwards, so use the current one
-        mgr.topicPartitionsNeedingLeaderFollowerChanges(tp) =
+        mgr.topicPartitionsNeedingLeaderFollowerChanges(topicPartition) =
           new LeaderAndIsrPartitionState()
-            .setAddingReplicas(allReplicasAddedInThisBatch)
+            .setAddingReplicas(Option(partition.addingReplicas).getOrElse(Collections.emptyList[Integer]))
             .setControllerEpoch(controllerEpoch)
             .setIsNew(isNewPartition)
-            .setIsr(partition.isr())
-            .setLeader(partition.leader())
-            .setLeaderEpoch(partition.leaderEpoch())
+            .setIsr(partition.isr)
+            .setLeader(partition.leader)
+            .setLeaderEpoch(partition.leaderEpoch)
             .setPartitionIndex(partitionId)
-            .setRemovingReplicas(allReplicasRemovedInThisBatch)
-            .setReplicas(partition.replicas())
+            .setRemovingReplicas(Option(partition.removingReplicas).getOrElse(Collections.emptyList[Integer]))
+            .setReplicas(partition.replicas)
             .setTopicName(topicName)
         // cancel any request to remove the local replica that may have already appeared in this batch
-        mgr.topicPartitionsNeedingStopReplica.remove(tp)
+        mgr.topicPartitionsNeedingStopReplica.remove(topicPartition)
       }
     }
   }
@@ -871,81 +817,13 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       val numBrokersAdding = 1
       val mgr = MetadataMgr(numBrokersAdding, 0, 0)
       mgr.getCopiedBrokerEpochs().put(kafkaConfig.brokerId, requestedBrokerEpoch)
-      metadataCache.writeState(
-        MetadataSnapshot(
-          mgr.getCurrentPartitionStates(),
-          mgr.getMetadataSnapshot().controllerId,
-          mgr.getCurrentAliveBrokers(),
-          mgr.getCurrentAliveNodes(),
-          mgr.getCurrentTopicIdMap(),
-          mgr.getCurrentFencedBrokers(),
-          mgr.getCurrentBrokerEpochs()))
+      metadataCache.updatePartitionMetadata(
+        mgr.getCurrentPartitionStates(),
+        mgr.getCurrentAliveBrokers(),
+        mgr.getCurrentAliveNodes(),
+        mgr.getCurrentTopicIdMap(),
+        mgr.getCurrentFencedBrokers(),
+        mgr.getCurrentBrokerEpochs())
     }
-  }
-
-  def process(outOfBandFenceLocalBrokerEvent: FenceBrokerEvent): Unit = {
-    val numBrokersFencing = 1
-    val mgr = MetadataMgr(0, 0, numBrokersFencing)
-    val brokerId = kafkaConfig.brokerId
-    // check the current state, whether copied already or not
-    if (!mgr.getCurrentAliveBrokers().contains(brokerId)) {
-      // The broker is not considered alive.
-      error(s"Skipping fence local broker heartbeat event because the broker is not considered alive: $outOfBandFenceLocalBrokerEvent")
-    } else {
-      // sanity-check the broker epoch
-      val currentBrokerEpoch = mgr.getCurrentBrokerEpochs().get(brokerId).getOrElse(Int.MinValue)
-      if (outOfBandFenceLocalBrokerEvent.brokerEpoch != currentBrokerEpoch) {
-        error(s"Skipping fence local broker heartbeat event because current broker epoch ($currentBrokerEpoch)" +
-          s" is not the epoch being fenced: $outOfBandFenceLocalBrokerEvent")
-      } else {
-        // copy if necessary and update the copies
-        // move the broker from alive to fenced
-        val aliveBrokersCopy = mgr.getCopiedAliveBrokers()
-        val aliveNodesCopy = mgr.getCopiedAliveNodes()
-        // we know from above that it is alive
-        mgr.getCopiedFencedBrokers()(brokerId) = aliveBrokersCopy.remove(brokerId).get
-        aliveNodesCopy.remove(brokerId)
-        // no need to change the broker epoch since the existing one will be the one that is fenced
-
-        // Remove the current broker from all leadership (leader will be unknown).
-        // No need to log errors since they are already logged.
-        removeAllLeadershipForLocalBroker(mgr)
-        metadataCache.writeState(
-          MetadataSnapshot(
-            mgr.getCurrentPartitionStates(),
-            mgr.getMetadataSnapshot().controllerId,
-            mgr.getCurrentAliveBrokers(),
-            mgr.getCurrentAliveNodes(),
-            mgr.getCurrentTopicIdMap(),
-            mgr.getCurrentFencedBrokers(),
-            mgr.getCurrentBrokerEpochs()))
-      }
-    }
-  }
-
-  private def removeAllLeadershipForLocalBroker(mgr: MetadataMgr) = {
-    /*
-     We have to accomplish the following for each affected partition:
-
-     1) Update the metadata to set the leader to unknown
-     2) Make the broker stop accepting requests -- either consume or produce
-     3) Complete any delayed requests via replicaManager.completeDelayedFetchOrProduceRequests()
-
-     We currently have no way to accomplish (2), so this will require some more discussion.
-     One possibility is to make KafkaApis reject certain types of requests when the broker is fenced.
-
-     For now we will just do (1).
-     */
-
-    val brokerId = kafkaConfig.brokerId
-    mgr.getCopiedPartitionStates().values.foreach(map =>
-      map.values.foreach(partition => {
-        if (partition.leader() == brokerId) {
-          partition.setLeader(-1) // unknown
-        }
-      }))
-
-    // TODO: remove leadership/complete delayed requests
-    error("Do not yet know how to remove leadership")
   }
 }

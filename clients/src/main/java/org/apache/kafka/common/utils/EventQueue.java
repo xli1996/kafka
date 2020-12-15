@@ -26,6 +26,19 @@ public interface EventQueue extends AutoCloseable {
         default void handleException(Throwable e) {}
     }
 
+    class DeadlineFunction implements Function<Long, Long> {
+        private final long deadlineNs;
+
+        public DeadlineFunction(long deadlineNs) {
+            this.deadlineNs = deadlineNs;
+        }
+
+        @Override
+        public Long apply(Long t) {
+            return deadlineNs;
+        }
+    }
+
     class VoidEvent implements Event {
         public final static VoidEvent INSTANCE = new VoidEvent();
 
@@ -115,7 +128,7 @@ public interface EventQueue extends AutoCloseable {
 
     /**
      * Asynchronously shut down the event queue with no unnecessary delay.
-     * @see #beginShutdown(Event, TimeUnit, long)
+     * @see #beginShutdown(String, Event, TimeUnit, long)
      *
      * @param source                The source of the shutdown.
      */
@@ -129,7 +142,7 @@ public interface EventQueue extends AutoCloseable {
      * @param source        The source of the shutdown.
      * @param cleanupEvent  The mandatory event to invoke after all other events have
      *                      been processed.
-     * @see #beginShutdown(Event, TimeUnit, long)
+     * @see #beginShutdown(String, Event, TimeUnit, long)
      */
     default void beginShutdown(String source, Event cleanupEvent) {
         beginShutdown(source, cleanupEvent, TimeUnit.SECONDS, 0);

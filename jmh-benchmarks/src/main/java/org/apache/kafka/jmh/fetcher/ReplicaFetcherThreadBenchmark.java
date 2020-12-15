@@ -87,7 +87,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -133,7 +132,6 @@ public class ReplicaFetcherThreadBenchmark {
                 1000L,
                 60000,
                 scheduler,
-                new CompletableFuture<>(),
                 brokerTopicStats,
                 logDirFailureChannel,
                 Time.SYSTEM);
@@ -173,7 +171,7 @@ public class ReplicaFetcherThreadBenchmark {
                 }
 
                 @Override
-                public RecordsSend<? extends BaseRecords> toSend(String destination) {
+                public RecordsSend<? extends BaseRecords> toSend() {
                     return null;
                 }
             };

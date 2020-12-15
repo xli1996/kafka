@@ -34,13 +34,15 @@ public class LeaderState implements EpochState {
     private Optional<LogOffsetMetadata> highWatermark;
     private final Map<Integer, VoterState> voterReplicaStates = new HashMap<>();
     private final Map<Integer, ReplicaState> observerReplicaStates = new HashMap<>();
+    private final Set<Integer> grantingVoters = new HashSet<>();
     private static final long OBSERVER_SESSION_TIMEOUT_MS = 300_000L;
 
     protected LeaderState(
         int localId,
         int epoch,
         long epochStartOffset,
-        Set<Integer> voters
+        Set<Integer> voters,
+        Set<Integer> grantingVoters
     ) {
         this.localId = localId;
         this.epoch = epoch;
@@ -51,6 +53,7 @@ public class LeaderState implements EpochState {
             boolean hasEndorsedLeader = voterId == localId;
             this.voterReplicaStates.put(voterId, new VoterState(voterId, hasEndorsedLeader));
         }
+        this.grantingVoters.addAll(grantingVoters);
     }
 
     @Override
@@ -72,11 +75,15 @@ public class LeaderState implements EpochState {
         return voterReplicaStates.keySet().stream().filter(id -> id != localId).collect(Collectors.toSet());
     }
 
+    public Set<Integer> grantingVoters() {
+        return this.grantingVoters;
+    }
+
     public int localId() {
         return localId;
     }
 
-    public Set<Integer> nonEndorsingFollowers() {
+    public Set<Integer> nonEndorsingVoters() {
         Set<Integer> nonEndorsing = new HashSet<>();
         for (VoterState state : voterReplicaStates.values()) {
             if (!state.hasEndorsedLeader)
@@ -152,14 +159,15 @@ public class LeaderState implements EpochState {
 
     public List<Integer> nonLeaderVotersByDescendingFetchOffset() {
         return followersByDescendingFetchOffset().stream()
-                   .filter(state -> state.nodeId != localId)
-                   .map(state -> state.nodeId)
-                   .collect(Collectors.toList());
+            .filter(state -> state.nodeId != localId)
+            .map(state -> state.nodeId)
+            .collect(Collectors.toList());
     }
 
     private List<VoterState> followersByDescendingFetchOffset() {
-        return new ArrayList<>(this.voterReplicaStates.values())
-            .stream().sorted().collect(Collectors.toList());
+        return new ArrayList<>(this.voterReplicaStates.values()).stream()
+            .sorted()
+            .collect(Collectors.toList());
     }
 
     private boolean updateEndOffset(ReplicaState state,

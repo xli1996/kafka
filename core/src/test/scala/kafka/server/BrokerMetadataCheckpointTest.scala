@@ -10,11 +10,13 @@
   * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
   * specific language governing permissions and limitations under the License.
   */
+
 package kafka.server
 
-import java.io.File
-import java.util.UUID
+import org.apache.kafka.common.Uuid;
 
+import java.io.File
+import kafka.server.KafkaServer.BrokerRole
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -26,25 +28,23 @@ class BrokerMetadataCheckpointTest {
 
   @Test
   def testCreateLegacyMetadataProperties(): Unit = {
-    val meta = new LegacyMetaProperties(3, Some("7bc79ca1-9746-42a3-a35a-efb3cde44492"))
-    val properties = meta.toProperties()
-    val meta2 = LegacyMetaProperties(properties)
-    assertEquals(meta, meta2)
-  }
-
-  @Test
-  def testCreateLegacyMetadataPropertiesWithoutClusterId(): Unit = {
-    val meta = new LegacyMetaProperties(0, None)
-    val properties = meta.toProperties()
-    val meta2 = LegacyMetaProperties(properties)
-    assertEquals(meta, meta2)
+    val meta = LegacyMetaProperties("7bc79ca1-9746-42a3-a35a-efb3cde44492", 3)
+    val properties = meta.toProperties
+    val parsed = RawMetaProperties(properties)
+    assertEquals(0, parsed.version)
+    assertEquals(Some(meta.clusterId), parsed.clusterId)
+    assertEquals(Some(meta.brokerId), parsed.brokerId)
   }
 
   @Test
   def testCreateMetadataProperties(): Unit = {
-    val meta = new MetaProperties(UUID.fromString("623c048c-787a-41ac-9e86-7d9d4b07c1a3"))
-    val properties = meta.toProperties()
-    val meta2 = MetaProperties(properties)
+    val meta = MetaProperties(
+      clusterId = Uuid.fromString("H3KKO4NTRPaCWtEmm3vW7A"),
+      brokerId = Some(5),
+      controllerId = None
+    )
+    val properties = RawMetaProperties(meta.toProperties)
+    val meta2 = MetaProperties.parse(properties, Set(BrokerRole))
     assertEquals(meta, meta2)
   }
 }

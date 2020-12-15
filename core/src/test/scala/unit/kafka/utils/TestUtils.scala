@@ -25,7 +25,7 @@ import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.{Arrays, Collections, Properties}
-import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, Executors, TimeUnit}
+import java.util.concurrent.{Callable, ExecutionException, Executors, TimeUnit}
 
 import javax.net.ssl.X509TrustManager
 import kafka.api._
@@ -50,6 +50,7 @@ import org.apache.kafka.common.errors.{KafkaStorageException, UnknownTopicOrPart
 import org.apache.kafka.common.header.Header
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.network.{ListenerName, Mode}
+import org.apache.kafka.common.quota.{ClientQuotaAlteration, ClientQuotaEntity}
 import org.apache.kafka.common.record._
 import org.apache.kafka.common.resource.ResourcePattern
 import org.apache.kafka.common.security.auth.SecurityProtocol
@@ -1059,7 +1060,6 @@ object TestUtils extends Logging {
                    maxPidExpirationMs = 60 * 60 * 1000,
                    scheduler = time.scheduler,
                    time = time,
-                   cleanShutdownCompletableFuture = new CompletableFuture[Boolean](),
                    brokerTopicStats = new BrokerTopicStats,
                    logDirFailureChannel = new LogDirFailureChannel(logDirs.size))
   }
@@ -1550,6 +1550,16 @@ object TestUtils extends Logging {
       Map(new ConfigResource(ConfigResource.Type.BROKER, "") -> configEntries).asJava
     }
     adminClient.incrementalAlterConfigs(configs)
+  }
+
+  def alterClientQuotas(adminClient: Admin, request: Map[ClientQuotaEntity, Map[String, Option[Double]]]): AlterClientQuotasResult = {
+    val entries = request.map { case (entity, alter) =>
+      val ops = alter.map { case (key, value) =>
+        new ClientQuotaAlteration.Op(key, value.map(Double.box).getOrElse(null))
+      }.asJavaCollection
+      new ClientQuotaAlteration(entity, ops)
+    }.asJavaCollection
+    adminClient.alterClientQuotas(entries)
   }
 
   def assertLeader(client: Admin, topicPartition: TopicPartition, expectedLeader: Int): Unit = {

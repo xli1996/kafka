@@ -18,18 +18,20 @@
 package unit.kafka.server
 
 import java.net.InetAddress
-import java.util.{Properties, UUID}
+import java.util.Properties
 
 import kafka.network.RequestChannel
+import kafka.raft.RaftManager
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.{ClientQuotaManager, ClientRequestQuotaManager, ControllerApis, ControllerMutationQuotaManager, KafkaConfig, MetaProperties, ReplicationQuotaManager}
 import kafka.utils.MockTime
+import org.apache.kafka.common.Uuid
 import org.apache.kafka.common.errors.ClusterAuthorizationException
 import org.apache.kafka.common.memory.MemoryPool
 import org.apache.kafka.common.message.BrokerRegistrationRequestData
 import org.apache.kafka.common.network.{ClientInformation, ListenerName, Send}
 import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, BrokerRegistrationRequest, RequestContext, RequestHeader}
+import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, BrokerRegistrationRequest, RequestContext, RequestHeader, RequestTestUtils}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.controller.Controller
 import org.apache.kafka.metadata.VersionRange
@@ -40,7 +42,7 @@ import org.scalatest.Matchers.intercept
 
 class ControllerApisTest {
   // Mocks
-  private val brokerID = 1
+  private val brokerId = 1
   private val brokerRack = "Rack1"
   private val clientID = "Client1"
   private val requestChannelMetrics: RequestChannel.Metrics = EasyMock.createNiceMock(classOf[RequestChannel.Metrics])
@@ -50,6 +52,7 @@ class ControllerApisTest {
   private val clientRequestQuotaManager: ClientRequestQuotaManager = EasyMock.createNiceMock(classOf[ClientRequestQuotaManager])
   private val clientControllerQuotaManager: ControllerMutationQuotaManager = EasyMock.createNiceMock(classOf[ControllerMutationQuotaManager])
   private val replicaQuotaManager: ReplicationQuotaManager = EasyMock.createNiceMock(classOf[ReplicationQuotaManager])
+  private val raftManager: RaftManager = EasyMock.createNiceMock(classOf[RaftManager])
   private val quotas = QuotaManagers(
     clientQuotaManager,
     clientQuotaManager,
@@ -70,8 +73,11 @@ class ControllerApisTest {
       time,
       supportedFeatures,
       controller,
+      raftManager,
       new KafkaConfig(new Properties()),
-      new MetaProperties(UUID.fromString("7ace6e94-d39e-4a2f-a722-167eab2d0d9d")),
+
+      // FIXME: Would make more sense to set controllerId here
+      MetaProperties(Uuid.fromString("JgxuGe9URy-E-ceaL04lEw"), brokerId = Some(brokerId)),
       Seq.empty
     )
   }
@@ -86,7 +92,8 @@ class ControllerApisTest {
    */
   private def buildRequest[T <: AbstractRequest](request: AbstractRequest,
                                                  listenerName: ListenerName = ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT)): RequestChannel.Request = {
-    val buffer = request.serialize(new RequestHeader(request.api, request.version, clientID, 0))
+    val buffer = RequestTestUtils.serializeRequestWithHeader(
+      new RequestHeader(request.apiKey, request.version, clientID, 0), request)
 
     // read the header from the buffer first so that the body can be read next from the Request constructor
     val header = RequestHeader.parse(buffer)
@@ -100,7 +107,7 @@ class ControllerApisTest {
   def testBrokerRegistration(): Unit = {
     val brokerRegistrationRequest = new BrokerRegistrationRequest.Builder(
       new BrokerRegistrationRequestData()
-        .setBrokerId(brokerID)
+        .setBrokerId(brokerId)
         .setRack(brokerRack)
     ).build()
 

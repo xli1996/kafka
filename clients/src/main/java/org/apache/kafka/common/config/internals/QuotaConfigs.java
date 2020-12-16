@@ -7,8 +7,6 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
-
 /**
  * Define the dynamic quota configs. Note that these are not normal configurations that exist in properties files, but
  * rather only ever exist as dynamic configs.

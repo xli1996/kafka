@@ -24,10 +24,12 @@ import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
+import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
+import org.apache.kafka.common.requests.DescribeClientQuotasRequest;
 import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
 import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
 import org.apache.kafka.metadata.FeatureManager;
@@ -146,6 +148,14 @@ public interface Controller extends AutoCloseable {
     CompletableFuture<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
         Collection<ClientQuotaAlteration> quotaAlterations, boolean validateOnly
     );
+
+    /**
+     * TODO
+     * @param request
+     * @return
+     */
+    CompletableFuture<Map<ClientQuotaEntity, Map<String, Double>>> describeClientQuotas(
+        DescribeClientQuotasRequestData request);
 
     /**
      * Begin shutting down, but don't block.  You must still call close to clean up all

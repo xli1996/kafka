@@ -65,6 +65,127 @@ public class ClientQuotaControlManager {
         return new ControllerResult<>(outputRecords, outputResults);
     }
 
+    /**
+     * Read the current client quotas from memory using the filters provided in the request
+     *
+     * @return
+     */
+    Map<ClientQuotaEntity, Map<String, Double>> describeClientQuotas(DescribeClientQuotasRequestData request) {
+        // Ensure we have only valid entity combinations and no duplicates
+        List<String> entityTypesInRequest = request.components().stream()
+            .map(DescribeClientQuotasRequestData.ComponentData::entityType)
+            .collect(Collectors.toList());
+
+        Set<String> entityTypes = new HashSet<>(2);
+        entityTypesInRequest.forEach(entityType -> {
+            switch (entityType) {
+                case ClientQuotaEntity.USER:
+                    if (entityTypes.contains(ClientQuotaEntity.USER)) {
+                        throw new InvalidRequestException("Duplicate user filter component entity type");
+                    } else {
+                        entityTypes.add(ClientQuotaEntity.USER);
+                    }
+                    break;
+                case ClientQuotaEntity.CLIENT_ID:
+                    if (entityTypes.contains(ClientQuotaEntity.CLIENT_ID)) {
+                        throw new InvalidRequestException("Duplicate client id filter component entity type");
+                    } else {
+                        entityTypes.add(ClientQuotaEntity.CLIENT_ID);
+                    }
+                    break;
+                case ClientQuotaEntity.IP:
+                    if (entityTypes.contains(ClientQuotaEntity.IP)) {
+                        throw new InvalidRequestException("Duplicate IP filter component entity type");
+                    } else {
+                        entityTypes.add(ClientQuotaEntity.IP);
+                    }
+                    break;
+                case "":
+                    throw new InvalidRequestException("Unexpected empty filter component entity type");
+                default:
+                    throw new InvalidRequestException("Custom entity type" + entityType + " not supported");
+            }
+        });
+
+        if (entityTypes.contains(ClientQuotaEntity.IP) && entityTypes.size() > 1) {
+            throw new InvalidRequestException("Invalid entity filter component combination, IP filter component should " +
+                "not be used with user or clientId filter component.");
+        }
+
+        // entity type -> entity name match
+        Map<String, Optional<String>> entityMatches = new HashMap<>(2);
+        for (DescribeClientQuotasRequestData.ComponentData componentData : request.components()) {
+            switch (componentData.matchType()) {
+                case DescribeClientQuotasRequest.MATCH_TYPE_EXACT:
+                    entityMatches.put(componentData.entityType(), Optional.of(componentData.match()));
+                    break;
+                case DescribeClientQuotasRequest.MATCH_TYPE_DEFAULT:
+                    entityMatches.put(componentData.entityType(), Optional.of(QuotaConfigs.DEFAULT_ENTITY_NAME));
+                    break;
+                case DescribeClientQuotasRequest.MATCH_TYPE_SPECIFIED:
+                    entityMatches.put(componentData.entityType(), Optional.empty());
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unexpected match type: " + componentData.matchType());
+            }
+        }
+
+        Predicate<ClientQuotaEntity> quotaPredicate = targetEntity -> {
+            // Each entityMatch entry must match the target entity. In strict mode, we do not allow any unmatched
+            // entries from the target entity
+            Map<String, Boolean> matched = new HashMap<>(2);
+            Set<String> unmatched = new HashSet<>(targetEntity.entries().keySet());
+            for (Map.Entry<String, Optional<String>> searchEntry : entityMatches.entrySet()) {
+                String searchType = searchEntry.getKey();
+                Optional<String> searchName = searchEntry.getValue();
+
+                String targetName = targetEntity.entries().get(searchType);
+                if (targetName != null) {
+                    if (searchName.isPresent()) {
+                        matched.put(searchType, searchName.get().equals(targetName));
+                    } else {
+                        // empty search string means match anything
+                        matched.put(searchType, true);
+                    }
+                    unmatched.remove(searchType);
+                } else {
+                    matched.put(searchType, false);
+                }
+
+                /*
+                String targetType = targetEntry.getKey();
+                String targetName = targetEntry.getValue();
+                Optional<String> searchName = entityMatches.get(targetType);
+                if (searchName == null) {
+                    unmatched.add(targetType);
+                } else {
+                    if (searchName.isPresent()) {
+                        matched.put(targetType, searchName.get().equals(targetName));
+                    } else {
+                        // empty match means match anything
+                        matched.put(targetType, true);
+                    }
+                }
+                 */
+            }
+
+            if (matched.containsValue(false)) {
+                return false;
+            } else if (request.strict() && !unmatched.isEmpty()) {
+                // No false matches, but we have unmatched entity types in strict mode
+                return false;
+            } else {
+                return true;
+            }
+        };
+
+        Set<Map.Entry<ClientQuotaEntity, Map<String, Double>>> allQuotas = clientQuotaData.entrySet();
+
+        return allQuotas.stream()
+            .filter(entry -> quotaPredicate.test(entry.getKey()))
+            .collect(Collectors.toMap(entry -> desanitizeEntity(entry.getKey()), Map.Entry::getValue));
+    }
+
     private void alterClientQuotaEntity(
             ClientQuotaEntity entity,
             Map<String, Double> newQuotaConfigs,

@@ -706,6 +706,12 @@ public final class QuorumController implements Controller {
         });
     }
 
+    public CompletableFuture<Map<ClientQuotaEntity, Map<String, Double>>> describeClientQuotas(
+            DescribeClientQuotasRequestData request) {
+        return appendReadEvent("descirbeClientQuotas", () ->
+            clientQuotaControlManager.describeClientQuotas(request));
+    }
+
     @Override
     public void beginShutdown() {
         queue.beginShutdown("QuorumController#beginShutdown");

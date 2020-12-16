@@ -29,10 +29,12 @@ import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
+import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.ConfigRecord;
 import org.apache.kafka.common.metadata.FenceBrokerRecord;
 import org.apache.kafka.common.metadata.MetadataRecordType;
 import org.apache.kafka.common.metadata.PartitionRecord;
+import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.metadata.RegisterBrokerRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.common.metadata.UnfenceBrokerRecord;
@@ -480,6 +482,9 @@ public final class QuorumController implements Controller {
             case CONFIG_RECORD:
                 configurationControl.replay((ConfigRecord) message);
                 break;
+            case QUOTA_RECORD:
+                clientQuotaControlManager.replay((QuotaRecord) message);
+                break;
             case ISR_CHANGE_RECORD:
                 throw new RuntimeException("Unhandled record type " + type);
             case ACCESS_CONTROL_RECORD:
@@ -687,13 +692,6 @@ public final class QuorumController implements Controller {
                 featureControl.finalizedFeaturesAndEpoch(Long.MAX_VALUE)));
     }
 
-    /**
-     * Perform some client quota changes
-     *
-     * @param quotaAlterations The list of quotas to alter
-     * @param validateOnly     True if we should validate the changes but not apply them.
-     * @return A future yielding a map of quota entities to error results.
-     */
     @Override
     public CompletableFuture<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
             Collection<ClientQuotaAlteration> quotaAlterations, boolean validateOnly) {

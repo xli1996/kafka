@@ -7,15 +7,20 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.apache.kafka.common.config.ConfigDef.Range.atLeast;
+
 /**
  * Define the dynamic quota configs. Note that these are not normal configurations that exist in properties files, but
  * rather only ever exist as dynamic configs.
  */
 public class QuotaConfigs {
+    public static final String DEFAULT_ENTITY_NAME = "<default>";
+
     public static final String PRODUCER_BYTE_RATE_OVERRIDE_CONFIG = "producer_byte_rate";
     public static final String CONSUMER_BYTE_RATE_OVERRIDE_CONFIG = "consumer_byte_rate";
     public static final String REQUEST_PERCENTAGE_OVERRIDE_CONFIG = "request_percentage";
     public static final String CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG = "controller_mutation_rate";
+    public static final String IP_CONNECTION_RATE_OVERRIDE_CONFIG = "connection_creation_rate";
 
     public static final String PRODUCER_BYTE_RATE_DOC = "A rate representing the upper bound (bytes/sec) for producer traffic.";
     public static final String CONSUMER_BYTE_RATE_DOC = "A rate representing the upper bound (bytes/sec) for consumer traffic.";
@@ -23,6 +28,8 @@ public class QuotaConfigs {
     public static final String CONTROLLER_MUTATION_RATE_DOC = "The rate at which mutations are accepted for the create " +
         "topics request, the create partitions request and the delete topics request. The rate is accumulated by " +
         "the number of partitions created or deleted.";
+    public static final String IP_CONNECTION_RATE_DOC = "An int representing the upper bound of connections accepted " +
+        "for the specified IP.";
 
     private static Set<String> configNames = new HashSet<>(Arrays.asList(
         PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, CONSUMER_BYTE_RATE_OVERRIDE_CONFIG,
@@ -45,7 +52,7 @@ public class QuotaConfigs {
             ConfigDef.Importance.MEDIUM, CONTROLLER_MUTATION_RATE_DOC);
     }
 
-    public static boolean isQuotaConfig(String name) {
+    public static boolean isClientOrUserConfig(String name) {
         return configNames.contains(name);
     }
 
@@ -62,6 +69,13 @@ public class QuotaConfigs {
     public static ConfigDef clientConfigs() {
         ConfigDef configDef = new ConfigDef();
         buildQuotaConfigDef(configDef);
+        return configDef;
+    }
+
+    public static ConfigDef ipConfigs() {
+        ConfigDef configDef = new ConfigDef();
+        configDef.define(IP_CONNECTION_RATE_OVERRIDE_CONFIG, ConfigDef.Type.INT, Integer.MAX_VALUE,
+            ConfigDef.Range.atLeast(0), ConfigDef.Importance.MEDIUM, IP_CONNECTION_RATE_DOC);
         return configDef;
     }
 }

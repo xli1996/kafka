@@ -87,7 +87,7 @@ class ControllerApis(val requestChannel: RequestChannel,
     //ApiKeys.INCREMENTAL_ALTER_CONFIGS
     //ApiKeys.ALTER_PARTITION_REASSIGNMENTS
     //ApiKeys.LIST_PARTITION_REASSIGNMENTS
-    //ApiKeys.DESCRIBE_CLIENT_QUOTAS
+    ApiKeys.DESCRIBE_CLIENT_QUOTAS,
     ApiKeys.ALTER_CLIENT_QUOTAS,
     //ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS
     //ApiKeys.ALTER_USER_SCRAM_CREDENTIALS
@@ -142,6 +142,7 @@ class ControllerApis(val requestChannel: RequestChannel,
         case ApiKeys.ALTER_ISR => handleAlterIsrRequest(request)
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartBeatRequest(request)
         case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
+        case ApiKeys.DESCRIBE_CLIENT_QUOTAS => handleDescribeClientQuotas(request)
         case ApiKeys.ALTER_CLIENT_QUOTAS => handleAlterClientQuotas(request)
         case _ => throw new ApiException(s"Unsupported ApiKey ${request.context.header.apiKey()}")
       }
@@ -422,6 +423,20 @@ class ControllerApis(val requestChannel: RequestChannel,
     })
   }
 
+  def handleDescribeClientQuotas(request: RequestChannel.Request): Unit = {
+    val quotaRequest = request.body[DescribeClientQuotasRequest]
+    apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
+
+    controller.describeClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
+      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        if (exception != null) {
+          quotaRequest.getErrorResponse(exception)
+        } else {
+          DescribeClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs)
+        })
+    })
+  }
+
   def handleAlterClientQuotas(request: RequestChannel.Request): Unit = {
     val quotaRequest = request.body[AlterClientQuotasRequest]
     apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
@@ -430,7 +445,7 @@ class ControllerApis(val requestChannel: RequestChannel,
       .onComplete {
         case Success(quotaResults) =>
           apisUtils.sendResponseMaybeThrottle(request,
-            requestThrottleMs => new AlterClientQuotasResponse(quotaResults, requestThrottleMs))
+            requestThrottleMs => AlterClientQuotasResponse.fromQuotaEntities(quotaResults, requestThrottleMs))
         case Failure(e) => apisUtils.handleError(request, e)
           apisUtils.handleError(request, e)
       }

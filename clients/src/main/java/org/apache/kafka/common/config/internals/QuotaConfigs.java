@@ -44,6 +44,8 @@ public class QuotaConfigs {
     public static final String IP_CONNECTION_RATE_DOC = "An int representing the upper bound of connections accepted " +
         "for the specified IP.";
 
+    public static final Integer IP_CONNECTION_RATE_DEFAULT = Integer.MAX_VALUE;
+
     private static Set<String> userClientConfigNames = new HashSet<>(Arrays.asList(
         PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, CONSUMER_BYTE_RATE_OVERRIDE_CONFIG,
         REQUEST_PERCENTAGE_OVERRIDE_CONFIG, CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG

@@ -92,12 +92,6 @@ object DynamicConfig {
   }
 
   object Ip {
-    // TODO remove these
-    val IpConnectionRateOverrideProp = "connection_creation_rate"
-    val UnlimitedConnectionCreationRate = Int.MaxValue
-    val DefaultConnectionCreationRate = UnlimitedConnectionCreationRate
-    val IpOverrideDoc = "An int representing the upper bound of connections accepted for the specified IP."
-
     private val ipConfigs = org.apache.kafka.common.config.internals.QuotaConfigs.ipConfigs()
 
     def configKeys = ipConfigs.configKeys

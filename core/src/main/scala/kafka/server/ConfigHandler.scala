@@ -190,7 +190,7 @@ class UserConfigHandler(private val quotaManagers: QuotaManagers, val credential
 class IpConfigHandler(private val connectionQuotas: ConnectionQuotas) extends ConfigHandler with Logging {
 
   def processConfigChanges(ip: String, config: Properties): Unit = {
-    val ipConnectionRateQuota = Option(config.getProperty(DynamicConfig.Ip.IpConnectionRateOverrideProp)).map(_.toInt)
+    val ipConnectionRateQuota = Option(config.getProperty(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG)).map(_.toInt)
     val updatedIp = {
       if (ip != ConfigEntityName.Default) {
         try {

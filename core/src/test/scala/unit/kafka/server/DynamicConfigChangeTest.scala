@@ -199,7 +199,7 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
   def testIpHandlerUnresolvableAddress(): Unit = {
     val configHandler = new IpConfigHandler(null)
     val props: Properties = new Properties()
-    props.put(DynamicConfig.Ip.IpConnectionRateOverrideProp, "1")
+    props.put(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, "1")
 
     assertThrows[IllegalArgumentException]{
       configHandler.processConfigChanges("illegal-hostname", props)
@@ -210,9 +210,9 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
   def testIpQuotaInitialization(): Unit = {
     val server = servers.head
     val ipOverrideProps = new Properties()
-    ipOverrideProps.put(DynamicConfig.Ip.IpConnectionRateOverrideProp, "10")
+    ipOverrideProps.put(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, "10")
     val ipDefaultProps = new Properties()
-    ipDefaultProps.put(DynamicConfig.Ip.IpConnectionRateOverrideProp, "20")
+    ipDefaultProps.put(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, "20")
     server.shutdown()
 
     adminZkClient.changeIpConfig(ConfigEntityName.Default, ipDefaultProps)
@@ -232,9 +232,9 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
   @Test
   def testIpQuotaConfigChange(): Unit = {
     val ipOverrideProps = new Properties()
-    ipOverrideProps.put(DynamicConfig.Ip.IpConnectionRateOverrideProp, "10")
+    ipOverrideProps.put(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, "10")
     val ipDefaultProps = new Properties()
-    ipDefaultProps.put(DynamicConfig.Ip.IpConnectionRateOverrideProp, "20")
+    ipDefaultProps.put(QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, "20")
 
     val overrideQuotaIp = InetAddress.getByName("1.2.3.4")
     val defaultQuotaIp = InetAddress.getByName("2.3.4.5")
@@ -258,7 +258,7 @@ class DynamicConfigChangeTest extends KafkaServerTestHarness {
     verifyConnectionQuota(overrideQuotaIp, 20)
 
     adminZkClient.changeIpConfig(ConfigEntityName.Default, emptyProps)
-    verifyConnectionQuota(overrideQuotaIp, DynamicConfig.Ip.DefaultConnectionCreationRate)
+    verifyConnectionQuota(overrideQuotaIp, QuotaConfigs.IP_CONNECTION_RATE_DEFAULT)
   }
 
   @Test

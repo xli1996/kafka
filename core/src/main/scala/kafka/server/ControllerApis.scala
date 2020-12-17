@@ -21,7 +21,7 @@ import kafka.network.RequestChannel
 import kafka.raft.RaftManager
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging
-import org.apache.kafka.common.acl.AclOperation.{ALTER_CONFIGS, CLUSTER_ACTION, CREATE, DESCRIBE}
+import org.apache.kafka.common.acl.AclOperation.{ALTER_CONFIGS, CLUSTER_ACTION, CREATE, DESCRIBE, DESCRIBE_CONFIGS}
 import org.apache.kafka.common.errors.ApiException
 import org.apache.kafka.common.internals.FatalExitError
 import org.apache.kafka.common.message.ApiVersionsResponseData.{ApiVersionsResponseKey, FinalizedFeatureKey, SupportedFeatureKey}
@@ -425,7 +425,7 @@ class ControllerApis(val requestChannel: RequestChannel,
 
   def handleDescribeClientQuotas(request: RequestChannel.Request): Unit = {
     val quotaRequest = request.body[DescribeClientQuotasRequest]
-    apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
+    apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)
 
     controller.describeClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>

@@ -18,6 +18,7 @@
 package kafka.server.metadata
 
 import kafka.network.ConnectionQuotas
+import kafka.server.ConfigEntityName
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging
 import org.apache.kafka.common.config.internals.QuotaConfigs
@@ -27,7 +28,14 @@ import org.apache.kafka.common.quota.ClientQuotaEntity
 import org.apache.kafka.common.utils.Sanitizer
 
 import java.net.{InetAddress, UnknownHostException}
+import scala.collection.mutable
 
+/**
+ * Watch for changes to quotas in the metadata log and update quota managers as necessary
+ *
+ * @param quotaManagers
+ * @param connectionQuotas
+ */
 class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
                              val connectionQuotas: ConnectionQuotas) extends BrokerMetadataProcessor with Logging {
 
@@ -43,24 +51,27 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
   }
 
   private def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
-    var user: Option[String] = None
-    var clientId: Option[String] = None
-    var ip: Option[String] = None
-
+    val entityMap = mutable.Map[String, String]()
     quotaRecord.entity().forEach { entityData =>
+      // A null entity name indicates the default entity (represented as <default>)
+      val nameOrDefault = Option(entityData.entityName()).getOrElse(ConfigEntityName.Default)
       entityData.entityType() match {
-        case ClientQuotaEntity.USER => user = Some(entityData.entityName())
-        case ClientQuotaEntity.CLIENT_ID => clientId = Some(entityData.entityName())
-        case ClientQuotaEntity.IP => ip = Some(entityData.entityName())
+        case ClientQuotaEntity.USER => entityMap.put(ClientQuotaEntity.USER, nameOrDefault)
+        case ClientQuotaEntity.CLIENT_ID => entityMap.put(ClientQuotaEntity.CLIENT_ID, nameOrDefault)
+        case ClientQuotaEntity.IP => entityMap.put(ClientQuotaEntity.IP, nameOrDefault)
       }
     }
 
-    if (ip.isDefined) {
-      handleIpQuota(ip, quotaRecord)
+    if (entityMap.contains(ClientQuotaEntity.IP)) {
+      handleIpQuota(entityMap.get(ClientQuotaEntity.IP), quotaRecord)
     }
 
-    if (user.isDefined || clientId.isDefined) {
-      handleUserClientQuota(user, clientId, quotaRecord)
+    if (entityMap.contains(ClientQuotaEntity.USER) || entityMap.contains(ClientQuotaEntity.CLIENT_ID)) {
+      handleUserClientQuota(
+        entityMap.get(ClientQuotaEntity.USER),
+        entityMap.get(ClientQuotaEntity.CLIENT_ID),
+        quotaRecord
+      )
     }
   }
 
@@ -78,7 +89,6 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
     }
 
     connectionQuotas.updateIpConnectionRateQuota(inetAddress, newValue)
-
   }
 
   private def handleUserClientQuota(user: Option[String], clientId: Option[String], quotaRecord: QuotaRecord): Unit = {

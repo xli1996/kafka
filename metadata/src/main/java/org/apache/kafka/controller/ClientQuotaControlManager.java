@@ -161,31 +161,13 @@ public class ClientQuotaControlManager {
             } else {
                 matched.put(searchType, false);
             }
-
-            /*
-            String targetType = targetEntry.getKey();
-            String targetName = targetEntry.getValue();
-            Optional<String> searchName = entityMatches.get(targetType);
-            if (searchName == null) {
-                unmatched.add(targetType);
-            } else {
-                if (searchName.isPresent()) {
-                    matched.put(targetType, searchName.get().equals(targetName));
-                } else {
-                    // empty match means match anything
-                    matched.put(targetType, true);
-                }
-            }
-             */
         }
 
         if (matched.containsValue(false)) {
             return false;
-        } else if (strict && !unmatched.isEmpty()) {
-            // No false matches, but we have unmatched entity types in strict mode
-            return false;
         } else {
-            return true;
+            // If in strict mode, don't allow unmatched entities
+            return !strict || unmatched.isEmpty();
         }
     }
 

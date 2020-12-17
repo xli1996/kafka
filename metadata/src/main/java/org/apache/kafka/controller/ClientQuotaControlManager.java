@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.kafka.controller;
 
 import org.apache.kafka.common.config.ConfigDef;
@@ -46,7 +63,7 @@ public class ClientQuotaControlManager {
      * that this method does not change the contents of memory.  It just generates a
      * result, that you can replay later if you wish using replay().
      *
-     * @param quotaAlterations  List of client quota alterations to evalutate
+     * @param quotaAlterations  List of client quota alterations to evaluate
      * @return                  The result.
      */
     ControllerResult<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
@@ -85,10 +102,125 @@ public class ClientQuotaControlManager {
             }
         }
 
+        // Traverse the in-memory quota entries and find matches
         Set<Map.Entry<ClientQuotaEntity, Map<String, Double>>> allQuotas = clientQuotaData.entrySet();
         return allQuotas.stream()
             .filter(entry -> matchQuotaEntity(entry.getKey(), entityMatches, filter.strict()))
+            .filter(entry -> hasValidQuotaKeys(entry.getKey(), entry.getValue().keySet()))
             .collect(Collectors.toMap(entry -> desanitizeEntity(entry.getKey()), Map.Entry::getValue));
+    }
+
+    private void alterClientQuotaEntity(
+            ClientQuotaEntity entity,
+            Map<String, Double> newQuotaConfigs,
+            List<ApiMessageAndVersion> outputRecords,
+            Map<ClientQuotaEntity, ApiError> outputResults) {
+
+        // Check entity types and sanitize the names
+        Map<String, String> sanitizedNames = new HashMap<>(3);
+        ApiError error = sanitizeEntity(entity, sanitizedNames);
+        if (error.isFailure()) {
+            outputResults.put(entity, error);
+            return;
+        }
+
+        // Check the combination of entity types and get the config keys
+        Map<String, ConfigDef.ConfigKey> configKeys = new HashMap<>(4);
+        error = configKeysForEntityType(sanitizedNames, configKeys);
+        if (error.isFailure()) {
+            outputResults.put(entity, error);
+            return;
+        }
+
+        // Don't share objects between different records
+        Supplier<List<QuotaRecord.EntityData>> recordEntitySupplier = () ->
+                sanitizedNames.entrySet().stream().map(mapEntry -> new QuotaRecord.EntityData()
+                        .setEntityType(mapEntry.getKey())
+                        .setEntityName(mapEntry.getValue()))
+                        .collect(Collectors.toList());
+
+        List<ApiMessageAndVersion> newRecords = new ArrayList<>(newQuotaConfigs.size());
+        Map<String, Double> currentQuotas = clientQuotaData.getOrDefault(entity, Collections.emptyMap());
+        newQuotaConfigs.forEach((key, newValue) -> {
+            if (newValue == null) {
+                if (currentQuotas.containsKey(key)) {
+                    // Null value indicates removal
+                    newRecords.add(new ApiMessageAndVersion(new QuotaRecord()
+                            .setEntity(recordEntitySupplier.get())
+                            .setKey(key)
+                            .setRemove(true), (short) 0));
+                }
+            } else {
+                ApiError validationError = validateQuotaConfigKeyValue(configKeys, key, newValue);
+                if (validationError.isFailure()) {
+                    outputResults.put(entity, validationError);
+                } else {
+                    final Double currentValue = currentQuotas.get(key);
+                    if (!Objects.equals(currentValue, newValue)) {
+                        // Only record the new value if it has changed
+                        newRecords.add(new ApiMessageAndVersion(new QuotaRecord()
+                                .setEntity(recordEntitySupplier.get())
+                                .setKey(key)
+                                .setValue(newValue), (short) 0));
+                    }
+                }
+            }
+        });
+
+        outputRecords.addAll(newRecords);
+        outputResults.put(entity, ApiError.NONE);
+    }
+
+    private ApiError configKeysForEntityType(Map<String, String> entity, Map<String, ConfigDef.ConfigKey> output) {
+        // We only allow certain combinations of quota entity types. Which type is in use determines which config
+        // keys are valid
+        Optional<String> user = Optional.ofNullable(entity.get(ClientQuotaEntity.USER));
+        Optional<String> clientId = Optional.ofNullable(entity.get(ClientQuotaEntity.CLIENT_ID));
+        Optional<String> ip = Optional.ofNullable(entity.get(ClientQuotaEntity.IP));
+
+        final Map<String, ConfigDef.ConfigKey> configKeys;
+        if (user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
+            configKeys = QuotaConfigs.userConfigs().configKeys();
+        } else if (user.isPresent() && !clientId.isPresent() && !ip.isPresent()) {
+            configKeys = QuotaConfigs.userConfigs().configKeys();
+        } else if (!user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
+            configKeys = QuotaConfigs.clientConfigs().configKeys();
+        } else if (!user.isPresent() && !clientId.isPresent() && ip.isPresent()) {
+            if (isValidIpEntity(ip.get())) {
+                configKeys = QuotaConfigs.ipConfigs().configKeys();
+            } else {
+                return new ApiError(Errors.INVALID_REQUEST, ip.get() + " is not a valid IP or resolvable host.");
+            }
+        } else {
+            return new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity");
+        }
+
+        output.putAll(configKeys);
+        return ApiError.NONE;
+    }
+
+    // TODO can this be shared with alter configs?
+    private ApiError validateQuotaConfigKeyValue(Map<String, ConfigDef.ConfigKey> validKeys, String key, Double value) {
+        ConfigDef.ConfigKey configKey = validKeys.get(key);
+        if (configKey == null) {
+            return new ApiError(Errors.INVALID_REQUEST, "Invalid configuration key " + key);
+        }
+        switch (configKey.type()) {
+            case DOUBLE:
+                break;
+            case LONG:
+                Double epsilon = 1e-6;
+                Long longValue = Double.valueOf(value + epsilon).longValue();
+                if (Math.abs(longValue.doubleValue() - value) > epsilon) {
+                    return new ApiError(Errors.INVALID_REQUEST,
+                            "Configuration " + key + " must be a Long value");
+                }
+                break;
+            default:
+                return new ApiError(Errors.UNKNOWN_SERVER_ERROR,
+                        "Unexpected config type " + configKey.type() + " should be Long or Double");
+        }
+        return ApiError.NONE;
     }
 
     private void verifyDescribeQuotaRequest(ClientQuotaFilter filter) {
@@ -166,104 +298,10 @@ public class ClientQuotaControlManager {
         }
     }
 
-    private void alterClientQuotaEntity(
-            ClientQuotaEntity entity,
-            Map<String, Double> newQuotaConfigs,
-            List<ApiMessageAndVersion> outputRecords,
-            Map<ClientQuotaEntity, ApiError> outputResults) {
-
-        Map<String, String> sanitizedNames = new HashMap<>(3);
-        ApiError error = sanitizeEntity(entity, sanitizedNames);
-        if (error.isFailure()) {
-            outputResults.put(entity, error);
-            return;
-        }
-
-        Optional<String> user = Optional.ofNullable(sanitizedNames.get(ClientQuotaEntity.USER));
-        Optional<String> clientId = Optional.ofNullable(sanitizedNames.get(ClientQuotaEntity.CLIENT_ID));
-        Optional<String> ip = Optional.ofNullable(sanitizedNames.get(ClientQuotaEntity.IP));
-
-        final Map<String, ConfigDef.ConfigKey> configKeys;
-        if (user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
-            configKeys = QuotaConfigs.userConfigs().configKeys();
-        } else if (user.isPresent() && !clientId.isPresent() && !ip.isPresent()) {
-            configKeys = QuotaConfigs.userConfigs().configKeys();
-        } else if (!user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
-            configKeys = QuotaConfigs.clientConfigs().configKeys();
-        } else if (!user.isPresent() && !clientId.isPresent() && ip.isPresent()) {
-            if (isValidIpEntity(ip.get())) {
-                configKeys = QuotaConfigs.ipConfigs().configKeys();
-            } else {
-                outputResults.put(entity, new ApiError(Errors.INVALID_REQUEST, ip.get() + " is not a valid IP or resolvable host."));
-                return;
-            }
-        } else {
-            outputResults.put(entity, new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity"));
-            return;
-        }
-
-        List<ApiMessageAndVersion> newRecords = new ArrayList<>();
-
-        // Don't share objects with different records
-        Supplier<List<QuotaRecord.EntityData>> recordEntitySupplier = () ->
-            sanitizedNames.entrySet().stream().map(mapEntry -> new QuotaRecord.EntityData()
-                .setEntityType(mapEntry.getKey())
-                .setEntityName(mapEntry.getValue()))
-            .collect(Collectors.toList());
-
-        Map<String, Double> currentQuotas = clientQuotaData.getOrDefault(entity, Collections.emptyMap());
-        newQuotaConfigs.forEach((key, newValue) -> {
-            if (newValue == null) {
-                if (currentQuotas.containsKey(key)) {
-                    // Null value indicates removal
-                    newRecords.add(new ApiMessageAndVersion(new QuotaRecord()
-                        .setEntity(recordEntitySupplier.get())
-                        .setKey(key)
-                        .setRemove(true), (short) 0));
-                }
-            } else {
-                ApiError validationError = validateQuotaConfigKeyValue(configKeys, key, newValue);
-                if (validationError.isFailure()) {
-                    outputResults.put(entity, validationError);
-                } else {
-                    final Double currentValue = currentQuotas.get(key);
-                    if (!Objects.equals(currentValue, newValue)) {
-                        // Only record the new value if it has changed
-                        newRecords.add(new ApiMessageAndVersion(new QuotaRecord()
-                            .setEntity(recordEntitySupplier.get())
-                            .setKey(key)
-                            .setValue(newValue), (short) 0));
-                    }
-                }
-            }
-        });
-
-        outputRecords.addAll(newRecords);
-        outputResults.put(entity, ApiError.NONE);
-    }
-
-    // TODO can this be shared with alter configs?
-    private ApiError validateQuotaConfigKeyValue(Map<String, ConfigDef.ConfigKey> validKeys, String key, Double value) {
-        ConfigDef.ConfigKey configKey = validKeys.get(key);
-        if (configKey == null) {
-            return new ApiError(Errors.INVALID_REQUEST, "Invalid configuration key " + key);
-        }
-        switch (configKey.type()) {
-            case DOUBLE:
-                break;
-            case LONG:
-                Double epsilon = 1e-6;
-                Long longValue = Double.valueOf(value + epsilon).longValue();
-                if (Math.abs(longValue.doubleValue() - value) > epsilon) {
-                    return new ApiError(Errors.INVALID_REQUEST,
-                        "Configuration " + key + " must be a Long value");
-                }
-                break;
-            default:
-                return new ApiError(Errors.UNKNOWN_SERVER_ERROR,
-                    "Unexpected config type " + configKey.type() + " should be Long or Double");
-        }
-        return ApiError.NONE;
+    private boolean hasValidQuotaKeys(ClientQuotaEntity entity, Set<String> quotaKeys) {
+        Map<String, ConfigDef.ConfigKey> configKeys = new HashMap<>();
+        configKeysForEntityType(entity.entries(), configKeys);
+        return quotaKeys.stream().allMatch(configKeys::containsKey);
     }
 
     // TODO move this somewhere common?
@@ -280,35 +318,9 @@ public class ClientQuotaControlManager {
         }
     }
 
-    private String sanitizeEntityName(String entityName) {
-        if (entityName == null) {
-            return QuotaConfigs.DEFAULT_ENTITY_NAME;
-        } else {
-            return Sanitizer.sanitize(entityName);
-        }
-    }
-
-    private String desanitizeEntityName(String sanitizedEntityName) {
-        if (sanitizedEntityName.equals(QuotaConfigs.DEFAULT_ENTITY_NAME)) {
-            return null;
-        } else {
-            return Sanitizer.desanitize(sanitizedEntityName);
-        }
-    }
-
-    private ClientQuotaEntity desanitizeEntity(ClientQuotaEntity entity) {
-        Map<String, String> entries = new HashMap<>(2);
-        entity.entries().forEach((type, name) -> entries.put(type, desanitizeEntityName(name)));
-        return new ClientQuotaEntity(entries);
-    }
-
     /**
      * Given a quota entity (which is a mapping of entity type to entity name), validate the types and
      * sanitize the names
-     *
-     * @param entity            The quota entity
-     * @param sanitizedEntities A map to put the sanitized entity values into
-     * @return                  An error if any validation failed
      */
     private ApiError sanitizeEntity(ClientQuotaEntity entity, Map<String, String> sanitizedEntities) {
         if (entity.entries().isEmpty()) {
@@ -335,6 +347,28 @@ public class ClientQuotaControlManager {
         }
 
         return ApiError.NONE;
+    }
+
+    private String sanitizeEntityName(String entityName) {
+        if (entityName == null) {
+            return QuotaConfigs.DEFAULT_ENTITY_NAME;
+        } else {
+            return Sanitizer.sanitize(entityName);
+        }
+    }
+
+    private ClientQuotaEntity desanitizeEntity(ClientQuotaEntity entity) {
+        Map<String, String> entries = new HashMap<>(2);
+        entity.entries().forEach((type, name) -> entries.put(type, desanitizeEntityName(name)));
+        return new ClientQuotaEntity(entries);
+    }
+
+    private String desanitizeEntityName(String sanitizedEntityName) {
+        if (sanitizedEntityName.equals(QuotaConfigs.DEFAULT_ENTITY_NAME)) {
+            return null;
+        } else {
+            return Sanitizer.desanitize(sanitizedEntityName);
+        }
     }
 
     /**

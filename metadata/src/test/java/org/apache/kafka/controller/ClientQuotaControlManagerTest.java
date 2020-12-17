@@ -6,7 +6,6 @@ import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
-import org.apache.kafka.common.utils.Sanitizer;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -26,43 +25,26 @@ import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH
 import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_EXACT;
 import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_SPECIFIED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 @Timeout(value = 40)
 public class ClientQuotaControlManagerTest {
     @Test
-    public void testDescribeClientQuotas() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
-        ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
-
-        manager.clientQuotaData.put(userEntity("A"), quotas("foo", 1.0, "bar", 2.0));
-        manager.clientQuotaData.put(userClientEntity("A", "X"), quotas("spam", 1.0));
-        manager.clientQuotaData.put(userClientEntity("A", "Y"), quotas("eggs", 1.0));
-
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(Collections.singletonList(
-            new DescribeClientQuotasRequestData.ComponentData()
-                .setEntityType(ClientQuotaEntity.USER).setMatch("A").setMatchType(MATCH_TYPE_EXACT)));
-        Map<ClientQuotaEntity, Map<String, Double>> quotas = manager.describeClientQuotas(request);
-        assertEquals(3, quotas.size());
-
-        request.setStrict(true);
-        quotas = manager.describeClientQuotas(request);
-        assertEquals(1, quotas.size());
-    }
-
-    @Test
-    public void testDesanitizedNames() {
+    public void testSanitizeDesanitizeNames() {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
         String name = "name with *3* spaces";
-        manager.clientQuotaData.put(userEntity(Sanitizer.sanitize(name)),
-            quotas("foo", 1.0, "bar", 2.0));
-        manager.clientQuotaData.put(userClientEntity(Sanitizer.sanitize(name), "X"), quotas("spam", 1.0));
-        manager.clientQuotaData.put(userClientEntity(Sanitizer.sanitize(name), "Y"), quotas("eggs", 1.0));
+
+        List<ClientQuotaAlteration> alterations = new ArrayList<>();
+        entityQuotaToAlterations(userEntity(name), quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 1.0,
+            QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 2.0), alterations::add);
+        entityQuotaToAlterations(userClientEntity(name, "X"),
+            quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 3.0), alterations::add);
+        entityQuotaToAlterations(userClientEntity(name, "Y"),
+            quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 4.0), alterations::add);
+        alterQuotas(alterations, manager);
 
         DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
         request.setStrict(false);
@@ -88,14 +70,9 @@ public class ClientQuotaControlManagerTest {
                 new DescribeClientQuotasRequestData.ComponentData()
                         .setEntityType(ClientQuotaEntity.IP).setMatchType(MATCH_TYPE_SPECIFIED)));
 
-        try {
-            manager.describeClientQuotas(request);
-            throw new AssertionError("Expected an error");
-        } catch (InvalidRequestException e) {
-            assertTrue(e.getMessage().startsWith("Invalid entity filter component combination"));
-        } catch (Throwable t) {
-            fail("Should not see this error", t);
-        }
+        InvalidRequestException e = assertThrows(InvalidRequestException.class,
+            () -> manager.describeClientQuotas(request));
+        assertTrue(e.getMessage().startsWith("Invalid entity filter component combination"));
     }
 
     public void setupDescribeMatchTest(ClientQuotaControlManager manager,
@@ -206,6 +183,49 @@ public class ClientQuotaControlManagerTest {
 
 
         // TODO more cases
+    }
+
+    @Test
+    public void testDescribeUnsupportedType() {
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
+
+        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
+        request.setStrict(false);
+        request.setComponents(new ArrayList<>());
+
+        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("other", "name")), request.components()::add);
+        InvalidRequestException e = assertThrows(InvalidRequestException.class,
+            () -> manager.describeClientQuotas(request));
+        assertEquals("Custom entity type other not supported", e.getMessage());
+    }
+
+    @Test
+    public void testDescribeMissingType() {
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
+
+        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
+        request.setStrict(false);
+        request.setComponents(new ArrayList<>());
+
+        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("", "name")), request.components()::add);
+        InvalidRequestException e = assertThrows(InvalidRequestException.class,
+                () -> manager.describeClientQuotas(request));
+        assertEquals("Unexpected empty filter component entity type", e.getMessage());
+    }
+
+    static void entityQuotaToAlterations(ClientQuotaEntity entity, Map<String, Double> quota,
+                                          Consumer<ClientQuotaAlteration> acceptor) {
+        Collection<ClientQuotaAlteration.Op> ops = quota.entrySet().stream()
+                .map(quotaEntry -> new ClientQuotaAlteration.Op(quotaEntry.getKey(), quotaEntry.getValue()))
+                .collect(Collectors.toList());
+        acceptor.accept(new ClientQuotaAlteration(entity, ops));
+    }
+
+    static void alterQuotas(List<ClientQuotaAlteration> alterations, ClientQuotaControlManager manager) {
+        ControllerResult<?> result = manager.alterClientQuotas(alterations);
+        result.records().forEach(apiMessageAndVersion -> manager.replay((QuotaRecord) apiMessageAndVersion.message()));
     }
 
     static void entityToRequest(ClientQuotaEntity entity, Consumer<DescribeClientQuotasRequestData.ComponentData> acceptor) {

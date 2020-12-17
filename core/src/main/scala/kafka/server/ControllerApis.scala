@@ -428,12 +428,12 @@ class ControllerApis(val requestChannel: RequestChannel,
     apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)
 
     controller.describeClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
-      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-        if (exception != null) {
-          quotaRequest.getErrorResponse(exception)
-        } else {
-          DescribeClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs)
-        })
+      if (exception != null) {
+        apisUtils.handleError(request, exception)
+      } else {
+        apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+          DescribeClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
+      }
     })
   }
 
@@ -441,13 +441,13 @@ class ControllerApis(val requestChannel: RequestChannel,
     val quotaRequest = request.body[AlterClientQuotasRequest]
     apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
 
-    FutureConverters.toScala(controller.alterClientQuotas(quotaRequest.entries(), quotaRequest.validateOnly()))
-      .onComplete {
-        case Success(quotaResults) =>
-          apisUtils.sendResponseMaybeThrottle(request,
-            requestThrottleMs => AlterClientQuotasResponse.fromQuotaEntities(quotaResults, requestThrottleMs))
-        case Failure(e) => apisUtils.handleError(request, e)
-          apisUtils.handleError(request, e)
+    controller.alterClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
+      if (exception != null) {
+        apisUtils.handleError(request, exception)
+      } else {
+        apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+          AlterClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
       }
+    })
   }
 }

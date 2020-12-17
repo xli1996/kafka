@@ -3,6 +3,7 @@ package org.apache.kafka.controller;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.internals.QuotaConfigs;
 import org.apache.kafka.common.errors.InvalidRequestException;
+import org.apache.kafka.common.message.AlterClientQuotasRequestData;
 import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
@@ -129,7 +130,7 @@ public class ClientQuotaControlManager {
                 case "":
                     throw new InvalidRequestException("Unexpected empty filter component entity type");
                 default:
-                    throw new InvalidRequestException("Custom entity type" + entityType + " not supported");
+                    throw new InvalidRequestException("Custom entity type " + entityType + " not supported");
             }
         });
 
@@ -227,7 +228,7 @@ public class ClientQuotaControlManager {
                         .setRemove(true), (short) 0));
                 }
             } else {
-                ApiError validationError = validateQuotaConfigKeyValue(configKeys.get(key), key, newValue);
+                ApiError validationError = validateQuotaConfigKeyValue(configKeys, key, newValue);
                 if (validationError.isFailure()) {
                     outputResults.put(entity, validationError);
                 } else {
@@ -248,7 +249,11 @@ public class ClientQuotaControlManager {
     }
 
     // TODO can this be shared with alter configs?
-    private ApiError validateQuotaConfigKeyValue(ConfigDef.ConfigKey configKey, String key, Double value) {
+    private ApiError validateQuotaConfigKeyValue(Map<String, ConfigDef.ConfigKey> validKeys, String key, Double value) {
+        ConfigDef.ConfigKey configKey = validKeys.get(key);
+        if (configKey == null) {
+            return new ApiError(Errors.INVALID_REQUEST, "Invalid configuration key " + key);
+        }
         switch (configKey.type()) {
             case DOUBLE:
                 break;

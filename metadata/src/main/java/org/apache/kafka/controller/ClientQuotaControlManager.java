@@ -42,7 +42,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -81,6 +80,11 @@ public class ClientQuotaControlManager {
         return new ControllerResult<>(outputRecords, outputResults);
     }
 
+    @FunctionalInterface
+    interface EntityMatch {
+        boolean matches(String name);
+    }
+
     /**
      * Read the current client quotas from memory using the given quota filter
      *
@@ -91,14 +95,14 @@ public class ClientQuotaControlManager {
         verifyDescribeQuotaRequest(filter);
 
         // Use a slightly different convention from ClientQuotaFilter (no null optional)
-        Map<String, Optional<String>> entityMatches = new HashMap<>(2);
+        Map<String, EntityMatch> entityMatches = new HashMap<>(2);
         for (ClientQuotaFilterComponent filterComponent : filter.components()) {
             if (filterComponent.match() != null && filterComponent.match().isPresent()) {
-                entityMatches.put(filterComponent.entityType(), filterComponent.match());
+                entityMatches.put(filterComponent.entityType(), name -> filterComponent.match().get().equals(name));
             } else if (filterComponent.match() != null) {
-                entityMatches.put(filterComponent.entityType(), Optional.of(QuotaConfigs.DEFAULT_ENTITY_NAME));
+                entityMatches.put(filterComponent.entityType(), Objects::isNull);
             } else {
-                entityMatches.put(filterComponent.entityType(), Optional.empty());
+                entityMatches.put(filterComponent.entityType(), name -> true);
             }
         }
 
@@ -174,22 +178,22 @@ public class ClientQuotaControlManager {
     private ApiError configKeysForEntityType(Map<String, String> entity, Map<String, ConfigDef.ConfigKey> output) {
         // We only allow certain combinations of quota entity types. Which type is in use determines which config
         // keys are valid
-        Optional<String> user = Optional.ofNullable(entity.get(ClientQuotaEntity.USER));
-        Optional<String> clientId = Optional.ofNullable(entity.get(ClientQuotaEntity.CLIENT_ID));
-        Optional<String> ip = Optional.ofNullable(entity.get(ClientQuotaEntity.IP));
+        boolean hasUser = entity.containsKey(ClientQuotaEntity.USER);
+        boolean hasClientId = entity.containsKey(ClientQuotaEntity.CLIENT_ID);
+        boolean hasIp = entity.containsKey(ClientQuotaEntity.IP);
 
         final Map<String, ConfigDef.ConfigKey> configKeys;
-        if (user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
+        if (hasUser && hasClientId && !hasIp) {
             configKeys = QuotaConfigs.userConfigs().configKeys();
-        } else if (user.isPresent() && !clientId.isPresent() && !ip.isPresent()) {
+        } else if (hasUser && !hasClientId && !hasIp) {
             configKeys = QuotaConfigs.userConfigs().configKeys();
-        } else if (!user.isPresent() && clientId.isPresent() && !ip.isPresent()) {
+        } else if (!hasUser && hasClientId && !hasIp) {
             configKeys = QuotaConfigs.clientConfigs().configKeys();
-        } else if (!user.isPresent() && !clientId.isPresent() && ip.isPresent()) {
-            if (isValidIpEntity(ip.get())) {
+        } else if (!hasUser && !hasClientId && hasIp) {
+            if (isValidIpEntity(entity.get(ClientQuotaEntity.IP))) {
                 configKeys = QuotaConfigs.ipConfigs().configKeys();
             } else {
-                return new ApiError(Errors.INVALID_REQUEST, ip.get() + " is not a valid IP or resolvable host.");
+                return new ApiError(Errors.INVALID_REQUEST, entity.get(ClientQuotaEntity.IP) + " is not a valid IP or resolvable host.");
             }
         } else {
             return new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity");
@@ -267,23 +271,16 @@ public class ClientQuotaControlManager {
     }
 
     private boolean matchQuotaEntity(ClientQuotaEntity targetEntity,
-                                     Map<String, Optional<String>> entityMatches, boolean strict) {
+                                     Map<String, EntityMatch> entityMatches, boolean strict) {
         // Each entityMatch entry must match the target entity. In strict mode, we do not allow any unmatched
         // entries from the target entity
         Map<String, Boolean> matched = new HashMap<>(2);
         Set<String> unmatched = new HashSet<>(targetEntity.entries().keySet());
-        for (Map.Entry<String, Optional<String>> searchEntry : entityMatches.entrySet()) {
+        for (Map.Entry<String, EntityMatch> searchEntry : entityMatches.entrySet()) {
             String searchType = searchEntry.getKey();
-            Optional<String> searchName = searchEntry.getValue();
-
             String targetName = targetEntity.entries().get(searchType);
-            if (targetName != null) {
-                if (searchName.isPresent()) {
-                    matched.put(searchType, searchName.get().equals(targetName));
-                } else {
-                    // empty search string means match anything
-                    matched.put(searchType, true);
-                }
+            if (targetEntity.entries().containsKey(searchType)) {
+                matched.put(searchType, searchEntry.getValue().matches(targetName));
                 unmatched.remove(searchType);
             } else {
                 matched.put(searchType, false);
@@ -306,7 +303,7 @@ public class ClientQuotaControlManager {
 
     // TODO move this somewhere common?
     private boolean isValidIpEntity(String ip) {
-        if (!ip.equals(QuotaConfigs.DEFAULT_ENTITY_NAME)) {
+        if (Objects.nonNull(ip)) {
             try {
                 InetAddress.getByName(ip);
                 return true;
@@ -351,7 +348,7 @@ public class ClientQuotaControlManager {
 
     private String sanitizeEntityName(String entityName) {
         if (entityName == null) {
-            return QuotaConfigs.DEFAULT_ENTITY_NAME;
+            return null;
         } else {
             return Sanitizer.sanitize(entityName);
         }
@@ -364,7 +361,7 @@ public class ClientQuotaControlManager {
     }
 
     private String desanitizeEntityName(String sanitizedEntityName) {
-        if (sanitizedEntityName.equals(QuotaConfigs.DEFAULT_ENTITY_NAME)) {
+        if (sanitizedEntityName == null) {
             return null;
         } else {
             return Sanitizer.desanitize(sanitizedEntityName);
@@ -377,9 +374,9 @@ public class ClientQuotaControlManager {
      * @param record    A QuotaRecord instance.
      */
     public void replay(QuotaRecord record) {
-        ClientQuotaEntity entity = new ClientQuotaEntity(
-            record.entity().stream()
-                .collect(Collectors.toMap(QuotaRecord.EntityData::entityType, QuotaRecord.EntityData::entityName)));
+        Map<String, String> entityMap = new HashMap<>(2);
+        record.entity().forEach(entityData -> entityMap.put(entityData.entityType(), entityData.entityName()));
+        ClientQuotaEntity entity = new ClientQuotaEntity(entityMap);
         Map<String, Double> quotas = clientQuotaData.get(entity);
         if (quotas == null) {
             quotas = new TimelineHashMap<>(snapshotRegistry, 0);

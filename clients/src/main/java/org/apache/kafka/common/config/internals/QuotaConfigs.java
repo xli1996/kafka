@@ -29,8 +29,6 @@ import java.util.Set;
  * only exist dynamically in the controller (or ZK, depending on which mode the cluster is running).
  */
 public class QuotaConfigs {
-    public static final String DEFAULT_ENTITY_NAME = "<default>";
-
     public static final String PRODUCER_BYTE_RATE_OVERRIDE_CONFIG = "producer_byte_rate";
     public static final String CONSUMER_BYTE_RATE_OVERRIDE_CONFIG = "consumer_byte_rate";
     public static final String REQUEST_PERCENTAGE_OVERRIDE_CONFIG = "request_percentage";
@@ -46,12 +44,12 @@ public class QuotaConfigs {
     public static final String IP_CONNECTION_RATE_DOC = "An int representing the upper bound of connections accepted " +
         "for the specified IP.";
 
-    private static Set<String> configNames = new HashSet<>(Arrays.asList(
+    private static Set<String> userClientConfigNames = new HashSet<>(Arrays.asList(
         PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, CONSUMER_BYTE_RATE_OVERRIDE_CONFIG,
         REQUEST_PERCENTAGE_OVERRIDE_CONFIG, CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG
     ));
 
-    private static void buildQuotaConfigDef(ConfigDef configDef) {
+    private static void buildUserClientQuotaConfigDef(ConfigDef configDef) {
         configDef.define(PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, ConfigDef.Type.LONG, Long.MAX_VALUE,
             ConfigDef.Importance.MEDIUM, PRODUCER_BYTE_RATE_DOC);
 
@@ -68,7 +66,7 @@ public class QuotaConfigs {
     }
 
     public static boolean isClientOrUserConfig(String name) {
-        return configNames.contains(name);
+        return userClientConfigNames.contains(name);
     }
 
     public static ConfigDef userConfigs() {
@@ -77,13 +75,13 @@ public class QuotaConfigs {
             configDef.define(mechanismName, ConfigDef.Type.STRING, null, ConfigDef.Importance.MEDIUM,
                 "User credentials for SCRAM mechanism " + mechanismName);
         });
-        buildQuotaConfigDef(configDef);
+        buildUserClientQuotaConfigDef(configDef);
         return configDef;
     }
 
     public static ConfigDef clientConfigs() {
         ConfigDef configDef = new ConfigDef();
-        buildQuotaConfigDef(configDef);
+        buildUserClientQuotaConfigDef(configDef);
         return configDef;
     }
 

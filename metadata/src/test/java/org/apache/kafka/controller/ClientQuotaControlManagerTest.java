@@ -24,6 +24,7 @@ import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.quota.ClientQuotaFilterComponent;
+import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -118,7 +119,8 @@ public class ClientQuotaControlManagerTest {
                     .collect(Collectors.toList());
             alters.add(new ClientQuotaAlteration(entity, ops));
         });
-        ControllerResult<?> result = manager.alterClientQuotas(alters);
+        ControllerResult<Map<ClientQuotaEntity, ApiError>> result = manager.alterClientQuotas(alters);
+        assertTrue(result.response().values().stream().allMatch(ApiError::isSuccess));
         result.records().forEach(apiMessageAndVersion -> manager.replay((QuotaRecord) apiMessageAndVersion.message()));
         quotasToTest.forEach(verifier);
     }
@@ -133,7 +135,8 @@ public class ClientQuotaControlManagerTest {
             entityToRequest(entity, components::add);
 
             // Exact match should only return one result for each in our test set
-            assertEquals(1, manager.describeClientQuotas(ClientQuotaFilter.containsOnly(components)).size());
+            assertEquals(1, manager.describeClientQuotas(ClientQuotaFilter.containsOnly(components)).size(),
+                "Expected one match for " + entity);
         });
 
         List<ClientQuotaEntity> nonMatching = Arrays.asList(

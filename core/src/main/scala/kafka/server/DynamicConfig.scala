@@ -68,7 +68,7 @@ object DynamicConfig {
   }
 
   object QuotaConfigs {
-    def isQuotaConfig(name: String): Boolean = org.apache.kafka.common.config.internals.QuotaConfigs.isClientOrUserConfig(name)
+    def isClientOrUserQuotaConfig(name: String): Boolean = org.apache.kafka.common.config.internals.QuotaConfigs.isClientOrUserConfig(name)
   }
 
   object Client {

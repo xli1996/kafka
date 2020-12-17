@@ -29,7 +29,6 @@ import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
-import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.ConfigRecord;
 import org.apache.kafka.common.metadata.FenceBrokerRecord;
 import org.apache.kafka.common.metadata.MetadataRecordType;
@@ -44,6 +43,7 @@ import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
+import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.common.utils.EventQueue;
 import org.apache.kafka.common.utils.KafkaEventQueue;
@@ -707,9 +707,9 @@ public final class QuorumController implements Controller {
     }
 
     public CompletableFuture<Map<ClientQuotaEntity, Map<String, Double>>> describeClientQuotas(
-            DescribeClientQuotasRequestData request) {
+            ClientQuotaFilter filter) {
         return appendReadEvent("descirbeClientQuotas", () ->
-            clientQuotaControlManager.describeClientQuotas(request));
+            clientQuotaControlManager.describeClientQuotas(filter));
     }
 
     @Override

@@ -20,15 +20,14 @@ package org.apache.kafka.controller;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
-import org.apache.kafka.common.message.AlterClientQuotasRequestData;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
-import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
+import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
 import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
@@ -149,12 +148,13 @@ public interface Controller extends AutoCloseable {
     );
 
     /**
-     * TODO
-     * @param request
-     * @return
+     * Retrieve current quotas for the given client quota entities
+     *
+     * @param filter        A collection of quota entity filters
+     * @return              A future yielding a map of quota entities to their current values
      */
     CompletableFuture<Map<ClientQuotaEntity, Map<String, Double>>> describeClientQuotas(
-        DescribeClientQuotasRequestData request);
+        ClientQuotaFilter filter);
 
     /**
      * Begin shutting down, but don't block.  You must still call close to clean up all

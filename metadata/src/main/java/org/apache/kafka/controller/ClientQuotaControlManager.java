@@ -3,15 +3,14 @@ package org.apache.kafka.controller;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.internals.QuotaConfigs;
 import org.apache.kafka.common.errors.InvalidRequestException;
-import org.apache.kafka.common.message.AlterClientQuotasRequestData;
-import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
+import org.apache.kafka.common.quota.ClientQuotaFilter;
+import org.apache.kafka.common.quota.ClientQuotaFilterComponent;
 import org.apache.kafka.common.requests.ApiError;
-import org.apache.kafka.common.requests.DescribeClientQuotasRequest;
 import org.apache.kafka.common.utils.Sanitizer;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.apache.kafka.timeline.TimelineHashMap;
@@ -66,41 +65,36 @@ public class ClientQuotaControlManager {
     }
 
     /**
-     * Read the current client quotas from memory using the filters provided in the request
+     * Read the current client quotas from memory using the given quota filter
      *
-     * @return
+     * @param filter    A ClientQuotaFilter built from the DescribeClientQuotasRequest
+     * @return          Mapping of quota entity to the quota value map that match the given filter
      */
-    Map<ClientQuotaEntity, Map<String, Double>> describeClientQuotas(DescribeClientQuotasRequestData request) {
-        verifyDescribeQuotaRequest(request);
+    Map<ClientQuotaEntity, Map<String, Double>> describeClientQuotas(ClientQuotaFilter filter) {
+        verifyDescribeQuotaRequest(filter);
 
-        // entity type -> entity name match
+        // Use a slightly different convention from ClientQuotaFilter (no null optional)
         Map<String, Optional<String>> entityMatches = new HashMap<>(2);
-        for (DescribeClientQuotasRequestData.ComponentData componentData : request.components()) {
-            switch (componentData.matchType()) {
-                case DescribeClientQuotasRequest.MATCH_TYPE_EXACT:
-                    entityMatches.put(componentData.entityType(), Optional.of(componentData.match()));
-                    break;
-                case DescribeClientQuotasRequest.MATCH_TYPE_DEFAULT:
-                    entityMatches.put(componentData.entityType(), Optional.of(QuotaConfigs.DEFAULT_ENTITY_NAME));
-                    break;
-                case DescribeClientQuotasRequest.MATCH_TYPE_SPECIFIED:
-                    entityMatches.put(componentData.entityType(), Optional.empty());
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unexpected match type: " + componentData.matchType());
+        for (ClientQuotaFilterComponent filterComponent : filter.components()) {
+            if (filterComponent.match() != null && filterComponent.match().isPresent()) {
+                entityMatches.put(filterComponent.entityType(), filterComponent.match());
+            } else if (filterComponent.match() != null) {
+                entityMatches.put(filterComponent.entityType(), Optional.of(QuotaConfigs.DEFAULT_ENTITY_NAME));
+            } else {
+                entityMatches.put(filterComponent.entityType(), Optional.empty());
             }
         }
 
         Set<Map.Entry<ClientQuotaEntity, Map<String, Double>>> allQuotas = clientQuotaData.entrySet();
         return allQuotas.stream()
-            .filter(entry -> matchQuotaEntity(entry.getKey(), entityMatches, request.strict()))
+            .filter(entry -> matchQuotaEntity(entry.getKey(), entityMatches, filter.strict()))
             .collect(Collectors.toMap(entry -> desanitizeEntity(entry.getKey()), Map.Entry::getValue));
     }
 
-    private void verifyDescribeQuotaRequest(DescribeClientQuotasRequestData request) {
+    private void verifyDescribeQuotaRequest(ClientQuotaFilter filter) {
         // Ensure we have only valid entity combinations and no duplicates
-        List<String> entityTypesInRequest = request.components().stream()
-                .map(DescribeClientQuotasRequestData.ComponentData::entityType)
+        List<String> entityTypesInRequest = filter.components().stream()
+                .map(ClientQuotaFilterComponent::entityType)
                 .collect(Collectors.toList());
 
         Set<String> entityTypes = new HashSet<>(2);

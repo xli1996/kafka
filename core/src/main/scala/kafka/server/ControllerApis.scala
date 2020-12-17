@@ -427,7 +427,7 @@ class ControllerApis(val requestChannel: RequestChannel,
     val quotaRequest = request.body[DescribeClientQuotasRequest]
     apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)
 
-    controller.describeClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
+    controller.describeClientQuotas(quotaRequest.filter()).whenComplete((results, exception) => {
       if (exception != null) {
         apisUtils.handleError(request, exception)
       } else {
@@ -441,13 +441,14 @@ class ControllerApis(val requestChannel: RequestChannel,
     val quotaRequest = request.body[AlterClientQuotasRequest]
     apisUtils.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
 
-    controller.alterClientQuotas(quotaRequest.data()).whenComplete((results, exception) => {
-      if (exception != null) {
-        apisUtils.handleError(request, exception)
-      } else {
-        apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-          AlterClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
-      }
-    })
+    controller.alterClientQuotas(quotaRequest.entries(), quotaRequest.validateOnly())
+      .whenComplete((results, exception) => {
+        if (exception != null) {
+          apisUtils.handleError(request, exception)
+        } else {
+          apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+            AlterClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
+        }
+      })
   }
 }

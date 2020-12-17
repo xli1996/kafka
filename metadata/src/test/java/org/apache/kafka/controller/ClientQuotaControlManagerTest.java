@@ -2,10 +2,11 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.config.internals.QuotaConfigs;
 import org.apache.kafka.common.errors.InvalidRequestException;
-import org.apache.kafka.common.message.DescribeClientQuotasRequestData;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
+import org.apache.kafka.common.quota.ClientQuotaFilter;
+import org.apache.kafka.common.quota.ClientQuotaFilterComponent;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -21,9 +22,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_DEFAULT;
-import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_EXACT;
-import static org.apache.kafka.common.requests.DescribeClientQuotasRequest.MATCH_TYPE_SPECIFIED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,12 +44,9 @@ public class ClientQuotaControlManagerTest {
             quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 4.0), alterations::add);
         alterQuotas(alterations, manager);
 
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(Collections.singletonList(
-                new DescribeClientQuotasRequestData.ComponentData()
-                        .setEntityType(ClientQuotaEntity.USER).setMatchType(MATCH_TYPE_SPECIFIED)));
-        Map<ClientQuotaEntity, Map<String, Double>> quotas = manager.describeClientQuotas(request);
+        ClientQuotaFilter filter = ClientQuotaFilter.contains(Collections.singletonList(
+            ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)));
+        Map<ClientQuotaEntity, Map<String, Double>> quotas = manager.describeClientQuotas(filter);
 
         assertEquals(3, quotas.size());
         assertTrue(quotas.keySet().stream()
@@ -62,16 +57,12 @@ public class ClientQuotaControlManagerTest {
     public void testInvalidDescribeFilters() {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(Arrays.asList(
-                new DescribeClientQuotasRequestData.ComponentData()
-                        .setEntityType(ClientQuotaEntity.USER).setMatchType(MATCH_TYPE_SPECIFIED),
-                new DescribeClientQuotasRequestData.ComponentData()
-                        .setEntityType(ClientQuotaEntity.IP).setMatchType(MATCH_TYPE_SPECIFIED)));
 
+        List<ClientQuotaFilterComponent> components = new ArrayList<>();
+        components.add(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER));
+        components.add(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.IP));
         InvalidRequestException e = assertThrows(InvalidRequestException.class,
-            () -> manager.describeClientQuotas(request));
+            () -> manager.describeClientQuotas(ClientQuotaFilter.contains(components)));
         assertTrue(e.getMessage().startsWith("Invalid entity filter component combination"));
     }
 
@@ -121,13 +112,11 @@ public class ClientQuotaControlManagerTest {
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
         setupDescribeMatchTest(manager, (entity, quotas) -> {
-            DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-            request.setStrict(true);
-            request.setComponents(new ArrayList<>());
-            entityToRequest(entity, request.components()::add);
+            List<ClientQuotaFilterComponent> components = new ArrayList<>();
+            entityToRequest(entity, components::add);
 
             // Exact match should only return one result for each in our test set
-            assertEquals(1, manager.describeClientQuotas(request).size());
+            assertEquals(1, manager.describeClientQuotas(ClientQuotaFilter.containsOnly(components)).size());
         });
 
         List<ClientQuotaEntity> nonMatching = Arrays.asList(
@@ -141,12 +130,11 @@ public class ClientQuotaControlManagerTest {
         );
 
         nonMatching.forEach(entity -> {
-            DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-            request.setStrict(true);
-            request.setComponents(new ArrayList<>());
-            entityToRequest(entity, request.components()::add);
+            List<ClientQuotaFilterComponent> components = new ArrayList<>();
+            entityToRequest(entity, components::add);
 
-            assertEquals(0, manager.describeClientQuotas(request).size());
+            // Exact match should only return no results for our non matching test set
+            assertEquals(0, manager.describeClientQuotas(ClientQuotaFilter.containsOnly(components)).size());
         });
     }
 
@@ -157,26 +145,25 @@ public class ClientQuotaControlManagerTest {
 
         setupDescribeMatchTest(manager, (entity, quotas) -> {});
 
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(new ArrayList<>());
+        List<ClientQuotaFilterComponent> components = new ArrayList<>();
+        ClientQuotaFilter filter = ClientQuotaFilter.contains(components);
 
         // Match open-ended existing user.
-        entityToRequest(userEntity("user-1"), request.components()::add);
-        Map<ClientQuotaEntity, Map<String, Double>> matched = manager.describeClientQuotas(request);
+        entityToRequest(userEntity("user-1"), components::add);
+        Map<ClientQuotaEntity, Map<String, Double>> matched = manager.describeClientQuotas(filter);
         assertEquals(3, matched.size());
         assertTrue(matched.keySet().stream()
             .allMatch(entity -> entity.entries().get(ClientQuotaEntity.USER).equals("user-1")));
 
         // Match open-ended non-existent user.
-        request.components().clear();
-        entityToRequest(userEntity("unknown"), request.components()::add);
-        assertEquals(0, manager.describeClientQuotas(request).size());
+        components.clear();
+        entityToRequest(userEntity("unknown"), components::add);
+        assertEquals(0, manager.describeClientQuotas(filter).size());
 
         // Match open-ended existing client ID.
-        request.components().clear();
-        entityToRequest(clientEntity("client-id-2"), request.components()::add);
-        matched = manager.describeClientQuotas(request);
+        components.clear();
+        entityToRequest(clientEntity("client-id-2"), components::add);
+        matched = manager.describeClientQuotas(filter);
         assertEquals(2, matched.size());
         assertTrue(matched.keySet().stream()
                 .allMatch(entity -> entity.entries().get(ClientQuotaEntity.CLIENT_ID).equals("client-id-2")));
@@ -190,13 +177,10 @@ public class ClientQuotaControlManagerTest {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(new ArrayList<>());
-
-        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("other", "name")), request.components()::add);
+        List<ClientQuotaFilterComponent> components = new ArrayList<>();
+        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("other", "name")), components::add);
         InvalidRequestException e = assertThrows(InvalidRequestException.class,
-            () -> manager.describeClientQuotas(request));
+            () -> manager.describeClientQuotas(ClientQuotaFilter.contains(components)));
         assertEquals("Custom entity type other not supported", e.getMessage());
     }
 
@@ -205,13 +189,10 @@ public class ClientQuotaControlManagerTest {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
-        DescribeClientQuotasRequestData request = new DescribeClientQuotasRequestData();
-        request.setStrict(false);
-        request.setComponents(new ArrayList<>());
-
-        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("", "name")), request.components()::add);
+        List<ClientQuotaFilterComponent> components = new ArrayList<>();
+        entityToRequest(new ClientQuotaEntity(Collections.singletonMap("", "name")), components::add);
         InvalidRequestException e = assertThrows(InvalidRequestException.class,
-                () -> manager.describeClientQuotas(request));
+                () -> manager.describeClientQuotas(ClientQuotaFilter.contains(components)));
         assertEquals("Unexpected empty filter component entity type", e.getMessage());
     }
 
@@ -228,14 +209,12 @@ public class ClientQuotaControlManagerTest {
         result.records().forEach(apiMessageAndVersion -> manager.replay((QuotaRecord) apiMessageAndVersion.message()));
     }
 
-    static void entityToRequest(ClientQuotaEntity entity, Consumer<DescribeClientQuotasRequestData.ComponentData> acceptor) {
+    static void entityToRequest(ClientQuotaEntity entity, Consumer<ClientQuotaFilterComponent> acceptor) {
         entity.entries().forEach((type, name) -> {
             if (name == null) {
-                acceptor.accept(new DescribeClientQuotasRequestData.ComponentData()
-                    .setEntityType(type).setMatchType(MATCH_TYPE_DEFAULT));
+                acceptor.accept(ClientQuotaFilterComponent.ofDefaultEntity(type));
             } else {
-                acceptor.accept(new DescribeClientQuotasRequestData.ComponentData()
-                    .setEntityType(type).setMatch(name).setMatchType(MATCH_TYPE_EXACT));
+                acceptor.accept(ClientQuotaFilterComponent.ofEntity(type, name));
             }
         });
     }

@@ -43,7 +43,7 @@ object ConfigType {
 }
 
 object ConfigEntityName {
-  val Default = "<default>" // TODO remove this in favor of QuotaConfigs.DEFAULT_ENTITY_NAME
+  val Default = "<default>"
 }
 
 /**

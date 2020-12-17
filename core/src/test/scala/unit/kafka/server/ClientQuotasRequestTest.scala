@@ -36,7 +36,7 @@ class ClientQuotasRequestTest extends BaseRequestTest {
   private val ConsumerByteRateProp = QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG
   private val ProducerByteRateProp = QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG
   private val RequestPercentageProp = QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG
-  private val IpConnectionRateProp = DynamicConfig.Ip.IpConnectionRateOverrideProp
+  private val IpConnectionRateProp = QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG
 
   override val brokerCount = 1
 

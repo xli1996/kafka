@@ -18,7 +18,6 @@
 package kafka.server.metadata
 
 import kafka.network.ConnectionQuotas
-import kafka.security.CredentialProvider
 import kafka.server.ConfigEntityName
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging

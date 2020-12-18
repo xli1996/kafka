@@ -18,6 +18,7 @@
 package kafka.server.metadata
 
 import kafka.network.ConnectionQuotas
+import kafka.security.CredentialProvider
 import kafka.server.ConfigEntityName
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.utils.Logging
@@ -99,8 +100,6 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       case QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG => Some(quotaManagers.controllerMutation)
       case _ => warn(s"Unexpected quota key ${quotaRecord.key()}"); None
     }
-
-    user.map(Sanitizer.sanitize)
 
     val quota = if (quotaRecord.remove()) {
       None

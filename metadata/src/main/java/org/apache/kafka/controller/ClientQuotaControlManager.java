@@ -28,7 +28,6 @@ import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.quota.ClientQuotaFilterComponent;
 import org.apache.kafka.common.requests.ApiError;
-import org.apache.kafka.common.utils.Sanitizer;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.apache.kafka.timeline.TimelineHashMap;
 
@@ -48,13 +47,19 @@ import java.util.stream.Collectors;
 
 
 public class ClientQuotaControlManager {
+
     private final SnapshotRegistry snapshotRegistry;
 
-    final TimelineHashMap<ClientQuotaEntity, Map<String, Double>> clientQuotaData;
+    private final TimelineHashMap<ClientQuotaEntity, Map<String, Double>> clientQuotaData;
 
     ClientQuotaControlManager(SnapshotRegistry snapshotRegistry) {
         this.snapshotRegistry = snapshotRegistry;
         this.clientQuotaData = new TimelineHashMap<>(snapshotRegistry, 0);
+    }
+
+    @FunctionalInterface
+    interface EntityMatch {
+        boolean matches(String name);
     }
 
     /**
@@ -80,25 +85,21 @@ public class ClientQuotaControlManager {
         return new ControllerResult<>(outputRecords, outputResults);
     }
 
-    @FunctionalInterface
-    interface EntityMatch {
-        boolean matches(String name);
-    }
-
     /**
      * Read the current client quotas from memory using the given quota filter
      *
-     * @param filter    A ClientQuotaFilter built from the DescribeClientQuotasRequest
-     * @return          Mapping of quota entity to the quota value map that match the given filter
+     * @param quotaFilter       A ClientQuotaFilter built from the DescribeClientQuotasRequest
+     * @return                  Mapping of quota entity to the quota value map that match the given filter
      */
-    Map<ClientQuotaEntity, Map<String, Double>> describeClientQuotas(ClientQuotaFilter filter) {
-        verifyDescribeQuotaRequest(filter);
+    Map<ClientQuotaEntity, Map<String, Double>> describeClientQuotas(ClientQuotaFilter quotaFilter) {
+        verifyDescribeQuotaRequest(quotaFilter);
 
         // Use a slightly different convention from ClientQuotaFilter (no null optional)
         Map<String, EntityMatch> entityMatches = new HashMap<>(2);
-        for (ClientQuotaFilterComponent filterComponent : filter.components()) {
+        for (ClientQuotaFilterComponent filterComponent : quotaFilter.components()) {
             if (filterComponent.match() != null && filterComponent.match().isPresent()) {
-                entityMatches.put(filterComponent.entityType(), name -> filterComponent.match().get().equals(name));
+                String match = filterComponent.match().get();
+                entityMatches.put(filterComponent.entityType(), match::equals);
             } else if (filterComponent.match() != null) {
                 entityMatches.put(filterComponent.entityType(), Objects::isNull);
             } else {
@@ -109,9 +110,30 @@ public class ClientQuotaControlManager {
         // Traverse the in-memory quota entries and find matches
         Set<Map.Entry<ClientQuotaEntity, Map<String, Double>>> allQuotas = clientQuotaData.entrySet();
         return allQuotas.stream()
-            .filter(entry -> matchQuotaEntity(entry.getKey(), entityMatches, filter.strict()))
+            .filter(entry -> matchQuotaEntity(entry.getKey(), entityMatches, quotaFilter.strict()))
             .filter(entry -> hasValidQuotaKeys(entry.getKey(), entry.getValue().keySet()))
-            .collect(Collectors.toMap(entry -> desanitizeEntity(entry.getKey()), Map.Entry::getValue));
+            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    /**
+     * Apply a quota record to the in-memory state.
+     *
+     * @param record    A QuotaRecord instance.
+     */
+    public void replay(QuotaRecord record) {
+        Map<String, String> entityMap = new HashMap<>(2);
+        record.entity().forEach(entityData -> entityMap.put(entityData.entityType(), entityData.entityName()));
+        ClientQuotaEntity entity = new ClientQuotaEntity(entityMap);
+        Map<String, Double> quotas = clientQuotaData.get(entity);
+        if (quotas == null) {
+            quotas = new TimelineHashMap<>(snapshotRegistry, 0);
+            clientQuotaData.put(entity, quotas);
+        }
+        if (record.remove()) {
+            quotas.remove(record.key());
+        } else {
+            quotas.put(record.key(), record.value());
+        }
     }
 
     private void alterClientQuotaEntity(
@@ -121,8 +143,8 @@ public class ClientQuotaControlManager {
             Map<ClientQuotaEntity, ApiError> outputResults) {
 
         // Check entity types and sanitize the names
-        Map<String, String> sanitizedNames = new HashMap<>(3);
-        ApiError error = sanitizeEntity(entity, sanitizedNames);
+        Map<String, String> validatedEntityMap = new HashMap<>(3);
+        ApiError error = validateEntity(entity, validatedEntityMap);
         if (error.isFailure()) {
             outputResults.put(entity, error);
             return;
@@ -130,7 +152,7 @@ public class ClientQuotaControlManager {
 
         // Check the combination of entity types and get the config keys
         Map<String, ConfigDef.ConfigKey> configKeys = new HashMap<>(4);
-        error = configKeysForEntityType(sanitizedNames, configKeys);
+        error = configKeysForEntityType(validatedEntityMap, configKeys);
         if (error.isFailure()) {
             outputResults.put(entity, error);
             return;
@@ -138,7 +160,7 @@ public class ClientQuotaControlManager {
 
         // Don't share objects between different records
         Supplier<List<QuotaRecord.EntityData>> recordEntitySupplier = () ->
-                sanitizedNames.entrySet().stream().map(mapEntry -> new QuotaRecord.EntityData()
+                validatedEntityMap.entrySet().stream().map(mapEntry -> new QuotaRecord.EntityData()
                         .setEntityType(mapEntry.getKey())
                         .setEntityName(mapEntry.getValue()))
                         .collect(Collectors.toList());
@@ -155,7 +177,7 @@ public class ClientQuotaControlManager {
                             .setRemove(true), (short) 0));
                 }
             } else {
-                ApiError validationError = validateQuotaConfigKeyValue(configKeys, key, newValue);
+                ApiError validationError = validateQuotaKeyValue(configKeys, key, newValue);
                 if (validationError.isFailure()) {
                     outputResults.put(entity, validationError);
                 } else {
@@ -203,12 +225,15 @@ public class ClientQuotaControlManager {
         return ApiError.NONE;
     }
 
-    // TODO can this be shared with alter configs?
-    private ApiError validateQuotaConfigKeyValue(Map<String, ConfigDef.ConfigKey> validKeys, String key, Double value) {
+    private ApiError validateQuotaKeyValue(Map<String, ConfigDef.ConfigKey> validKeys, String key, Double value) {
+        // TODO can this validation be shared with alter configs?
+        // Ensure we have an allowed quota key
         ConfigDef.ConfigKey configKey = validKeys.get(key);
         if (configKey == null) {
             return new ApiError(Errors.INVALID_REQUEST, "Invalid configuration key " + key);
         }
+
+        // Ensure the quota value is valid
         switch (configKey.type()) {
             case DOUBLE:
                 break;
@@ -315,11 +340,8 @@ public class ClientQuotaControlManager {
         }
     }
 
-    /**
-     * Given a quota entity (which is a mapping of entity type to entity name), validate the types and
-     * sanitize the names
-     */
-    private ApiError sanitizeEntity(ClientQuotaEntity entity, Map<String, String> sanitizedEntities) {
+    private ApiError validateEntity(ClientQuotaEntity entity, Map<String, String> validatedEntityMap) {
+        // Given a quota entity (which is a mapping of entity type to entity name), validate it's types
         if (entity.entries().isEmpty()) {
             return new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity");
         }
@@ -327,13 +349,12 @@ public class ClientQuotaControlManager {
         for (Map.Entry<String, String> entityEntry : entity.entries().entrySet()) {
             String entityType = entityEntry.getKey();
             String entityName = entityEntry.getValue();
-            String sanitizedEntityName = sanitizeEntityName(entityName);
             if (Objects.equals(entityType, ClientQuotaEntity.USER)) {
-                sanitizedEntities.put(ClientQuotaEntity.USER, sanitizedEntityName);
+                validatedEntityMap.put(ClientQuotaEntity.USER, entityName);
             } else if (Objects.equals(entityType, ClientQuotaEntity.CLIENT_ID)) {
-                sanitizedEntities.put(ClientQuotaEntity.CLIENT_ID, sanitizedEntityName);
+                validatedEntityMap.put(ClientQuotaEntity.CLIENT_ID, entityName);
             } else if (Objects.equals(entityType, ClientQuotaEntity.IP)) {
-                sanitizedEntities.put(ClientQuotaEntity.IP, sanitizedEntityName);
+                validatedEntityMap.put(ClientQuotaEntity.IP, entityName);
             } else {
                 return new ApiError(Errors.INVALID_REQUEST, "Unhandled client quota entity type: " + entityType);
             }
@@ -344,48 +365,5 @@ public class ClientQuotaControlManager {
         }
 
         return ApiError.NONE;
-    }
-
-    private String sanitizeEntityName(String entityName) {
-        if (entityName == null) {
-            return null;
-        } else {
-            return Sanitizer.sanitize(entityName);
-        }
-    }
-
-    private ClientQuotaEntity desanitizeEntity(ClientQuotaEntity entity) {
-        Map<String, String> entries = new HashMap<>(2);
-        entity.entries().forEach((type, name) -> entries.put(type, desanitizeEntityName(name)));
-        return new ClientQuotaEntity(entries);
-    }
-
-    private String desanitizeEntityName(String sanitizedEntityName) {
-        if (sanitizedEntityName == null) {
-            return null;
-        } else {
-            return Sanitizer.desanitize(sanitizedEntityName);
-        }
-    }
-
-    /**
-     * Apply a quota record to the in-memory state.
-     *
-     * @param record    A QuotaRecord instance.
-     */
-    public void replay(QuotaRecord record) {
-        Map<String, String> entityMap = new HashMap<>(2);
-        record.entity().forEach(entityData -> entityMap.put(entityData.entityType(), entityData.entityName()));
-        ClientQuotaEntity entity = new ClientQuotaEntity(entityMap);
-        Map<String, Double> quotas = clientQuotaData.get(entity);
-        if (quotas == null) {
-            quotas = new TimelineHashMap<>(snapshotRegistry, 0);
-            clientQuotaData.put(entity, quotas);
-        }
-        if (record.remove()) {
-            quotas.remove(record.key());
-        } else {
-            quotas.put(record.key(), record.value());
-        }
     }
 }

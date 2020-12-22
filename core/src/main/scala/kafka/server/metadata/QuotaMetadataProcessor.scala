@@ -87,10 +87,13 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
     }
   }
 
+
   /**
-   * TODO
-   * @param quotaFilter
-   * @return
+   * Return quota entries for a given filter. These entries are returned from an in-memory cache and may not reflect
+   * the latest state of the quotas according to the controller.
+   *
+   * @param quotaFilter       A quota entity filter
+   * @return                  A mapping of quota entities along with their quota values
    */
   def describeClientQuotas(quotaFilter: ClientQuotaFilter): Map[QuotaEntity, Map[String, Double]] = {
 
@@ -128,8 +131,8 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
 
     val userMatches: Set[QuotaEntity] = if (userMatch.isDefined) {
       userMatch.get match {
-        case ExactMatch(user) => userQuotasIndex(SpecificUser(user)).toSet
-        case DefaultMatch => userQuotasIndex(DefaultUser).toSet
+        case ExactMatch(user) => userQuotasIndex.getOrElse(SpecificUser(user), Set()).toSet
+        case DefaultMatch => userQuotasIndex.getOrElse(DefaultUser, Set()).toSet
         case TypeMatch => userQuotasIndex.values.flatten.toSet
       }
     } else {
@@ -138,8 +141,8 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
 
     val clientMatches: Set[QuotaEntity] = if (clientMatch.isDefined) {
       clientMatch.get match {
-        case ExactMatch(clientId) => clientQuotasIndex(SpecificClientId(clientId)).toSet
-        case DefaultMatch => clientQuotasIndex(DefaultClientId).toSet
+        case ExactMatch(clientId) => clientQuotasIndex.getOrElse(SpecificClientId(clientId), Set()).toSet
+        case DefaultMatch => clientQuotasIndex.getOrElse(DefaultClientId, Set()).toSet
         case TypeMatch => clientQuotasIndex.values.flatten.toSet
       }
     } else {
@@ -165,24 +168,21 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       // Remove any matches with extra entity types
       userClientMatches.filter { quotaEntity =>
         quotaEntity match {
-          case IpEntity(ip) => true
+          case IpEntity(_) => true
           case DefaultIpEntity => true
-          case UserEntity(user) => userMatch.isDefined
+          case UserEntity(_) => userMatch.isDefined
           case DefaultUserEntity => userMatch.isDefined
-          case ClientIdEntity(clientId) => clientMatch.isDefined
+          case ClientIdEntity(_) => clientMatch.isDefined
           case DefaultClientIdEntity => clientMatch.isDefined
-          case UserClientIdEntity(user, clientId) => userMatch.isDefined && clientMatch.isDefined
-          case DefaultUserClientIdEntity(clientId) => userMatch.isDefined && clientMatch.isDefined
-          case UserDefaultClientIdEntity(user) => userMatch.isDefined && clientMatch.isDefined
+          case UserClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
+          case DefaultUserClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
+          case UserDefaultClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
           case DefaultUserDefaultClientIdEntity => userMatch.isDefined && clientMatch.isDefined
         }
       }
     } else {
       userClientMatches
     }
-
-    System.err.println(userClientMatches)
-    System.err.println(filteredMatches)
 
     val resultsMap: Map[QuotaEntity, Map[String, Double]] = filteredMatches.map {
       quotaEntity => quotaEntity -> quotaCache(quotaEntity).toMap
@@ -192,43 +192,52 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
   }
 
   private[server] def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
-    // A mapping of entities in the record along with their names or <default> if the name was null
     val entityMap = mutable.Map[String, String]()
     quotaRecord.entity().forEach { entityData =>
       entityMap.put(entityData.entityType(), entityData.entityName())
-      /*entityData.entityType() match {
-        case ClientQuotaEntity.USER => entityMap.put(ClientQuotaEntity.USER, entityData.entityName())
-        case ClientQuotaEntity.CLIENT_ID => entityMap.put(ClientQuotaEntity.CLIENT_ID, entityData.entityName())
-        case ClientQuotaEntity.IP => entityMap.put(ClientQuotaEntity.IP, entityData.entityName())
-      }*/
     }
 
     if (entityMap.contains(ClientQuotaEntity.IP)) {
-      // IP quota manager has "default" convention of: None
+      // In the IP quota manager, None is used for default entity
       handleIpQuota(Option(entityMap(ClientQuotaEntity.IP)), quotaRecord)
+      return
     }
 
     if (entityMap.contains(ClientQuotaEntity.USER) || entityMap.contains(ClientQuotaEntity.CLIENT_ID)) {
-      // User+Client quota managers has "default" convention of: Some("<default>")
-      val userOpt = entityMap.get(ClientQuotaEntity.USER).map(s =>
-        if (s == null) {
-          ConfigEntityName.Default
-        } else {
-          s
-        })
+      // Need to handle null values for default entity name, so use "getOrElse" combined with "contains" checks
+      val userVal = entityMap.getOrElse(ClientQuotaEntity.USER, null)
+      val clientIdVal = entityMap.getOrElse(ClientQuotaEntity.CLIENT_ID, null)
 
-      val clientIdOpt = entityMap.get(ClientQuotaEntity.CLIENT_ID).map(s =>
-        if (s == null) {
-          ConfigEntityName.Default
+      // In User+Client quota managers, "<default>" is used for default entity, so we need to represent all possible
+      // combinations of values, defaults, and absent entities
+      val userClientEntity = if (entityMap.contains(ClientQuotaEntity.USER) && entityMap.contains(ClientQuotaEntity.CLIENT_ID)) {
+        if (userVal == null && clientIdVal == null) {
+          DefaultUserDefaultClientIdEntity
+        } else if (userVal == null) {
+          DefaultUserClientIdEntity(clientIdVal)
+        } else if (clientIdVal == null) {
+          UserDefaultClientIdEntity(userVal)
         } else {
-          s
-        })
-
+          UserClientIdEntity(userVal, clientIdVal)
+        }
+      } else if (entityMap.contains(ClientQuotaEntity.USER)) {
+        if (userVal == null) {
+          DefaultUserEntity
+        } else {
+          UserEntity(userVal)
+        }
+      } else {
+        if (clientIdVal == null) {
+          DefaultClientIdEntity
+        } else {
+          ClientIdEntity(clientIdVal)
+        }
+      }
       handleUserClientQuota(
-        userOpt,
-        clientIdOpt,
+        userClientEntity,
         quotaRecord
       )
+      return
     }
   }
 
@@ -256,31 +265,7 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
     connectionQuotas.updateIpConnectionRateQuota(inetAddress, newValue)
   }
 
-  private def handleUserClientQuota(user: Option[String], clientId: Option[String], quotaRecord: QuotaRecord): Unit = {
-    val quotaEntity = if (user.isDefined && clientId.isDefined) {
-      if (user.get.equals(ConfigEntityName.Default) && clientId.get.equals(ConfigEntityName.Default)) {
-        DefaultUserDefaultClientIdEntity
-      } else if (user.get.equals(ConfigEntityName.Default)) {
-        DefaultUserClientIdEntity(clientId.get)
-      } else if (clientId.get.equals(ConfigEntityName.Default)) {
-        UserDefaultClientIdEntity(user.get)
-      } else {
-        UserClientIdEntity(user.get, clientId.get)
-      }
-    } else if (user.isDefined) {
-      if (user.get.equals(ConfigEntityName.Default)) {
-        DefaultUserEntity
-      } else {
-        UserEntity(user.get)
-      }
-    } else {
-      if (clientId.get.equals(ConfigEntityName.Default)) {
-        DefaultClientIdEntity
-      } else {
-        ClientIdEntity(clientId.get)
-      }
-    }
-
+  private def handleUserClientQuota(quotaEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
     updateQuotaCache(quotaEntity, quotaRecord)
 
     val managerOpt = quotaRecord.key() match {
@@ -291,19 +276,31 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       case _ => warn(s"Unexpected quota key ${quotaRecord.key()}"); None
     }
 
-    val quota = if (quotaRecord.remove()) {
+    val quotaValue = if (quotaRecord.remove()) {
       None
     } else {
       Some(new Quota(quotaRecord.value(), true))
     }
 
+    // Convert entity into Options with sanitized values for QuotaManagers
+    val (sanitizedUser, sanitizedClientId) = quotaEntity match {
+      case UserEntity(user) => (Some(Sanitizer.sanitize(user)), None)
+      case DefaultUserEntity => (Some(ConfigEntityName.Default), None)
+      case ClientIdEntity(clientId) => (None, Some(Sanitizer.sanitize(clientId)))
+      case DefaultClientIdEntity => (None, Some(ConfigEntityName.Default))
+      case UserClientIdEntity(user, clientId) => (Some(Sanitizer.sanitize(user)), Some(Sanitizer.sanitize(clientId)))
+      case UserDefaultClientIdEntity(user) => (Some(Sanitizer.sanitize(user)), Some(ConfigEntityName.Default))
+      case DefaultUserClientIdEntity(clientId) => (Some(ConfigEntityName.Default), Some(Sanitizer.sanitize(clientId)))
+      case DefaultUserDefaultClientIdEntity => (Some(ConfigEntityName.Default), Some(ConfigEntityName.Default))
+      case IpEntity(_) | DefaultIpEntity => (None, None)
+    }
+
     managerOpt.foreach {
-      // User and client id are not sanitized in the metadata record, so do that here
       manager => manager.updateQuota(
-        sanitizedUser = user.map(Sanitizer.sanitize),
-        clientId = clientId,
-        sanitizedClientId = clientId.map(Sanitizer.sanitize),
-        quota = quota)
+        sanitizedUser = sanitizedUser,
+        clientId = sanitizedClientId.map(Sanitizer.desanitize),
+        sanitizedClientId = sanitizedClientId,
+        quota = quotaValue)
     }
   }
 
@@ -341,16 +338,33 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
     }
 
     quotaEntity match {
+      case UserEntity(user) =>
+        updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
+      case DefaultUserEntity =>
+        updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
+
+      case ClientIdEntity(clientId) =>
+        updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
+      case DefaultClientIdEntity =>
+        updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+
       case UserClientIdEntity(user, clientId) =>
         updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
         updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
+
       case UserDefaultClientIdEntity(user) =>
         updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
         updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+
       case DefaultUserClientIdEntity(clientId) =>
         updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
         updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
-      case _ => // no indexing needed for other types
+
+      case DefaultUserDefaultClientIdEntity =>
+        updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
+        updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+
+      case IpEntity(_) | DefaultIpEntity => // Don't index these
     }
   }
 }

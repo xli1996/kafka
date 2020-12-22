@@ -7,7 +7,7 @@ import org.apache.kafka.common.config.internals.QuotaConfigs
 import org.apache.kafka.common.metadata.QuotaRecord
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilter, ClientQuotaFilterComponent}
-import org.junit.Assert.assertEquals
+import org.junit.Assert.{assertEquals, assertFalse}
 import org.junit.{Before, Test}
 import org.mockito.Mockito.mock
 
@@ -112,6 +112,43 @@ class QuotaMetadataProcessorTest {
     assertEquals(1, results.size)
   }
 
+  @Test
+  def testQuotaRemoval(): Unit = {
+    val entity = userClientEntity("user", "client-id")
+    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10000.0))
+    addQuotaRecord(processor, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 20000.0))
+    var quotas = describeEntity(entity)
+    assertEquals(2, quotas.size)
+    assertEquals(10000.0, quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG), 1e-6)
+
+    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10001.0))
+    quotas = describeEntity(entity)
+    assertEquals(2, quotas.size)
+    assertEquals(10001.0, quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG), 1e-6)
+
+    addQuotaRemovalRecord(processor, entity, QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG)
+    quotas = describeEntity(entity)
+    assertEquals(1, quotas.size)
+    assertFalse(quotas.contains(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG))
+
+    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
+    quotas = describeEntity(entity)
+    assertEquals(0, quotas.size)
+  }
+
+  def describeEntity(entity: List[QuotaRecord.EntityData]): Map[String, Double] = {
+    val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
+    entityToFilter(entity, components.addOne)
+    val results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
+    if (results.isEmpty) {
+      Map()
+    } else if (results.size == 1) {
+      results.head._2
+    } else {
+      throw new AssertionError("Matched more than one entity with strict=true describe filter")
+    }
+  }
+
   def setupAndVerify(processor: QuotaMetadataProcessor,
                      verifier: (List[QuotaRecord.EntityData], (String, Double)) => Unit ): Unit = {
     val toVerify = List(
@@ -143,6 +180,13 @@ class QuotaMetadataProcessorTest {
       .setEntity(entity.asJava)
       .setKey(quota._1)
       .setValue(quota._2))
+  }
+
+  def addQuotaRemovalRecord(processor: QuotaMetadataProcessor, entity: List[QuotaRecord.EntityData], quota: String): Unit = {
+    processor.handleQuotaRecord(new QuotaRecord()
+      .setEntity(entity.asJava)
+      .setKey(quota)
+      .setRemove(true))
   }
 
   def entityToFilter(entity: List[QuotaRecord.EntityData], acceptor: ClientQuotaFilterComponent => Unit): Unit = {

@@ -307,13 +307,17 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
   private def updateQuotaCache(quotaEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
     // Update the quota entity map
     val quotaValues = quotaCache.getOrElseUpdate(quotaEntity, mutable.HashMap.empty)
-    if (quotaRecord.remove()) {
+    val removeCache = if (quotaRecord.remove()) {
       quotaValues.remove(quotaRecord.key())
       if (quotaValues.isEmpty) {
         quotaCache.remove(quotaEntity)
+        true
+      } else {
+        false
       }
     } else {
       quotaValues.put(quotaRecord.key(), quotaRecord.value())
+      false
     }
 
     // Update the cache indexes for user/client quotas
@@ -339,30 +343,30 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
 
     quotaEntity match {
       case UserEntity(user) =>
-        updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
+        updateUserCache(SpecificUser(user), quotaEntity, removeCache)
       case DefaultUserEntity =>
-        updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
+        updateUserCache(DefaultUser, quotaEntity, removeCache)
 
       case ClientIdEntity(clientId) =>
-        updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
+        updateClientIdCache(SpecificClientId(clientId), quotaEntity, removeCache)
       case DefaultClientIdEntity =>
-        updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+        updateClientIdCache(DefaultClientId, quotaEntity, removeCache)
 
       case UserClientIdEntity(user, clientId) =>
-        updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
-        updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
+        updateUserCache(SpecificUser(user), quotaEntity, removeCache)
+        updateClientIdCache(SpecificClientId(clientId), quotaEntity, removeCache)
 
       case UserDefaultClientIdEntity(user) =>
-        updateUserCache(SpecificUser(user), quotaEntity, quotaRecord.remove())
-        updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+        updateUserCache(SpecificUser(user), quotaEntity, removeCache)
+        updateClientIdCache(DefaultClientId, quotaEntity, removeCache)
 
       case DefaultUserClientIdEntity(clientId) =>
-        updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
-        updateClientIdCache(SpecificClientId(clientId), quotaEntity, quotaRecord.remove())
+        updateUserCache(DefaultUser, quotaEntity, removeCache)
+        updateClientIdCache(SpecificClientId(clientId), quotaEntity, removeCache)
 
       case DefaultUserDefaultClientIdEntity =>
-        updateUserCache(DefaultUser, quotaEntity, quotaRecord.remove())
-        updateClientIdCache(DefaultClientId, quotaEntity, quotaRecord.remove())
+        updateUserCache(DefaultUser, quotaEntity, removeCache)
+        updateClientIdCache(DefaultClientId, quotaEntity, removeCache)
 
       case IpEntity(_) | DefaultIpEntity => // Don't index these
     }

@@ -1,16 +1,20 @@
 package kafka.server.metadata
 
 import kafka.network.ConnectionQuotas
+import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.{ConfigEntityName, KafkaConfig, QuotaFactory}
 import kafka.utils.{MockTime, TestUtils}
 import org.apache.kafka.common.config.internals.QuotaConfigs
+import org.apache.kafka.common.errors.{InvalidRequestException, UnsupportedVersionException}
 import org.apache.kafka.common.metadata.QuotaRecord
-import org.apache.kafka.common.metrics.Metrics
+import org.apache.kafka.common.metrics.{Metrics, Quota}
 import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilter, ClientQuotaFilterComponent}
-import org.junit.Assert.{assertEquals, assertFalse}
+import org.junit.Assert.{assertEquals, assertFalse, assertThrows}
 import org.junit.{Before, Test}
-import org.mockito.Mockito.mock
+import org.mockito.ArgumentMatchers.{any, eq => _eq}
+import org.mockito.Mockito._
 
+import java.net.InetAddress
 import java.util.Properties
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -28,15 +32,25 @@ class QuotaMetadataProcessorTest {
     val time = new MockTime
     val metrics = new Metrics
     val quotaManagers = QuotaFactory.instantiate(configs.head, metrics, time, "quota-metadata-processor-test")
+    val spiedQuotaManagers = QuotaManagers(
+      fetch = spy(quotaManagers.fetch),
+      produce = spy(quotaManagers.produce),
+      request = spy(quotaManagers.request),
+      controllerMutation = spy(quotaManagers.controllerMutation),
+      leader = quotaManagers.leader,
+      follower = quotaManagers.follower,
+      alterLogDirs = quotaManagers.alterLogDirs,
+      clientQuotaCallback = quotaManagers.clientQuotaCallback
+    )
     val connectionQuotas = mock(classOf[ConnectionQuotas])
-    processor = new QuotaMetadataProcessor(quotaManagers, connectionQuotas)
+    processor = new QuotaMetadataProcessor(spiedQuotaManagers, connectionQuotas)
   }
 
   @Test
-  def testDescribeMatchExact(): Unit = {
+  def testDescribeStrictMatch(): Unit = {
     setupAndVerify(processor, { case (entity, _) =>
       val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
-      entityToFilter(entity, components.addOne)
+      entityToFilter(entity, components)
       val filter = ClientQuotaFilter.containsOnly(components.toList.asJava)
       val results = processor.describeClientQuotas(filter)
       assertEquals(s"Should only match one quota for ${entity}", 1, results.size)
@@ -54,7 +68,7 @@ class QuotaMetadataProcessorTest {
 
     nonMatching.foreach( entity => {
       val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
-      entityToFilter(entity, components.addOne)
+      entityToFilter(entity, components)
       val filter = ClientQuotaFilter.containsOnly(components.toList.asJava)
       val results = processor.describeClientQuotas(filter)
       assertEquals(0, results.size)
@@ -62,12 +76,12 @@ class QuotaMetadataProcessorTest {
   }
 
   @Test
-  def testDescribeMatchPartial(): Unit = {
+  def testDescribeNonStrictMatch(): Unit = {
     setupAndVerify(processor, { case (_, _) => })
 
     // Match open-ended existing user.
     val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
-    entityToFilter(userEntity("user-1"), components.addOne)
+    entityToFilter(userEntity("user-1"), components)
     var results = processor.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
@@ -77,21 +91,77 @@ class QuotaMetadataProcessorTest {
       case _ => false
     }))
 
+    results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
+    assertEquals(1, results.size)
+
     // Match open-ended non-existent user.
     components.clear()
-    entityToFilter(userEntity("unknown"), components.addOne)
+    entityToFilter(userEntity("unknown"), components)
     results = processor.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(0, results.size)
 
     // Match open-ended existing client ID.
     components.clear()
-    entityToFilter(clientEntity("client-id-2"), components.addOne)
+    entityToFilter(clientEntity("client-id-2"), components)
     results = processor.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(2, results.size)
     assertEquals(2, results.keySet.count(quotaEntity => quotaEntity match {
       case ClientIdEntity(clientId) => clientId.equals("client-id-2")
       case DefaultUserClientIdEntity(clientId) => clientId.equals("client-id-2")
       case UserClientIdEntity(_, clientId) => clientId.equals("client-id-2")
+      case _ => false
+    }))
+
+    // Match open-ended default user.
+    results = processor.describeClientQuotas(
+      ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.USER)).asJava))
+    assertEquals(3, results.size)
+    assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
+      case DefaultUserEntity | DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case _ => false
+    }))
+
+    // Match open-ended default client.
+    results = processor.describeClientQuotas(
+      ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.CLIENT_ID)).asJava))
+    assertEquals(3, results.size)
+    assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
+      case DefaultClientIdEntity | UserDefaultClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case _ => false
+    }))
+  }
+
+  @Test
+  def testDescribeFilterOnTypes(): Unit = {
+    setupAndVerify(processor, { case (_, _) => })
+
+    var results = processor.describeClientQuotas(
+      ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)).asJava))
+    assertEquals(11, results.size)
+    assertEquals(11, results.keySet.count(quotaEntity => quotaEntity match {
+      case UserEntity(_) | DefaultUserEntity | UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
+           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case _ => false
+    }))
+
+    results = processor.describeClientQuotas(
+      ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)).asJava))
+    assertEquals(8, results.size)
+    assertEquals(8, results.keySet.count(quotaEntity => quotaEntity match {
+      case ClientIdEntity(_) | DefaultClientIdEntity | UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
+           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case _ => false
+    }))
+
+    results = processor.describeClientQuotas(
+      ClientQuotaFilter.containsOnly(List(
+        ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER),
+        ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)
+      ).asJava))
+    assertEquals(7, results.size)
+    assertEquals(7, results.keySet.count(quotaEntity => quotaEntity match {
+      case UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
+           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
   }
@@ -102,12 +172,12 @@ class QuotaMetadataProcessorTest {
     addQuotaRecord(processor, clientEntity(null), (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 30000.0))
 
     val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
-    entityToFilter(clientEntity(ConfigEntityName.Default), components.addOne)
+    entityToFilter(clientEntity(ConfigEntityName.Default), components)
     var results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
     assertEquals(1, results.size)
 
     components.clear()
-    entityToFilter(clientEntity(null), components.addOne)
+    entityToFilter(clientEntity(null), components)
     results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
     assertEquals(1, results.size)
   }
@@ -134,19 +204,154 @@ class QuotaMetadataProcessorTest {
     addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
     quotas = describeEntity(entity)
     assertEquals(0, quotas.size)
+
+    // Removing non-existent quota should not do anything
+    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
+    quotas = describeEntity(entity)
+    assertEquals(0, quotas.size)
   }
 
-  def describeEntity(entity: List[QuotaRecord.EntityData]): Map[String, Double] = {
-    val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
-    entityToFilter(entity, components.addOne)
-    val results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
-    if (results.isEmpty) {
-      Map()
-    } else if (results.size == 1) {
-      results.head._2
-    } else {
-      throw new AssertionError("Matched more than one entity with strict=true describe filter")
-    }
+  @Test
+  def testDescribeClientQuotasInvalidFilterCombination(): Unit = {
+    val ipFilterComponent = ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.IP)
+    val userFilterComponent = ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)
+    val clientIdFilterComponent = ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)
+    val expectedExceptionMessage = "Invalid entity filter component combination"
+    assertThrows(expectedExceptionMessage, classOf[InvalidRequestException],
+      () => processor.describeClientQuotas(ClientQuotaFilter.contains(List(ipFilterComponent, userFilterComponent).asJava)))
+    assertThrows(expectedExceptionMessage, classOf[InvalidRequestException],
+      () => processor.describeClientQuotas(ClientQuotaFilter.contains(List(ipFilterComponent, clientIdFilterComponent).asJava)))
+    assertThrows(expectedExceptionMessage, classOf[InvalidRequestException],
+      () => processor.describeClientQuotas(ClientQuotaFilter.contains(List(ipFilterComponent, ipFilterComponent).asJava)))
+    assertThrows(expectedExceptionMessage, classOf[InvalidRequestException],
+      () => processor.describeClientQuotas(ClientQuotaFilter.contains(List(userFilterComponent, userFilterComponent).asJava)))
+  }
+
+  @Test
+  def testDescribeEmptyFilter(): Unit = {
+    var results = processor.describeClientQuotas(ClientQuotaFilter.contains(List.empty.asJava))
+    assertEquals(0, results.size)
+
+    results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(List.empty.asJava))
+    assertEquals(0, results.size)
+  }
+
+  @Test
+  def testDescribeUnsupportedEntityType(): Unit = {
+    val filter = ClientQuotaFilter.contains(
+      List(ClientQuotaFilterComponent.ofEntityType("other")).asJava)
+    assertThrows(classOf[UnsupportedVersionException],
+      () => processor.describeClientQuotas(filter))
+  }
+
+  @Test
+  def testDescribeMissingEntityType(): Unit = {
+    val filter = ClientQuotaFilter.contains(
+      List(ClientQuotaFilterComponent.ofEntity("", "name")).asJava)
+    assertThrows(classOf[InvalidRequestException],
+      () => processor.describeClientQuotas(filter))
+  }
+
+  @Test
+  def testQuotaManagers(): Unit = {
+    val entity = userClientEntity("user", "client")
+    addQuotaRecord(processor, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(processor.quotaManagers.fetch, times(1)).updateQuota(
+      _eq(Some("user")),
+      _eq(Some("client")),
+      _eq(Some("client")),
+      any(classOf[Option[Quota]])
+    )
+
+    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(processor.quotaManagers.produce, times(1)).updateQuota(
+      _eq(Some("user")),
+      _eq(Some("client")),
+      _eq(Some("client")),
+      any(classOf[Option[Quota]])
+    )
+
+    addQuotaRecord(processor, entity, (QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG, 100.0))
+    verify(processor.quotaManagers.request, times(1)).updateQuota(
+      _eq(Some("user")),
+      _eq(Some("client")),
+      _eq(Some("client")),
+      any(classOf[Option[Quota]])
+    )
+
+    addQuotaRecord(processor, entity, (QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(processor.quotaManagers.controllerMutation, times(1)).updateQuota(
+      _eq(Some("user")),
+      _eq(Some("client")),
+      _eq(Some("client")),
+      any(classOf[Option[Quota]])
+    )
+
+    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG)
+    verify(processor.quotaManagers.controllerMutation, times(1)).updateQuota(
+      _eq(Some("user")),
+      _eq(Some("client")),
+      _eq(Some("client")),
+      _eq(None)
+    )
+  }
+
+  @Test
+  def testIpQuota(): Unit = {
+    val defaultIp = ipEntity(null)
+    val knownIp = ipEntity("1.2.3.4")
+
+    addQuotaRecord(processor, defaultIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 100.0))
+    addQuotaRecord(processor, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 99.0))
+
+    verify(processor.connectionQuotas, times(2)).updateIpConnectionRateQuota(
+      any(classOf[Option[InetAddress]]),
+      any(classOf[Option[Int]])
+    )
+
+    var quotas = describeEntity(defaultIp)
+    assertEquals(1, quotas.size)
+
+    quotas = describeEntity(knownIp)
+    assertEquals(1, quotas.size)
+
+    val filter = ClientQuotaFilter.contains(
+      List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.IP)).asJava)
+    val results = processor.describeClientQuotas(filter)
+    assertEquals(2, results.size)
+
+    reset(processor.connectionQuotas)
+    addQuotaRecord(processor, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 98.0))
+    verify(processor.connectionQuotas, times(1)).updateIpConnectionRateQuota(
+      any(classOf[Option[InetAddress]]),
+      _eq(Some(98))
+    )
+
+    reset(processor.connectionQuotas)
+    addQuotaRemovalRecord(processor, knownIp, QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG)
+    verify(processor.connectionQuotas, times(1)).updateIpConnectionRateQuota(
+      any(classOf[Option[InetAddress]]),
+      _eq(None)
+    )
+  }
+
+  @Test
+  def testIpQuotaUnknownKey(): Unit = {
+    val defaultIp = ipEntity(null)
+    addQuotaRecord(processor, defaultIp, ("not-an-ip-quota-key", 100.0))
+    verify(processor.connectionQuotas, times(0)).updateIpConnectionRateQuota(
+      any(classOf[Option[InetAddress]]),
+      _eq(Some(100))
+    )
+
+    assertEquals(0, describeEntity(defaultIp).size)
+  }
+
+  @Test
+  def testUserQuotaUnknownKey(): Unit = {
+    val defaultUser = userEntity(null)
+    addQuotaRecord(processor, defaultUser, ("not-a-user-quota-key", 100.0))
+    assertEquals(0, describeEntity(defaultUser).size)
   }
 
   def setupAndVerify(processor: QuotaMetadataProcessor,
@@ -175,6 +380,19 @@ class QuotaMetadataProcessorTest {
     }
   }
 
+  def describeEntity(entity: List[QuotaRecord.EntityData]): Map[String, Double] = {
+    val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
+    entityToFilter(entity, components)
+    val results = processor.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
+    if (results.isEmpty) {
+      Map()
+    } else if (results.size == 1) {
+      results.head._2
+    } else {
+      throw new AssertionError("Matched more than one entity with strict=true describe filter")
+    }
+  }
+
   def addQuotaRecord(processor: QuotaMetadataProcessor, entity: List[QuotaRecord.EntityData], quota: (String, Double)): Unit = {
     processor.handleQuotaRecord(new QuotaRecord()
       .setEntity(entity.asJava)
@@ -189,12 +407,12 @@ class QuotaMetadataProcessorTest {
       .setRemove(true))
   }
 
-  def entityToFilter(entity: List[QuotaRecord.EntityData], acceptor: ClientQuotaFilterComponent => Unit): Unit = {
+  def entityToFilter(entity: List[QuotaRecord.EntityData], components: mutable.ListBuffer[ClientQuotaFilterComponent]): Unit = {
     entity.foreach(entityData => {
       if (entityData.entityName() == null) {
-        acceptor.apply(ClientQuotaFilterComponent.ofDefaultEntity(entityData.entityType()))
+        components.append(ClientQuotaFilterComponent.ofDefaultEntity(entityData.entityType()))
       } else {
-        acceptor.apply(ClientQuotaFilterComponent.ofEntity(entityData.entityType(), entityData.entityName()))
+        components.append(ClientQuotaFilterComponent.ofEntity(entityData.entityType(), entityData.entityName()))
       }
     })
   }
@@ -214,4 +432,7 @@ class QuotaMetadataProcessorTest {
     )
   }
 
+  def ipEntity(ip: String): List[QuotaRecord.EntityData] = {
+    List(new QuotaRecord.EntityData().setEntityType(ClientQuotaEntity.IP).setEntityName(ip))
+  }
 }

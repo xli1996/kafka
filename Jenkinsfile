@@ -84,8 +84,9 @@ def job = {
 
     if (config.publish && config.isDevJob && !config.isReleaseJob && !config.isPrJob) {
         stage("Start Downstream Builds") {
+            def downstreamBranch = kafkaMuckrakeVersionMap[env.BRANCH_NAME]
             config.downStreamRepos.each { repo ->
-                build(job: "confluentinc/${repo}/${env.BRANCH_NAME}",
+                build(job: "confluentinc/${repo}/${downstreamBranch}",
                     wait: false,
                     propagate: false
                 )

@@ -55,8 +55,7 @@ object BrokerMetadataListener {
       ConfigResource.Type.BROKER -> new BrokerConfigHandler(kafkaConfig, quotaManagers))
     List(
       new PartitionMetadataProcessor(kafkaConfig, clusterId, metadataCache, groupCoordinator, quotaManagers,
-        replicaManager, txnCoordinator, configHandlers),
-      new QuotaMetadataProcessor(quotaManagers, socketServer.connectionQuotas)
+        replicaManager, txnCoordinator, configHandlers)
     )
   }
 }

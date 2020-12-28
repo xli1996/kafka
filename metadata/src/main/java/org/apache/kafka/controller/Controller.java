@@ -27,7 +27,6 @@ import org.apache.kafka.common.message.CreateTopicsResponseData;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
-import org.apache.kafka.common.quota.ClientQuotaFilter;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
 import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
@@ -156,15 +155,6 @@ public interface Controller extends AutoCloseable {
     CompletableFuture<Map<ClientQuotaEntity, ApiError>> alterClientQuotas(
         Collection<ClientQuotaAlteration> quotaAlterations, boolean validateOnly
     );
-
-    /**
-     * Retrieve current quotas for the given client quota entities
-     *
-     * @param filter        A collection of quota entity filters
-     * @return              A future yielding a map of quota entities to their current values
-     */
-    CompletableFuture<Map<ClientQuotaEntity, Map<String, Double>>> describeClientQuotas(
-        ClientQuotaFilter filter);
 
     /**
      * Begin shutting down, but don't block.  You must still call close to clean up all

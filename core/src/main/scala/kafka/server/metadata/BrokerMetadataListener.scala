@@ -48,8 +48,7 @@ object BrokerMetadataListener {
                         quotaManagers: QuotaFactory.QuotaManagers,
                         replicaManager: ReplicaManager,
                         txnCoordinator: TransactionCoordinator,
-                        logManager: LogManager,
-                        socketServer: SocketServer): List[BrokerMetadataProcessor] = {
+                        logManager: LogManager): List[BrokerMetadataProcessor] = {
     val configHandlers = Map[ConfigResource.Type, ConfigHandler](
       ConfigResource.Type.TOPIC -> new TopicConfigHandler(logManager, kafkaConfig, quotaManagers, None),
       ConfigResource.Type.BROKER -> new BrokerConfigHandler(kafkaConfig, quotaManagers))

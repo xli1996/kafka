@@ -220,7 +220,7 @@ class Kip500Broker(
         config, metadataCache, time,
         BrokerMetadataListener.defaultProcessors(
           config, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator,
-          logManager, socketServer))
+          logManager))
       brokerMetadataListener.start()
 
       lifecycleManager.start(() => brokerMetadataListener.currentMetadataOffset(),

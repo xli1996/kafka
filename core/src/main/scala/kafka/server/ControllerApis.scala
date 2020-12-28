@@ -87,7 +87,6 @@ class ControllerApis(val requestChannel: RequestChannel,
     //ApiKeys.INCREMENTAL_ALTER_CONFIGS
     //ApiKeys.ALTER_PARTITION_REASSIGNMENTS
     //ApiKeys.LIST_PARTITION_REASSIGNMENTS
-    ApiKeys.DESCRIBE_CLIENT_QUOTAS,
     ApiKeys.ALTER_CLIENT_QUOTAS,
     //ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS
     //ApiKeys.ALTER_USER_SCRAM_CREDENTIALS
@@ -144,7 +143,6 @@ class ControllerApis(val requestChannel: RequestChannel,
         case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartBeatRequest(request)
         case ApiKeys.DECOMMISSION_BROKER => handleDecommissionBroker(request)
-        case ApiKeys.DESCRIBE_CLIENT_QUOTAS => handleDescribeClientQuotas(request)
         case ApiKeys.ALTER_CLIENT_QUOTAS => handleAlterClientQuotas(request)
         case _ => throw new ApiException(s"Unsupported ApiKey ${request.context.header.apiKey()}")
       }
@@ -443,20 +441,6 @@ class ControllerApis(val requestChannel: RequestChannel,
         buildResponse(responseData)
       }
       apisUtils.sendResponseExemptThrottle(request, response)
-    })
-  }
-
-  def handleDescribeClientQuotas(request: RequestChannel.Request): Unit = {
-    val quotaRequest = request.body[DescribeClientQuotasRequest]
-    apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)
-
-    controller.describeClientQuotas(quotaRequest.filter()).whenComplete((results, exception) => {
-      if (exception != null) {
-        apisUtils.handleError(request, exception)
-      } else {
-        apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
-          DescribeClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
-      }
     })
   }
 

@@ -64,8 +64,8 @@ class MetadataCacheControllerNodeProvider(val metadataCache: kafka.server.Metada
  * This provider is used when we are in KIP-500 mode.
  */
 class RaftControllerNodeProvider(val metaLogManager: MetaLogManager,
-                                 controllerConnectNodes: Seq[Node]) extends ControllerNodeProvider with Logging {
-  val idToNode = controllerConnectNodes.map(node => node.id() -> node).toMap
+                                 controllerQuorumVoterNodes: Seq[Node]) extends ControllerNodeProvider with Logging {
+  val idToNode = controllerQuorumVoterNodes.map(node => node.id() -> node).toMap
 
   override def controllerNode(): Option[Node] = {
     val leader = metaLogManager.leader()
@@ -79,35 +79,17 @@ class RaftControllerNodeProvider(val metaLogManager: MetaLogManager,
   }
 }
 
-/**
- * This class manages the connection between a broker and the controller. It runs a single
- * {@link BrokerToControllerRequestThread} which uses the broker's metadata cache as its own metadata to find
- * and connect to the controller. The channel is async and runs the network connection in the background.
- * The maximum number of in-flight requests are set to one to ensure orderly response from the controller, therefore
- * care must be taken to not block on outstanding requests for too long.
- */
-class BrokerToControllerChannelManager(controllerNodeProvider: ControllerNodeProvider,
-                                       time: Time,
-                                       metrics: Metrics,
-                                       config: KafkaConfig,
-                                       managerName: String,
-                                       threadNamePrefix: Option[String] = None,
-                                       val configuredClient: Option[KafkaClient] = None) extends Logging {
-  private val logContext = new LogContext(s"[broker-${config.brokerId}-to-controller-$managerName] ")
-  private val manualMetadataUpdater = new ManualMetadataUpdater()
-  private val requestThread = newRequestThread
-
-  def start(): Unit = {
-    requestThread.start()
-  }
-
-  def shutdown(): Unit = {
-    requestThread.shutdown()
-    requestThread.awaitShutdown()
-  }
-
-  private[server] def newRequestThread = {
-    val networkClient = configuredClient.getOrElse {
+object BrokerToControllerChannelManager {
+  def apply(controllerNodeProvider: ControllerNodeProvider,
+            time: Time,
+            metrics: Metrics,
+            config: KafkaConfig,
+            maxExponentialBackoff: Long,
+            managerName: String,
+            threadNamePrefix: Option[String]): BrokerToControllerChannelManager = {
+    val logContext = new LogContext(s"[broker-${config.brokerId}-to-controller-$managerName] ")
+    val manualMetadataUpdater = new ManualMetadataUpdater()
+    val networkClient = {
       val brokerToControllerListenerName =
         config.controlPlaneListenerName.getOrElse(config.interBrokerListenerName)
       val brokerToControllerSecurityProtocol =
@@ -152,18 +134,55 @@ class BrokerToControllerChannelManager(controllerNodeProvider: ControllerNodePro
         logContext
       )
     }
+    new BrokerToControllerChannelManager(networkClient,
+      manualMetadataUpdater,
+      controllerNodeProvider,
+      time,
+      maxExponentialBackoff,
+      config,
+      managerName,
+      threadNamePrefix)
+  }
+}
+
+/**
+ * This class manages the connection between a broker and the controller. It runs a single
+ * {@link BrokerToControllerRequestThread} which uses the broker's metadata cache as its own metadata to find
+ * and connect to the controller. The channel is async and runs the network connection in the background.
+ * The maximum number of in-flight requests are set to one to ensure orderly response from the controller, therefore
+ * care must be taken to not block on outstanding requests for too long.
+ */
+class BrokerToControllerChannelManager(kafkaClient: KafkaClient,
+                                       metadataUpdater: ManualMetadataUpdater,
+                                       controllerNodeProvider: ControllerNodeProvider,
+                                       time: Time,
+                                       maxExponentialBackoff: Long,
+                                       config: KafkaConfig,
+                                       managerName: String,
+                                       threadNamePrefix: Option[String]) extends Logging {
+  private val requestThread = {
     val threadName = threadNamePrefix match {
       case None => s"broker-${config.brokerId}-to-controller-${managerName}-sender"
       case Some(name) => s"$name-broker-${config.brokerId}-to-controller-${managerName}-sender"
     }
-
-    new BrokerToControllerRequestThread(networkClient,
-      manualMetadataUpdater,
+    new BrokerToControllerRequestThread(kafkaClient,
+      metadataUpdater,
       controllerNodeProvider,
-      config,
       time,
+      maxExponentialBackoff,
+      config,
       threadName)
   }
+
+  def start(): Unit = {
+    requestThread.start()
+  }
+
+  def shutdown(): Unit = {
+    requestThread.shutdown()
+    requestThread.awaitShutdown()
+  }
+
 
   /**
    * Send request to the controller.
@@ -208,11 +227,12 @@ case class BrokerToControllerQueueItem(
 )
 
 
-class BrokerToControllerRequestThread(networkClient: KafkaClient,
-                                      metadataUpdater: ManualMetadataUpdater,
+class BrokerToControllerRequestThread(val networkClient: KafkaClient,
+                                      val metadataUpdater: ManualMetadataUpdater,
                                       val controllerNodeProvider: ControllerNodeProvider,
+                                      val time: Time,
+                                      maxExponentialBackoff: Long,
                                       config: KafkaConfig,
-                                      time: Time,
                                       threadName: String)
   extends InterBrokerSendThread(threadName, networkClient, config.controllerSocketTimeoutMs, time, isInterruptible = false) {
 
@@ -228,13 +248,14 @@ class BrokerToControllerRequestThread(networkClient: KafkaClient,
     networkClient.wakeup()
   }
 
-  private val exponentialBackoff = new ExponentialBackoff(100, 2, 30000, 0.1)
+  private val exponentialBackoff = new ExponentialBackoff(100, 2, maxExponentialBackoff, 0.1)
   private var waitForControllerRetries = 0L
   private var curController: Option[Node] = None
 
   def generateRequests(): (Iterable[RequestAndCompletionHandler], Long) = synchronized {
     if (sendableRequests.isEmpty) {
       waitForControllerRetries = 0
+      trace(s"${threadName}: there are no sendable requests right now.")
       (Seq(), Long.MaxValue)
     } else {
       val nextController: Option[Node] = controllerNodeProvider.controllerNode()
@@ -242,19 +263,22 @@ class BrokerToControllerRequestThread(networkClient: KafkaClient,
         curController = None
         val waitMs = exponentialBackoff.backoff(waitForControllerRetries)
         waitForControllerRetries = waitForControllerRetries + 1
+        debug(s"${threadName}: waiting ${waitMs} to discover the controller node.")
         (Seq(), waitMs)
       } else {
         waitForControllerRetries = 0
         if (curController.isEmpty || curController.get != nextController.get) {
           curController = nextController
           metadataUpdater.setNodes(Collections.singletonList(curController.get))
-          info(s"Controller node is now ${curController}")
+          info(s"Controller node is now ${curController.get}")
         }
         val requestsToSend = sendableRequests.map {
           request => RequestAndCompletionHandler(curController.get,
               request.request, handleResponse(curController.get, request))
         }
         sendableRequests.clear()
+        debug(s"${threadName}: sending request(s): " +
+          requestsToSend.map(r => r.request.apiKey()).mkString(", ") + ".")
         (requestsToSend, Long.MaxValue)
       }
     }

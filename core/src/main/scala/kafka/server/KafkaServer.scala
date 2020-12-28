@@ -95,8 +95,8 @@ class Kip500Server(
     throw new ConfigException(s"Duplicate role names found in roles config $roles")
   }
 
-  if (config.controllerConnect == null || config.controllerConnect.isEmpty) {
-    throw new ConfigException(s"You must specify a value for ${KafkaConfig.ControllerConnectProp}")
+  if (config.controllerQuorumVoters == null || config.controllerQuorumVoters.isEmpty) {
+    throw new ConfigException(s"You must specify a value for ${KafkaConfig.ControllerQuorumVotersProp}")
   }
 
   private val (metaProps, offlineDirs) = loadMetaProperties()
@@ -107,7 +107,7 @@ class Kip500Server(
   KafkaBroker.notifyClusterListeners(metaProps.clusterId.toString,
     kafkaMetricsReporters ++ metrics.reporters.asScala)
 
-  private val metadataPartition = new TopicPartition("__cluster_metadata", 0)
+  private val metadataPartition = new TopicPartition(KafkaServer.metadataTopicName, 0)
   private val raftManager = new KafkaRaftManager(metaProps, metadataPartition, config, time, metrics)
 
   val broker: Option[Kip500Broker] = if (roles.contains(BrokerRole)) {
@@ -118,7 +118,8 @@ class Kip500Server(
       time,
       metrics,
       threadNamePrefix,
-      offlineDirs
+      offlineDirs,
+      CompletableFuture.completedFuture(config.controllerQuorumVoters)
     ))
   } else {
     None
@@ -133,7 +134,7 @@ class Kip500Server(
       time,
       metrics,
       threadNamePrefix,
-      CompletableFuture.completedFuture(config.controllerConnect)
+      CompletableFuture.completedFuture(config.controllerQuorumVoters)
     ))
   } else {
     None
@@ -155,7 +156,8 @@ class Kip500Server(
 
   private def loadMetaProperties(): (MetaProperties, Seq[String]) = {
     val logDirs = config.logDirs ++ Seq(config.metadataLogDir)
-    val (rawMetaProperties, offlineDirs) = BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(logDirs)
+    val (rawMetaProperties, offlineDirs) = BrokerMetadataCheckpoint.
+      getBrokerMetadataAndOfflineDirs(logDirs, false)
 
     if (offlineDirs.contains(config.metadataLogDir)) {
       throw new RuntimeException("Cannot start server since `meta.properties` could not be " +
@@ -186,6 +188,8 @@ class Kip500Server(
 }
 
 object KafkaServer {
+  val metadataTopicName = "@metadata"
+
   def apply(
     config: KafkaConfig,
     time: Time = Time.SYSTEM,

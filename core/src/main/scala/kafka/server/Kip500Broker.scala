@@ -61,7 +61,8 @@ class Kip500Broker(
   val time: Time,
   val metrics: Metrics,
   val threadNamePrefix: Option[String],
-  offlineDirs: Seq[String]
+  val initialOfflineDirs: Seq[String],
+  val controllerQuorumVotersFuture: CompletableFuture[String]
 ) extends KafkaBroker {
 
   import kafka.server.KafkaServer._
@@ -156,8 +157,6 @@ class Kip500Broker(
       kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
       kafkaScheduler.startup()
 
-      val controllerNodeProvider = new RaftControllerNodeProvider(metaLogManager, config.controllerConnectNodes)
-
       /* register broker metrics */
       _brokerTopicStats = new BrokerTopicStats
 
@@ -167,7 +166,8 @@ class Kip500Broker(
 
       // Create log manager, but don't start it because we need to delay any potential unclean shutdown log recovery
       // until we catch up on the metadata log and have up-to-date topic and broker configs.
-      logManager = LogManager(config, offlineDirs, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+      logManager = LogManager(config, initialOfflineDirs, kafkaScheduler, time,
+        brokerTopicStats, logDirFailureChannel)
 
       metadataCache = new MetadataCache(config.brokerId)
       // Enable delegation token cache for all SCRAM mechanisms to simplify dynamic update.
@@ -185,11 +185,14 @@ class Kip500Broker(
       replicaManager = createReplicaManager(isShuttingDown)
 
       /* start broker-to-controller channel managers */
-      alterIsrChannelManager = new BrokerToControllerChannelManager(controllerNodeProvider,
-        time, metrics, config, "alterisr", threadNamePrefix)
+      val controllerNodes =
+        KafkaConfig.controllerQuorumVoterStringsToNodes(controllerQuorumVotersFuture.get())
+      val controllerNodeProvider = new RaftControllerNodeProvider(metaLogManager, controllerNodes)
+      alterIsrChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
+        time, metrics, config, 60000,"alterisr", threadNamePrefix)
       alterIsrChannelManager.start()
-      forwardingChannelManager = new BrokerToControllerChannelManager(controllerNodeProvider,
-        time, metrics, config, "forwarding", threadNamePrefix)
+      forwardingChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
+        time, metrics, config, 60000, "forwarding", threadNamePrefix)
       forwardingChannelManager.start()
       val forwardingManager = new ForwardingManager(forwardingChannelManager, time, config.requestTimeoutMs.longValue)
 
@@ -221,8 +224,9 @@ class Kip500Broker(
       brokerMetadataListener.start()
 
       lifecycleManager.start(() => brokerMetadataListener.currentMetadataOffset(),
-        new BrokerToControllerChannelManager(controllerNodeProvider,
-          time, metrics, config, "heartbeat", threadNamePrefix), metaProps.clusterId)
+        BrokerToControllerChannelManager(controllerNodeProvider, time, metrics, config,
+          config.brokerSessionTimeoutMs.toLong, "heartbeat", threadNamePrefix),
+        metaProps.clusterId)
 
       // Register a listener with the Raft layer to receive metadata event notifications
       metaLogManager.register(brokerMetadataListener)

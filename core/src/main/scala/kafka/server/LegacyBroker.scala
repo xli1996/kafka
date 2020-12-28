@@ -195,7 +195,7 @@ class LegacyBroker(val config: KafkaConfig,
 
         /* load metadata */
         val (preloadedMetaProperties, initialOfflineDirs) =
-          BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(config.logDirs)
+          BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(config.logDirs, true)
 
         /* check cluster id */
         if (preloadedMetaProperties.clusterId.exists(_ != _clusterId))
@@ -263,8 +263,8 @@ class LegacyBroker(val config: KafkaConfig,
         /* start replica manager */
         val controllerNodeProvider = new MetadataCacheControllerNodeProvider(
           metadataCache, config.interBrokerListenerName)
-        alterIsrChannelManager = new BrokerToControllerChannelManager(controllerNodeProvider,
-          time, metrics, config, "alterisr", threadNamePrefix)
+        alterIsrChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
+          time, metrics, config, 60000, "alterisr", threadNamePrefix)
         replicaManager = createReplicaManager(isShuttingDown)
         replicaManager.startup()
         alterIsrChannelManager.start()
@@ -286,8 +286,8 @@ class LegacyBroker(val config: KafkaConfig,
         var forwardingManager: ForwardingManager = null
         if (config.metadataQuorumEnabled) {
           /* start forwarding manager */
-          forwardingChannelManager = new BrokerToControllerChannelManager(controllerNodeProvider,
-            time, metrics, config, "forwarding", threadNamePrefix)
+          forwardingChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
+            time, metrics, config, 60000, "forwarding", threadNamePrefix)
           forwardingChannelManager.start()
           forwardingManager = new ForwardingManager(forwardingChannelManager, time, config.requestTimeoutMs.longValue())
         }

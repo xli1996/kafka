@@ -19,12 +19,10 @@ package kafka.testkit;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 
 public class ControllerNode implements TestKitNode {
     public static class Builder {
         private int id = -1;
-        private UUID incarnationId = null;
         private String logDirectory = null;
 
         public Builder setId(int id) {
@@ -41,34 +39,24 @@ public class ControllerNode implements TestKitNode {
             if (id == -1) {
                 throw new RuntimeException("You must set the node id");
             }
-            if (incarnationId == null) {
-                incarnationId = UUID.randomUUID();
-            }
             if (logDirectory == null) {
                 logDirectory = String.format("controller_%d", id);
             }
-            return new ControllerNode(id, incarnationId, logDirectory);
+            return new ControllerNode(id, logDirectory);
         }
     }
 
     private final int id;
-    private final UUID incarnationId;
     private final String logDirectory;
 
-    private ControllerNode(int id, UUID incarnationId, String logDirectory) {
+    private ControllerNode(int id, String logDirectory) {
         this.id = id;
-        this.incarnationId = incarnationId;
         this.logDirectory = logDirectory;
     }
 
     @Override
     public int id() {
         return id;
-    }
-
-    @Override
-    public UUID incarnationId() {
-        return incarnationId;
     }
 
     @Override

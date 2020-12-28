@@ -19,6 +19,7 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.internals.QuotaConfigs;
+import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.kafka.common.metadata.QuotaRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
@@ -66,10 +67,23 @@ public class ClientQuotaControlManager {
         Map<ClientQuotaEntity, ApiError> outputResults = new HashMap<>();
 
         quotaAlterations.forEach(quotaAlteration -> {
-            // TODO check for duplicate keys?
-            Map<String, Double> alterations = quotaAlteration.ops().stream()
-                .collect(Collectors.toMap(ClientQuotaAlteration.Op::key, ClientQuotaAlteration.Op::value));
-            alterClientQuotaEntity(quotaAlteration.entity(), alterations, outputRecords, outputResults);
+            // Note that the values in this map may be null
+            Map<String, Double> alterations = new HashMap<>(quotaAlteration.ops().size());
+            quotaAlteration.ops().forEach(op -> {
+                if (alterations.containsKey(op.key())) {
+                    outputResults.put(quotaAlteration.entity(), ApiError.fromThrowable(
+                            new InvalidRequestException("Duplicate quota key " + op.key() +
+                                " not updating quota for this entity " + quotaAlteration.entity())));
+                } else {
+                    alterations.put(op.key(), op.value());
+                }
+            });
+            if (outputResults.containsKey(quotaAlteration.entity())) {
+                outputResults.put(quotaAlteration.entity(), ApiError.fromThrowable(
+                        new InvalidRequestException("Ignoring duplicate entity " + quotaAlteration.entity())));
+            } else {
+                alterClientQuotaEntity(quotaAlteration.entity(), alterations, outputRecords, outputResults);
+            }
         });
 
         return new ControllerResult<>(outputRecords, outputResults);
@@ -91,6 +105,9 @@ public class ClientQuotaControlManager {
         }
         if (record.remove()) {
             quotas.remove(record.key());
+            if (quotas.size() == 0) {
+                clientQuotaData.remove(entity);
+            }
         } else {
             quotas.put(record.key(), record.value());
         }
@@ -235,6 +252,9 @@ public class ClientQuotaControlManager {
         for (Map.Entry<String, String> entityEntry : entity.entries().entrySet()) {
             String entityType = entityEntry.getKey();
             String entityName = entityEntry.getValue();
+            if (validatedEntityMap.containsKey(entityType)) {
+                return new ApiError(Errors.INVALID_REQUEST, "Invalid empty client quota entity, duplicate entity entry " + entityType);
+            }
             if (Objects.equals(entityType, ClientQuotaEntity.USER)) {
                 validatedEntityMap.put(ClientQuotaEntity.USER, entityName);
             } else if (Objects.equals(entityType, ClientQuotaEntity.CLIENT_ID)) {

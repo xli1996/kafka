@@ -21,7 +21,6 @@ import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.LogManager
 import kafka.metrics.KafkaMetricsGroup
-import kafka.network.SocketServer
 import kafka.server._
 import kafka.utils.ShutdownableThread
 import org.apache.kafka.common.config.ConfigResource

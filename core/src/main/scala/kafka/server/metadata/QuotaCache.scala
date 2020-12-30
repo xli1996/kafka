@@ -26,45 +26,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.collection.mutable
 
 
-// Types for primary quota cache
-sealed trait QuotaEntity {
-  val toMap: Map[String, String]
-}
-case class IpEntity(ip: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.IP -> ip)
-}
-case object DefaultIpEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.IP -> null)
-}
-
-case class UserEntity(user: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user)
-}
-case object DefaultUserEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null)
-}
-
-case class ClientIdEntity(clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case object DefaultClientIdEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.CLIENT_ID -> null)
-}
-
-case class UserClientIdEntity(user: String, clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case class UserDefaultClientIdEntity(user: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
-}
-case class DefaultUserClientIdEntity(clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case object DefaultUserDefaultClientIdEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
-}
-
-
 // A type for the cache index keys
 sealed trait CacheIndexKey
 case object DefaultUser extends CacheIndexKey
@@ -134,74 +95,74 @@ class QuotaCache {
     }
 
     // We do not allow IP filters to be combined with user or client filters
-    if (entityFilters.contains(ClientQuotaEntity.IP) && entityFilters.size > 1) {
-      throw new InvalidRequestException("Invalid entity filter component combination, IP filter component should " +
-        "not be used with user or clientId filter component.")
-    }
-
-    val ipMatch = entityFilters.get(ClientQuotaEntity.IP)
-    val ipIndexMatches: Set[QuotaEntity] = if (ipMatch.isDefined) {
-      ipMatch.get match {
-        case ExactMatch(ip) => ipEntityIndex.getOrElse(SpecificIp(ip), Set()).toSet
-        case DefaultMatch => ipEntityIndex.getOrElse(DefaultIp, Set()).toSet
-        case TypeMatch => ipEntityIndex.values.flatten.toSet
+    val matchingEntities: Set[QuotaEntity] = if (entityFilters.contains(ClientQuotaEntity.IP)) {
+      if (entityFilters.size > 1) {
+        throw new InvalidRequestException("Invalid entity filter component combination, IP filter component should " +
+          "not be used with user or clientId filter component.")
       }
-    } else {
-      Set()
-    }
-
-    val userMatch = entityFilters.get(ClientQuotaEntity.USER)
-    val userIndexMatches: Set[QuotaEntity] = if (userMatch.isDefined) {
-      userMatch.get match {
-        case ExactMatch(user) => userEntityIndex.getOrElse(SpecificUser(user), Set()).toSet
-        case DefaultMatch => userEntityIndex.getOrElse(DefaultUser, Set()).toSet
-        case TypeMatch => userEntityIndex.values.flatten.toSet
+      val ipMatch = entityFilters.get(ClientQuotaEntity.IP)
+      if (ipMatch.isDefined) {
+        ipMatch.get match {
+          case ExactMatch(ip) => ipEntityIndex.getOrElse(SpecificIp(ip), Set.empty).toSet
+          case DefaultMatch => ipEntityIndex.getOrElse(DefaultIp, Set.empty).toSet
+          case TypeMatch => ipEntityIndex.values.flatten.toSet
+        }
+      } else {
+        Set.empty
       }
-    } else {
-      Set()
-    }
-
-    val clientMatch = entityFilters.get(ClientQuotaEntity.CLIENT_ID)
-    val clientIndexMatches: Set[QuotaEntity] = if (clientMatch.isDefined) {
-      clientMatch.get match {
-        case ExactMatch(clientId) => clientIdEntityIndex.getOrElse(SpecificClientId(clientId), Set()).toSet
-        case DefaultMatch => clientIdEntityIndex.getOrElse(DefaultClientId, Set()).toSet
-        case TypeMatch => clientIdEntityIndex.values.flatten.toSet
+    } else if (entityFilters.contains(ClientQuotaEntity.USER) || entityFilters.contains(ClientQuotaEntity.CLIENT_ID)) {
+      // If either are present, check both indexes
+      val userMatch = entityFilters.get(ClientQuotaEntity.USER)
+      val userIndexMatches: Set[QuotaEntity] = if (userMatch.isDefined) {
+        userMatch.get match {
+          case ExactMatch(user) => userEntityIndex.getOrElse(SpecificUser(user), Set.empty).toSet
+          case DefaultMatch => userEntityIndex.getOrElse(DefaultUser, Set.empty).toSet
+          case TypeMatch => userEntityIndex.values.flatten.toSet
+        }
+      } else {
+        Set.empty
       }
-    } else {
-      Set()
-    }
 
-    val candidateMatches: Set[QuotaEntity] = if (userMatch.isDefined && clientMatch.isDefined) {
-      userIndexMatches.intersect(clientIndexMatches)
-    } else if (userMatch.isDefined) {
-      userIndexMatches
-    } else if (clientMatch.isDefined) {
-      clientIndexMatches
-    } else if (ipMatch.isDefined) {
-      ipIndexMatches
+      val clientMatch = entityFilters.get(ClientQuotaEntity.CLIENT_ID)
+      val clientIndexMatches: Set[QuotaEntity] = if (clientMatch.isDefined) {
+        clientMatch.get match {
+          case ExactMatch(clientId) => clientIdEntityIndex.getOrElse(SpecificClientId(clientId), Set.empty).toSet
+          case DefaultMatch => clientIdEntityIndex.getOrElse(DefaultClientId, Set.empty).toSet
+          case TypeMatch => clientIdEntityIndex.values.flatten.toSet
+        }
+      } else {
+        Set.empty
+      }
+
+      val candidateMatches = if (userMatch.isDefined && clientMatch.isDefined) {
+        userIndexMatches.intersect(clientIndexMatches)
+      } else if (userMatch.isDefined) {
+        userIndexMatches
+      } else {
+        clientIndexMatches
+      }
+
+      if (quotaFilter.strict()) {
+        // If in strict mode, need to remove any matches with extra entity types. This only applies to results with
+        // both user and clientId parts
+        candidateMatches.filter { quotaEntity =>
+          quotaEntity match {
+            case UserClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
+            case DefaultUserClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
+            case UserDefaultClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
+            case DefaultUserDefaultClientIdEntity => userMatch.isDefined && clientMatch.isDefined
+            case _ => true
+          }
+        }
+      } else {
+        candidateMatches
+      }
     } else {
       // TODO Should not get here, maybe throw?
-      Set()
+      Set.empty
     }
 
-    val filteredMatches: Set[QuotaEntity] = if (quotaFilter.strict()) {
-      // If in strict mode, need to remove any matches with extra entity types. This only applies to results with
-      // both user and clientId parts
-      candidateMatches.filter { quotaEntity =>
-        quotaEntity match {
-          case UserClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
-          case DefaultUserClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
-          case UserDefaultClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
-          case DefaultUserDefaultClientIdEntity => userMatch.isDefined && clientMatch.isDefined
-          case _ => true
-        }
-      }
-    } else {
-      candidateMatches
-    }
-
-    val resultsMap: Map[QuotaEntity, Map[String, Double]] = filteredMatches.map {
+    val resultsMap: Map[QuotaEntity, Map[String, Double]] = matchingEntities.map {
       quotaEntity => quotaEntity -> quotaCache(quotaEntity).toMap
     }.toMap
 
@@ -214,11 +175,11 @@ class QuotaCache {
                       (quotaCacheIndex: QuotaCacheIndex,
                        key: CacheIndexKey): Unit = {
     if (remove) {
-      val cleanup = quotaCacheIndex.get(key) match {
+      val needsCleanup = quotaCacheIndex.get(key) match {
         case Some(quotaEntitySet) => quotaEntitySet.remove(quotaEntity); quotaEntitySet.isEmpty
         case None => false
       }
-      if (cleanup) {
+      if (needsCleanup) {
         quotaCacheIndex.remove(key)
       }
     } else {

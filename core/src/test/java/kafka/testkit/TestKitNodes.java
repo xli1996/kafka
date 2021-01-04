@@ -19,6 +19,7 @@ package kafka.testkit;
 
 import kafka.server.MetaProperties;
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.network.ListenerName;
 import scala.compat.java8.OptionConverters;
 
 import java.nio.file.Paths;
@@ -148,6 +149,10 @@ public class TestKitNodes {
         return MetaProperties.apply(clusterId,
             OptionConverters.toScala(Optional.of(id)),
             OptionConverters.toScala(Optional.empty()));
+    }
+
+    public ListenerName externalListenerName() {
+        return new ListenerName("EXTERNAL");
     }
 
     public TestKitNodes copyWithAbsolutePaths(String baseDirectory) {

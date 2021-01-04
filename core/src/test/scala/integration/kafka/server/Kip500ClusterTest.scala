@@ -50,6 +50,7 @@ class Kip500ClusterTest {
       cluster.startup()
       TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
         "Broker never made it to RUNNING state.")
+      cluster.clientProperties()
     } finally {
       cluster.close()
     }

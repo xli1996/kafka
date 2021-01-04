@@ -472,6 +472,8 @@ class Kip500Broker(
     }
   }
 
+  override def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
+
   override def currentState(): BrokerState = lifecycleManager.state()
 
 }

@@ -23,9 +23,11 @@ import kafka.server.KafkaConfig$;
 import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.tools.StorageTool;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.common.utils.LogContext;
@@ -49,6 +51,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.TreeMap;
@@ -184,9 +187,9 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.LogDirsProp(),
                         String.join(",", node.logDataDirectories()));
                     props.put(KafkaConfig$.MODULE$.ListenerSecurityProtocolMapProp(),
-                        "BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT");
+                        "EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT");
                     props.put(KafkaConfig$.MODULE$.ListenersProp(),
-                        "BROKER://localhost:0");
+                        "EXTERNAL://localhost:0");
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
 
@@ -298,7 +301,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
     public void format() throws Exception {
         List<Future<?>> futures = new ArrayList<>();
         try {
-            for (Map.Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
+            for (Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
                 int nodeId = entry.getKey();
                 Kip500Controller controller = entry.getValue();
                 futures.add(executorService.submit(() -> {
@@ -319,7 +322,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     }
                 }));
             }
-            for (Map.Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
+            for (Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
                 int nodeId = entry.getKey();
                 Kip500Broker broker = entry.getValue();
                 futures.add(executorService.submit(() -> {
@@ -392,6 +395,24 @@ public class KafkaClusterTestKit implements AutoCloseable {
             properties.setProperty("bootstrap.servers",
                 controllerNodes.stream().map(n -> n.host() + ":" + n.port()).
                     collect(Collectors.joining(",")));
+        }
+        if (!kip500Brokers.isEmpty()) {
+            StringBuilder bld = new StringBuilder();
+            String prefix = "";
+            for (Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
+                int brokerId = entry.getKey();
+                Kip500Broker broker = entry.getValue();
+                ListenerName listenerName = nodes.externalListenerName();
+                int port = broker.boundPort(listenerName);
+                if (port <= 0) {
+                    throw new RuntimeException("Broker " + brokerId + " does not yet " +
+                        "have a bound port for " + listenerName + ".  Did you start " +
+                        "the cluster yet?");
+                }
+                bld.append(prefix).append("localhost:").append(port);
+                prefix = ",";
+            }
+            properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bld.toString());
         }
         return properties;
     }

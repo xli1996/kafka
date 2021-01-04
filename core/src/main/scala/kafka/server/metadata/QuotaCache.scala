@@ -24,6 +24,7 @@ import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilter}
 
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.collection.mutable
+import scala.jdk.CollectionConverters._
 
 
 // A type for the cache index keys
@@ -63,7 +64,12 @@ class QuotaCache {
    * @param quotaFilter       A quota entity filter
    * @return                  A mapping of quota entities along with their quota values
    */
-  def describeClientQuotas(quotaFilter: ClientQuotaFilter): Map[QuotaEntity, Map[String, Double]] = inReadLock(lock) {
+  def describeClientQuotas(quotaFilter: ClientQuotaFilter): Map[ClientQuotaEntity, Map[String, Double]] = inReadLock(lock) {
+    describeClientQuotasInternal(quotaFilter).map { case (entity, value) => convertEntity(entity) -> value}
+  }
+
+  // Visible for testing
+  private[metadata] def describeClientQuotasInternal(quotaFilter: ClientQuotaFilter): Map[QuotaEntity, Map[String, Double]] = inReadLock(lock) {
 
     // Do some preliminary validation of the filter types and convert them to correct QuotaMatch type
     val entityFilters: mutable.Map[String, QuotaMatch] = mutable.HashMap.empty
@@ -90,7 +96,6 @@ class QuotaCache {
     })
 
     if (entityFilters.isEmpty) {
-      // TODO return empty or throw exception here?
       return Map.empty
     }
 
@@ -158,15 +163,39 @@ class QuotaCache {
         candidateMatches
       }
     } else {
-      // TODO Should not get here, maybe throw?
-      Set.empty
+      throw new IllegalStateException(s"Unexpected handling of ${entityFilters} after filter validation")
     }
 
     val resultsMap: Map[QuotaEntity, Map[String, Double]] = matchingEntities.map {
-      quotaEntity => quotaEntity -> quotaCache(quotaEntity).toMap
+      quotaEntity => {
+        quotaCache.get(quotaEntity) match {
+          case Some(quotas) => quotaEntity -> quotas.toMap
+          case None => quotaEntity -> Map.empty[String, Double]
+        }
+      }
     }.toMap
 
     resultsMap
+  }
+
+  private def convertEntity(entity: QuotaEntity): ClientQuotaEntity = {
+    val entityMap = entity match {
+      case IpEntity(ip) => Map(ClientQuotaEntity.IP -> ip)
+      case DefaultIpEntity => Map(ClientQuotaEntity.IP -> null)
+      case UserEntity(user) => Map(ClientQuotaEntity.USER -> user)
+      case DefaultUserEntity => Map(ClientQuotaEntity.USER -> null)
+      case ClientIdEntity(clientId) => Map(ClientQuotaEntity.CLIENT_ID -> clientId)
+      case DefaultClientIdEntity => Map(ClientQuotaEntity.CLIENT_ID -> null)
+      case UserClientIdEntity(user, clientId) =>
+      Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
+      case UserDefaultClientIdEntity(user) =>
+      Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
+      case DefaultUserClientIdEntity(clientId) =>
+      Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
+      case DefaultUserDefaultClientIdEntity =>
+      Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
+    }
+    new ClientQuotaEntity(entityMap.asJava)
   }
 
   // Update the cache indexes for user/client quotas

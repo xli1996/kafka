@@ -41,6 +41,14 @@ class ClientQuotasRequestTest extends BaseRequestTest {
   override val brokerCount = 1
 
   @Test
+  def testEmptyEntityFilter(): Unit = {
+    // Expect an empty configuration.
+    val describe = describeClientQuotas(ClientQuotaFilter.containsOnly(List.empty.asJava))
+    assertEquals(0, describe.size)
+  }
+
+
+  @Test
   def testAlterClientQuotasRequest(): Unit = {
 
     val entity = new ClientQuotaEntity(Map((ClientQuotaEntity.USER -> "user"), (ClientQuotaEntity.CLIENT_ID -> "client-id")).asJava)

@@ -100,7 +100,7 @@ class QuotaMetadataProcessorTest {
     // Match open-ended existing user.
     val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
     entityToFilter(userEntity("user-1"), components)
-    var results = cache.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
+    var results = cache.describeClientQuotasInternal(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
       case UserEntity(user) => user.equals("user-1")
@@ -109,19 +109,19 @@ class QuotaMetadataProcessorTest {
       case _ => false
     }))
 
-    results = cache.describeClientQuotas(ClientQuotaFilter.containsOnly(components.toList.asJava))
+    results = cache.describeClientQuotasInternal(ClientQuotaFilter.containsOnly(components.toList.asJava))
     assertEquals(1, results.size)
 
     // Match open-ended non-existent user.
     components.clear()
     entityToFilter(userEntity("unknown"), components)
-    results = cache.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
+    results = cache.describeClientQuotasInternal(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(0, results.size)
 
     // Match open-ended existing client ID.
     components.clear()
     entityToFilter(clientEntity("client-id-2"), components)
-    results = cache.describeClientQuotas(ClientQuotaFilter.contains(components.toList.asJava))
+    results = cache.describeClientQuotasInternal(ClientQuotaFilter.contains(components.toList.asJava))
     assertEquals(2, results.size)
     assertEquals(2, results.keySet.count(quotaEntity => quotaEntity match {
       case ClientIdEntity(clientId) => clientId.equals("client-id-2")
@@ -131,7 +131,7 @@ class QuotaMetadataProcessorTest {
     }))
 
     // Match open-ended default user.
-    results = cache.describeClientQuotas(
+    results = cache.describeClientQuotasInternal(
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.USER)).asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
@@ -140,7 +140,7 @@ class QuotaMetadataProcessorTest {
     }))
 
     // Match open-ended default client.
-    results = cache.describeClientQuotas(
+    results = cache.describeClientQuotasInternal(
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.CLIENT_ID)).asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
@@ -153,7 +153,7 @@ class QuotaMetadataProcessorTest {
   def testDescribeFilterOnTypes(): Unit = {
     setupAndVerify(processor, { case (_, _) => })
 
-    var results = cache.describeClientQuotas(
+    var results = cache.describeClientQuotasInternal(
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)).asJava))
     assertEquals(11, results.size)
     assertEquals(11, results.keySet.count(quotaEntity => quotaEntity match {
@@ -162,7 +162,7 @@ class QuotaMetadataProcessorTest {
       case _ => false
     }))
 
-    results = cache.describeClientQuotas(
+    results = cache.describeClientQuotasInternal(
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)).asJava))
     assertEquals(8, results.size)
     assertEquals(8, results.keySet.count(quotaEntity => quotaEntity match {
@@ -171,7 +171,7 @@ class QuotaMetadataProcessorTest {
       case _ => false
     }))
 
-    results = cache.describeClientQuotas(
+    results = cache.describeClientQuotasInternal(
       ClientQuotaFilter.containsOnly(List(
         ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER),
         ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)

@@ -31,42 +31,17 @@ import java.net.{InetAddress, UnknownHostException}
 import scala.collection.mutable
 
 
-sealed trait QuotaEntity {
-  val toMap: Map[String, String]
-}
-case class IpEntity(ip: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.IP -> ip)
-}
-case object DefaultIpEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.IP -> null)
-}
-
-case class UserEntity(user: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user)
-}
-case object DefaultUserEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null)
-}
-
-case class ClientIdEntity(clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case object DefaultClientIdEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.CLIENT_ID -> null)
-}
-
-case class UserClientIdEntity(user: String, clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case class UserDefaultClientIdEntity(user: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
-}
-case class DefaultUserClientIdEntity(clientId: String) extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
-}
-case object DefaultUserDefaultClientIdEntity extends QuotaEntity {
-  val toMap = Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
-}
+sealed trait QuotaEntity
+case class IpEntity(ip: String) extends QuotaEntity
+case object DefaultIpEntity extends QuotaEntity
+case class UserEntity(user: String) extends QuotaEntity
+case object DefaultUserEntity extends QuotaEntity
+case class ClientIdEntity(clientId: String) extends QuotaEntity
+case object DefaultClientIdEntity extends QuotaEntity
+case class UserClientIdEntity(user: String, clientId: String) extends QuotaEntity
+case class UserDefaultClientIdEntity(user: String) extends QuotaEntity
+case class DefaultUserClientIdEntity(clientId: String) extends QuotaEntity
+case object DefaultUserDefaultClientIdEntity extends QuotaEntity
 
 /**
  * Watch for changes to quotas in the metadata log and update quota managers and cache as necessary

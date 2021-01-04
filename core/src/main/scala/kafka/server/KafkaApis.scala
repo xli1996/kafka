@@ -3209,8 +3209,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val result = quotaCache.describeClientQuotas(describeClientQuotasRequest.filter())
       val resultAsJava = new util.HashMap[ClientQuotaEntity, util.Map[String, java.lang.Double]](result.size)
       result.foreach { case (entity, quotas) =>
-        resultAsJava.put(new ClientQuotaEntity(entity.toMap.asJava),
-          quotas.map { case (key, quota) => key -> Double.box(quota)}.asJava)
+        resultAsJava.put(entity, quotas.map { case (key, quota) => key -> Double.box(quota)}.asJava)
       }
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
         DescribeClientQuotasResponse.fromQuotaEntities(resultAsJava, requestThrottleMs)

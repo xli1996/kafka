@@ -327,7 +327,7 @@ class LegacyBroker(val config: KafkaConfig,
           replicaManager, adminManager, groupCoordinator, transactionCoordinator,
           kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
           fetchManager, brokerTopicStats, _clusterId, time, tokenManager, brokerFeatures, featureCache, null,
-          new QuotaCache())
+          None)
 
         dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
           config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
@@ -337,7 +337,7 @@ class LegacyBroker(val config: KafkaConfig,
             replicaManager, adminManager, groupCoordinator, transactionCoordinator,
             kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
             fetchManager, brokerTopicStats, _clusterId, time, tokenManager, brokerFeatures, featureCache, null,
-            new QuotaCache())
+            None)
 
           controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
             1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)

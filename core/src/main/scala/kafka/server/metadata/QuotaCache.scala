@@ -152,9 +152,9 @@ class QuotaCache {
         // both user and clientId parts
         candidateMatches.filter { quotaEntity =>
           quotaEntity match {
-            case UserClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
-            case DefaultUserClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
-            case UserDefaultClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
+            case ExplicitUserExplicitClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
+            case DefaultUserExplicitClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
+            case ExplicitUserDefaultClientIdEntity(_) => userMatch.isDefined && clientMatch.isDefined
             case DefaultUserDefaultClientIdEntity => userMatch.isDefined && clientMatch.isDefined
             case _ => true
           }
@@ -186,11 +186,11 @@ class QuotaCache {
       case DefaultUserEntity => Map(ClientQuotaEntity.USER -> null)
       case ClientIdEntity(clientId) => Map(ClientQuotaEntity.CLIENT_ID -> clientId)
       case DefaultClientIdEntity => Map(ClientQuotaEntity.CLIENT_ID -> null)
-      case UserClientIdEntity(user, clientId) =>
+      case ExplicitUserExplicitClientIdEntity(user, clientId) =>
       Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
-      case UserDefaultClientIdEntity(user) =>
+      case ExplicitUserDefaultClientIdEntity(user) =>
       Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
-      case DefaultUserClientIdEntity(clientId) =>
+      case DefaultUserExplicitClientIdEntity(clientId) =>
       Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
       case DefaultUserDefaultClientIdEntity =>
       Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
@@ -246,15 +246,15 @@ class QuotaCache {
       case DefaultClientIdEntity =>
         updateCacheIndexPartial(clientIdEntityIndex, DefaultClientId)
 
-      case UserClientIdEntity(user, clientId) =>
+      case ExplicitUserExplicitClientIdEntity(user, clientId) =>
         updateCacheIndexPartial(userEntityIndex, SpecificUser(user))
         updateCacheIndexPartial(clientIdEntityIndex, SpecificClientId(clientId))
 
-      case UserDefaultClientIdEntity(user) =>
+      case ExplicitUserDefaultClientIdEntity(user) =>
         updateCacheIndexPartial(userEntityIndex, SpecificUser(user))
         updateCacheIndexPartial(clientIdEntityIndex, DefaultClientId)
 
-      case DefaultUserClientIdEntity(clientId) =>
+      case DefaultUserExplicitClientIdEntity(clientId) =>
         updateCacheIndexPartial(userEntityIndex, DefaultUser)
         updateCacheIndexPartial(clientIdEntityIndex, SpecificClientId(clientId))
 

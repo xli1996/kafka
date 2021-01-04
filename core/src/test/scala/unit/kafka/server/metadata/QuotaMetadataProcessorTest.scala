@@ -104,8 +104,8 @@ class QuotaMetadataProcessorTest {
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
       case UserEntity(user) => user.equals("user-1")
-      case UserDefaultClientIdEntity(user) => user.equals("user-1")
-      case UserClientIdEntity(user, _) => user.equals("user-1")
+      case ExplicitUserDefaultClientIdEntity(user) => user.equals("user-1")
+      case ExplicitUserExplicitClientIdEntity(user, _) => user.equals("user-1")
       case _ => false
     }))
 
@@ -125,8 +125,8 @@ class QuotaMetadataProcessorTest {
     assertEquals(2, results.size)
     assertEquals(2, results.keySet.count(quotaEntity => quotaEntity match {
       case ClientIdEntity(clientId) => clientId.equals("client-id-2")
-      case DefaultUserClientIdEntity(clientId) => clientId.equals("client-id-2")
-      case UserClientIdEntity(_, clientId) => clientId.equals("client-id-2")
+      case DefaultUserExplicitClientIdEntity(clientId) => clientId.equals("client-id-2")
+      case ExplicitUserExplicitClientIdEntity(_, clientId) => clientId.equals("client-id-2")
       case _ => false
     }))
 
@@ -135,7 +135,7 @@ class QuotaMetadataProcessorTest {
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.USER)).asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
-      case DefaultUserEntity | DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case DefaultUserEntity | DefaultUserExplicitClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
 
@@ -144,7 +144,7 @@ class QuotaMetadataProcessorTest {
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofDefaultEntity(ClientQuotaEntity.CLIENT_ID)).asJava))
     assertEquals(3, results.size)
     assertEquals(3, results.keySet.count(quotaEntity => quotaEntity match {
-      case DefaultClientIdEntity | UserDefaultClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case DefaultClientIdEntity | ExplicitUserDefaultClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
   }
@@ -157,8 +157,8 @@ class QuotaMetadataProcessorTest {
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)).asJava))
     assertEquals(11, results.size)
     assertEquals(11, results.keySet.count(quotaEntity => quotaEntity match {
-      case UserEntity(_) | DefaultUserEntity | UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
-           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case UserEntity(_) | DefaultUserEntity | ExplicitUserExplicitClientIdEntity(_, _) | ExplicitUserDefaultClientIdEntity(_) |
+           DefaultUserExplicitClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
 
@@ -166,8 +166,8 @@ class QuotaMetadataProcessorTest {
       ClientQuotaFilter.contains(List(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.CLIENT_ID)).asJava))
     assertEquals(8, results.size)
     assertEquals(8, results.keySet.count(quotaEntity => quotaEntity match {
-      case ClientIdEntity(_) | DefaultClientIdEntity | UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
-           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case ClientIdEntity(_) | DefaultClientIdEntity | ExplicitUserExplicitClientIdEntity(_, _) | ExplicitUserDefaultClientIdEntity(_) |
+           DefaultUserExplicitClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
 
@@ -178,8 +178,8 @@ class QuotaMetadataProcessorTest {
       ).asJava))
     assertEquals(7, results.size)
     assertEquals(7, results.keySet.count(quotaEntity => quotaEntity match {
-      case UserClientIdEntity(_, _) | UserDefaultClientIdEntity(_) |
-           DefaultUserClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
+      case ExplicitUserExplicitClientIdEntity(_, _) | ExplicitUserDefaultClientIdEntity(_) |
+           DefaultUserExplicitClientIdEntity(_) | DefaultUserDefaultClientIdEntity => true
       case _ => false
     }))
   }

@@ -38,9 +38,9 @@ case class UserEntity(user: String) extends QuotaEntity
 case object DefaultUserEntity extends QuotaEntity
 case class ClientIdEntity(clientId: String) extends QuotaEntity
 case object DefaultClientIdEntity extends QuotaEntity
-case class UserClientIdEntity(user: String, clientId: String) extends QuotaEntity
-case class UserDefaultClientIdEntity(user: String) extends QuotaEntity
-case class DefaultUserClientIdEntity(clientId: String) extends QuotaEntity
+case class ExplicitUserExplicitClientIdEntity(user: String, clientId: String) extends QuotaEntity
+case class ExplicitUserDefaultClientIdEntity(user: String) extends QuotaEntity
+case class DefaultUserExplicitClientIdEntity(clientId: String) extends QuotaEntity
 case object DefaultUserDefaultClientIdEntity extends QuotaEntity
 
 /**
@@ -57,7 +57,7 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
           case record: QuotaRecord => handleQuotaRecord(record)
           case _ => // We only care about quota records
         }
-      case _ => // We only about metadata events
+      case _ => // We only care about metadata events
     }
   }
 
@@ -85,11 +85,11 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
         if (userVal == null && clientIdVal == null) {
           DefaultUserDefaultClientIdEntity
         } else if (userVal == null) {
-          DefaultUserClientIdEntity(clientIdVal)
+          DefaultUserExplicitClientIdEntity(clientIdVal)
         } else if (clientIdVal == null) {
-          UserDefaultClientIdEntity(userVal)
+          ExplicitUserDefaultClientIdEntity(userVal)
         } else {
-          UserClientIdEntity(userVal, clientIdVal)
+          ExplicitUserExplicitClientIdEntity(userVal, clientIdVal)
         }
       } else if (entityMap.contains(ClientQuotaEntity.USER)) {
         if (userVal == null) {
@@ -148,7 +148,9 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       case QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG => Some(quotaManagers.produce)
       case QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG => Some(quotaManagers.request)
       case QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG => Some(quotaManagers.controllerMutation)
-      case _ => warn(s"Ignoring unexpected quota key ${quotaRecord.key()} for entity $quotaEntity"); None
+      case _ =>
+        warn(s"Ignoring unexpected quota key ${quotaRecord.key()} for entity $quotaEntity")
+        None
     }
 
     if (managerOpt.isEmpty) {
@@ -163,9 +165,9 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       case DefaultUserEntity => (Some(ConfigEntityName.Default), None)
       case ClientIdEntity(clientId) => (None, Some(Sanitizer.sanitize(clientId)))
       case DefaultClientIdEntity => (None, Some(ConfigEntityName.Default))
-      case UserClientIdEntity(user, clientId) => (Some(Sanitizer.sanitize(user)), Some(Sanitizer.sanitize(clientId)))
-      case UserDefaultClientIdEntity(user) => (Some(Sanitizer.sanitize(user)), Some(ConfigEntityName.Default))
-      case DefaultUserClientIdEntity(clientId) => (Some(ConfigEntityName.Default), Some(Sanitizer.sanitize(clientId)))
+      case ExplicitUserExplicitClientIdEntity(user, clientId) => (Some(Sanitizer.sanitize(user)), Some(Sanitizer.sanitize(clientId)))
+      case ExplicitUserDefaultClientIdEntity(user) => (Some(Sanitizer.sanitize(user)), Some(ConfigEntityName.Default))
+      case DefaultUserExplicitClientIdEntity(clientId) => (Some(ConfigEntityName.Default), Some(Sanitizer.sanitize(clientId)))
       case DefaultUserDefaultClientIdEntity => (Some(ConfigEntityName.Default), Some(ConfigEntityName.Default))
       case IpEntity(_) | DefaultIpEntity => throw new IllegalStateException("Should not see IP quota entities here")
     }

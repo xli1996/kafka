@@ -283,7 +283,7 @@ class Kip500Broker(
         replicaManager, adminManager, groupCoordinator, transactionCoordinator,
         kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
         fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener,
-        quotaCache)
+        Some(quotaCache))
 
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
         config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
@@ -293,7 +293,7 @@ class Kip500Broker(
           replicaManager, adminManager, groupCoordinator, transactionCoordinator,
           kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
           fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener,
-          quotaCache)
+          Some(quotaCache))
 
         controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
           1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)

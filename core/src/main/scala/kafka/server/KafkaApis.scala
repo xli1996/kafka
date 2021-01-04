@@ -121,7 +121,7 @@ class KafkaApis(val requestChannel: RequestChannel,
                 val brokerFeatures: BrokerFeatures,
                 val finalizedFeatureCache: FinalizedFeatureCache,
                 brokerMetadataListener: BrokerMetadataListener,
-                val quotaCache: QuotaCache) extends ApiRequestHandler with Logging {
+                val quotaCache: Option[QuotaCache]) extends ApiRequestHandler with Logging {
 
   val apisUtils = new ApisUtils(new LogContext(s"[BrokerApis id=${config.brokerId}] "),
     requestChannel, authorizer, quotas, time, Some(groupCoordinator), Some(txnCoordinator))
@@ -3180,7 +3180,10 @@ class KafkaApis(val requestChannel: RequestChannel,
   def handleDescribeClientQuotasRequest(request: RequestChannel.Request): Unit = {
     val describeClientQuotasRequest = request.body[DescribeClientQuotasRequest]
 
-    if (adminManager != null && apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)) {
+    if (!apisUtils.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)) {
+      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        describeClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+    } else if (adminManager != null) {
       val result = adminManager.describeClientQuotas(describeClientQuotasRequest.filter)
 
       val entriesData = result.iterator.map { case (quotaEntity, quotaValues) =>
@@ -3205,8 +3208,8 @@ class KafkaApis(val requestChannel: RequestChannel,
         new DescribeClientQuotasResponse(new DescribeClientQuotasResponseData()
           .setThrottleTimeMs(requestThrottleMs)
           .setEntries(entriesData.asJava)))
-    } else {
-      val result = quotaCache.describeClientQuotas(describeClientQuotasRequest.filter())
+    } else if (quotaCache.isDefined) {
+      val result = quotaCache.get.describeClientQuotas(describeClientQuotasRequest.filter())
       val resultAsJava = new util.HashMap[ClientQuotaEntity, util.Map[String, java.lang.Double]](result.size)
       result.foreach { case (entity, quotas) =>
         resultAsJava.put(entity, quotas.map { case (key, quota) => key -> Double.box(quota)}.asJava)
@@ -3214,6 +3217,10 @@ class KafkaApis(val requestChannel: RequestChannel,
       apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
         DescribeClientQuotasResponse.fromQuotaEntities(resultAsJava, requestThrottleMs)
       )
+    } else {
+      warn("Neither LegacyAdminManager nor QuotaCache were defined")
+      apisUtils.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        describeClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.UNKNOWN_SERVER_ERROR.exception))
     }
   }
 

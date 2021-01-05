@@ -19,8 +19,7 @@ package kafka.server.metadata
 
 import kafka.utils.CoreUtils.{inReadLock, inWriteLock}
 import org.apache.kafka.common.errors.{InvalidRequestException, UnsupportedVersionException}
-import org.apache.kafka.common.metadata.QuotaRecord
-import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilter}
+import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilterComponent}
 
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import scala.collection.mutable
@@ -45,12 +44,22 @@ case object TypeMatch extends QuotaMatch
 
 
 class QuotaCache {
-  type QuotaCacheIndex = mutable.HashMap[CacheIndexKey, mutable.HashSet[QuotaEntity]]
+  private type QuotaCacheIndex = mutable.HashMap[CacheIndexKey, mutable.HashSet[QuotaEntity]]
 
-  // A cache of the quota entities and their current quota values
+  // A mapping of the quota entities to their quotas, for example:
+  // {
+  //   (user:alice) -> {consumer_byte_rate: 10000},
+  //   (user:alice,client:x) -> {consumer_byte_rate: 8000, producer_byte_rate: 8000}
+  // }
   private val quotaCache = new mutable.HashMap[QuotaEntity, mutable.Map[String, Double]]
 
-  // An index of user or client to a set of corresponding cache entities. This is used for flexible lookups
+  // Indexes for the three supported entity types. This is needed for flexible lookups like: "all quotas for user:alice"
+  // The structure of these indexes is a mapping of a specific entity entry to entities in the cache:
+  // {
+  //   SpecificUser(alice) -> [(user:alice), (user:alice,client:x)],
+  //   DefaultUser -> [(user:default), (user:default, client:default), (user:default, client:x), ...]
+  // }
+  // We need three separate indexes because we also support wildcard lookups on entity type.
   private val userEntityIndex = new QuotaCacheIndex
   private val clientIdEntityIndex = new QuotaCacheIndex
   private val ipEntityIndex = new QuotaCacheIndex
@@ -59,21 +68,26 @@ class QuotaCache {
 
   /**
    * Return quota entries for a given filter. These entries are returned from an in-memory cache and may not reflect
-   * the latest state of the quotas according to the controller.
+   * the latest state of the quotas according to the controller. If a filter is given for an unsupported entity type
+   * or an invalid combination of entity types, this method will throw an exception.
    *
-   * @param quotaFilter       A quota entity filter
-   * @return                  A mapping of quota entities along with their quota values
+   * @param filters       A collection of quota filters (entity type and a match clause).
+   * @param strict        True if we should only return entities which match all the filter clauses and have no
+   *                      additional unmatched parts.
+   * @return              A mapping of quota entities along with their quota values.
    */
-  def describeClientQuotas(quotaFilter: ClientQuotaFilter): Map[ClientQuotaEntity, Map[String, Double]] = inReadLock(lock) {
-    describeClientQuotasInternal(quotaFilter).map { case (entity, value) => convertEntity(entity) -> value}
+  def describeClientQuotas(filters: Seq[ClientQuotaFilterComponent], strict: Boolean):
+      Map[ClientQuotaEntity, Map[String, Double]] = inReadLock(lock) {
+    describeClientQuotasInternal(filters, strict).map { case (entity, value) => convertEntity(entity) -> value}
   }
 
-  // Visible for testing
-  private[metadata] def describeClientQuotasInternal(quotaFilter: ClientQuotaFilter): Map[QuotaEntity, Map[String, Double]] = inReadLock(lock) {
+  // Visible for testing (QuotaEntity is nicer for assertions in test code)
+  private[metadata] def describeClientQuotasInternal(filters: Seq[ClientQuotaFilterComponent], strict: Boolean):
+      Map[QuotaEntity, Map[String, Double]] = inReadLock(lock) {
 
     // Do some preliminary validation of the filter types and convert them to correct QuotaMatch type
     val entityFilters: mutable.Map[String, QuotaMatch] = mutable.HashMap.empty
-    quotaFilter.components().forEach(component => {
+    filters.foreach(component => {
       val entityType = component.entityType()
       if (entityFilters.contains(entityType)) {
         throw new InvalidRequestException(s"Duplicate ${entityType} filter component entity type")
@@ -116,7 +130,7 @@ class QuotaCache {
         Set.empty
       }
     } else if (entityFilters.contains(ClientQuotaEntity.USER) || entityFilters.contains(ClientQuotaEntity.CLIENT_ID)) {
-      // If either are present, check both indexes
+      // If either are present, check both user and client indexes
       val userMatch = entityFilters.get(ClientQuotaEntity.USER)
       val userIndexMatches: Set[QuotaEntity] = if (userMatch.isDefined) {
         userMatch.get match {
@@ -147,9 +161,9 @@ class QuotaCache {
         clientIndexMatches
       }
 
-      if (quotaFilter.strict()) {
-        // If in strict mode, need to remove any matches with extra entity types. This only applies to results with
-        // both user and clientId parts
+      if (strict) {
+        // If in strict mode, we need to remove any matches with unspecified entity types. This only applies to results
+        // with more than one entity part (i.e., user and clientId)
         candidateMatches.filter { quotaEntity =>
           quotaEntity match {
             case ExplicitUserExplicitClientIdEntity(_, _) => userMatch.isDefined && clientMatch.isDefined
@@ -163,6 +177,7 @@ class QuotaCache {
         candidateMatches
       }
     } else {
+      // ClientQuotaEntity.isValidEntityType check above should prevent any unknown entity types
       throw new IllegalStateException(s"Unexpected handling of ${entityFilters} after filter validation")
     }
 
@@ -187,25 +202,27 @@ class QuotaCache {
       case ClientIdEntity(clientId) => Map(ClientQuotaEntity.CLIENT_ID -> clientId)
       case DefaultClientIdEntity => Map(ClientQuotaEntity.CLIENT_ID -> null)
       case ExplicitUserExplicitClientIdEntity(user, clientId) =>
-      Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
+        Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> clientId)
       case ExplicitUserDefaultClientIdEntity(user) =>
-      Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
+        Map(ClientQuotaEntity.USER -> user, ClientQuotaEntity.CLIENT_ID -> null)
       case DefaultUserExplicitClientIdEntity(clientId) =>
-      Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
+        Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> clientId)
       case DefaultUserDefaultClientIdEntity =>
-      Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
+        Map(ClientQuotaEntity.USER -> null, ClientQuotaEntity.CLIENT_ID -> null)
     }
     new ClientQuotaEntity(entityMap.asJava)
   }
 
-  // Update the cache indexes for user/client quotas
+  // Update the cache indexes
   private def updateCacheIndex(quotaEntity: QuotaEntity,
-                       remove: Boolean)
-                      (quotaCacheIndex: QuotaCacheIndex,
-                       key: CacheIndexKey): Unit = {
+                               remove: Boolean)
+                              (quotaCacheIndex: QuotaCacheIndex,
+                               key: CacheIndexKey): Unit = {
     if (remove) {
       val needsCleanup = quotaCacheIndex.get(key) match {
-        case Some(quotaEntitySet) => quotaEntitySet.remove(quotaEntity); quotaEntitySet.isEmpty
+        case Some(quotaEntitySet) =>
+          quotaEntitySet.remove(quotaEntity)
+          quotaEntitySet.isEmpty
         case None => false
       }
       if (needsCleanup) {
@@ -216,26 +233,34 @@ class QuotaCache {
     }
   }
 
-
-  def updateQuotaCache(quotaEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = inWriteLock(lock) {
-    // Update the quota entity map
-    val quotaValues = quotaCache.getOrElseUpdate(quotaEntity, mutable.HashMap.empty)
-    val removeCache = if (quotaRecord.remove()) {
-      quotaValues.remove(quotaRecord.key())
+  /**
+   * Update the quota cache with the given entity and quota key/value. If remove is set, the value is ignore and
+   * the quota entry is removed for the given key. No validation on quota keys is performed here, it is assumed
+   * that the caller has already done this.
+   *
+   * @param entity    A quota entity, either a specific entity or the default entity for the given type(s)
+   * @param key       The quota key
+   * @param value     The quota value
+   * @param remove    True if we should remove the given quota key from the entity's quota cache
+   */
+  def updateQuotaCache(entity: QuotaEntity, key: String, value: Double, remove: Boolean): Unit = inWriteLock(lock) {
+    val quotaValues = quotaCache.getOrElseUpdate(entity, mutable.HashMap.empty)
+    val removeFromIndex = if (remove) {
+      quotaValues.remove(key)
       if (quotaValues.isEmpty) {
-        quotaCache.remove(quotaEntity)
+        quotaCache.remove(entity)
         true
       } else {
         false
       }
     } else {
-      quotaValues.put(quotaRecord.key(), quotaRecord.value())
+      quotaValues.put(key, value)
       false
     }
 
     // Update the appropriate indexes with the entity
-    val updateCacheIndexPartial: (QuotaCacheIndex, CacheIndexKey) => Unit = updateCacheIndex(quotaEntity, removeCache)
-    quotaEntity match {
+    val updateCacheIndexPartial: (QuotaCacheIndex, CacheIndexKey) => Unit = updateCacheIndex(entity, removeFromIndex)
+    entity match {
       case UserEntity(user) =>
         updateCacheIndexPartial(userEntityIndex, SpecificUser(user))
       case DefaultUserEntity =>

@@ -3209,7 +3209,9 @@ class KafkaApis(val requestChannel: RequestChannel,
           .setThrottleTimeMs(requestThrottleMs)
           .setEntries(entriesData.asJava)))
     } else if (quotaCache.isDefined) {
-      val result = quotaCache.get.describeClientQuotas(describeClientQuotasRequest.filter())
+      val result = quotaCache.get.describeClientQuotas(
+        describeClientQuotasRequest.filter().components().asScala.toSeq,
+        describeClientQuotasRequest.filter().strict())
       val resultAsJava = new util.HashMap[ClientQuotaEntity, util.Map[String, java.lang.Double]](result.size)
       result.foreach { case (entity, quotas) =>
         resultAsJava.put(entity, quotas.map { case (key, quota) => key -> Double.box(quota)}.asJava)

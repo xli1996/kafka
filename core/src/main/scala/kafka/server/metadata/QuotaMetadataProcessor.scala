@@ -31,6 +31,7 @@ import java.net.{InetAddress, UnknownHostException}
 import scala.collection.mutable
 
 
+// A strict hierarchy of entities that we support
 sealed trait QuotaEntity
 case class IpEntity(ip: String) extends QuotaEntity
 case object DefaultIpEntity extends QuotaEntity
@@ -46,9 +47,9 @@ case object DefaultUserDefaultClientIdEntity extends QuotaEntity
 /**
  * Watch for changes to quotas in the metadata log and update quota managers and cache as necessary
  */
-class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
-                             val connectionQuotas: ConnectionQuotas,
-                             val quotaCache: QuotaCache) extends BrokerMetadataProcessor with Logging {
+class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
+                             private[metadata] val connectionQuotas: ConnectionQuotas,
+                             private[metadata] val quotaCache: QuotaCache) extends BrokerMetadataProcessor with Logging {
 
   override def process(event: BrokerMetadataEvent): Unit = {
     event match {
@@ -131,7 +132,7 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
     }
 
     // Update the cache
-    quotaCache.updateQuotaCache(ipEntity, quotaRecord)
+    quotaCache.updateQuotaCache(ipEntity, quotaRecord.key, quotaRecord.value, quotaRecord.remove)
 
     // Convert the value to an appropriate Option for the quota manager
     val newValue = if (quotaRecord.remove()) {
@@ -157,7 +158,7 @@ class QuotaMetadataProcessor(val quotaManagers: QuotaManagers,
       return
     }
 
-    quotaCache.updateQuotaCache(quotaEntity, quotaRecord)
+    quotaCache.updateQuotaCache(quotaEntity, quotaRecord.key, quotaRecord.value, quotaRecord.remove)
 
     // Convert entity into Options with sanitized values for QuotaManagers
     val (sanitizedUser, sanitizedClientId) = quotaEntity match {

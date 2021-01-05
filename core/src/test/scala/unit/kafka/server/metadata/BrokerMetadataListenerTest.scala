@@ -250,8 +250,9 @@ class BrokerMetadataListenerTest {
     val brokerMetadataProcessor = new MockMetadataProcessor
     val listener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), metadataCache, new MockTime, List(brokerMetadataProcessor),
       eventQueueTimeoutMs = 50)
-    val localLogManager = new LocalLogManager(new LogContext("log-manager-broker-test"), 1,
-      logdir.getAbsolutePath, "log-manager")
+    val shared = new LocalLogManager.SharedLogData()
+    val localLogManager = new LocalLogManager(new LogContext("log-manager-broker-test"),
+      1, shared, "log-manager")
     localLogManager.initialize()
     localLogManager.register(listener)
 
@@ -284,7 +285,7 @@ class BrokerMetadataListenerTest {
     Utils.delete(logdir)
 
     // Verify that the events were processed
-    assertTrue(listener.currentMetadataOffset() == apisInvoked.size - 1)
+    assertEquals(apisInvoked.size, listener.currentMetadataOffset())
   }
 
   @Test

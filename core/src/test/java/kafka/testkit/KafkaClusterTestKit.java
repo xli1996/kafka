@@ -119,6 +119,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 new ControllerQuorumVotersFutureManager(nodes.controllerNodes().size());
             File baseDirectory = null;
             LocalLogManager metaLogManager = null;
+            LocalLogManager.SharedLogData sharedLogData = new LocalLogManager.SharedLogData();
             try {
                 baseDirectory = TestUtils.tempDirectory();
                 nodes = nodes.copyWithAbsolutePaths(baseDirectory.getAbsolutePath());
@@ -154,7 +155,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     metaLogManager = new LocalLogManager(
                         logContext,
                         node.id(),
-                        config.metadataLogDir(),
+                        sharedLogData,
                         threadNamePrefix
                     );
                     metaLogManager.initialize();
@@ -208,7 +209,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     metaLogManager = new LocalLogManager(
                         logContext,
                         node.id(),
-                        config.metadataLogDir(),
+                        sharedLogData,
                         threadNamePrefix
                     );
                     metaLogManager.initialize();
@@ -256,14 +257,6 @@ public class KafkaClusterTestKit implements AutoCloseable {
             for (String logDataDirectory : logDataDirectories) {
                 Files.createDirectories(Paths.get(logDataDirectory));
             }
-
-            // This is a hack to allow us to use the LocalLogManager.
-            // We link all the leader and log files together.
-            // TODO: remove this when we have real Raft integration (or a better log mock)
-            Files.createSymbolicLink(Paths.get(metadataDirectory, "leader"),
-                Paths.get(baseDirectory.getAbsolutePath(), "leader"));
-            Files.createSymbolicLink(Paths.get(metadataDirectory, "log"),
-                Paths.get(baseDirectory.getAbsolutePath(), "log"));
         }
     }
 
@@ -423,6 +416,10 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
     public Map<Integer, Kip500Broker> kip500Brokers() {
         return kip500Brokers;
+    }
+
+    public TestKitNodes nodes() {
+        return nodes;
     }
 
     @Override

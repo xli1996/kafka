@@ -385,7 +385,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 prefix = ",";
             }
             properties.setProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), bld.toString());
-            properties.setProperty("bootstrap.servers",
+            properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
                 controllerNodes.stream().map(n -> n.host() + ":" + n.port()).
                     collect(Collectors.joining(",")));
         }

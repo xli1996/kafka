@@ -272,7 +272,7 @@ public final class LocalLogManager implements MetaLogManager, AutoCloseable {
     public void beginShutdown() {
         eventQueue.beginShutdown("beginShutdown", () -> {
             try {
-                if (initialized && !shutdown ) {
+                if (initialized && !shutdown) {
                     log.debug("Node {}: beginning shutdown.", nodeId);
                     renounce(leader.epoch());
                     for (MetaLogListenerData listenerData : listeners) {

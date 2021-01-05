@@ -18,8 +18,13 @@
 package kafka.server
 
 import kafka.testkit.{KafkaClusterTestKit, TestKitNodes}
+import org.apache.kafka.clients.admin.{Admin, NewTopic}
 import org.junit.rules.Timeout
 import org.junit.{Rule, Test}
+
+import java.time.Duration
+import java.util.Collections
+import java.util.concurrent.TimeUnit
 
 class Kip500ClusterTest {
   @Rule
@@ -32,6 +37,28 @@ class Kip500ClusterTest {
         setNumKip500BrokerNodes(1).
         setNumControllerNodes(1).build()).build()
     try {
+    } finally {
+      cluster.close()
+    }
+  }
+
+  @Test
+  def testCreateTopic(): Unit = {
+    val cluster = new KafkaClusterTestKit.Builder(
+      new TestKitNodes.Builder().
+        setNumKip500BrokerNodes(1).
+        setNumControllerNodes(1).build()).build()
+    try {
+      cluster.format()
+      cluster.startup()
+      val adminClient = Admin.create(cluster.clientProperties())
+      try {
+        val newTopic = new NewTopic("test-topic", 1, 1.toShort)
+        val createTopicResult = adminClient.createTopics(Collections.singletonList(newTopic))
+        createTopicResult.all().get(10, TimeUnit.SECONDS)
+      } finally {
+        adminClient.close(Duration.ofSeconds(10))
+      }
     } finally {
       cluster.close()
     }

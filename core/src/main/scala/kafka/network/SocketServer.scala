@@ -1455,7 +1455,7 @@ class ConnectionQuotas(config: KafkaConfig, time: Time, metrics: Metrics) extend
       case None =>
         // synchronize on counts to ensure reading an IP connection rate quota and creating a quota config is atomic
         counts.synchronized {
-          defaultConnectionRatePerIp = maxConnectionRate.getOrElse(QuotaConfigs.IP_CONNECTION_RATE_DEFAULT.intValue())
+          defaultConnectionRatePerIp = maxConnectionRate.getOrElse(QuotaConfigs.IP_CONNECTION_RATE_DEFAULT)
         }
         info(s"Updated default max IP connection rate to $defaultConnectionRatePerIp")
         metrics.metrics.forEach { (metricName, metric) =>

@@ -17,13 +17,18 @@
 
 package kafka.testkit;
 
+import kafka.raft.KafkaRaftManager;
 import kafka.raft.RaftManager;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
+import kafka.server.KafkaServer;
+import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.server.MetaProperties;
 import kafka.tools.StorageTool;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.protocol.ApiMessage;
@@ -46,10 +51,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Random;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -119,6 +126,24 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 executorService = Executors.newFixedThreadPool(4,
                     ThreadUtils.createThreadFactory("KafkaClusterTestKit%d", false));
                 Time time = Time.SYSTEM;
+
+                // Generate quorum voters connect configuration - Specify controller ports
+                Map<Integer, Integer> controllerPorts = new HashMap<>();
+                Iterator<Integer> nodeIDs = nodes.controllerNodes().keySet().stream().iterator();
+                new Random().ints(10240, 65535)
+                        .distinct()
+                        .limit(nodes.controllerNodes().size())
+                        .forEach(port -> {
+                            controllerPorts.put(nodeIDs.next(), port);
+                        });
+                StringBuilder builder = new StringBuilder();
+                String prefix = "";
+                for (Map.Entry<Integer, Integer> ports : controllerPorts.entrySet()) {
+                    builder.append(prefix).append(ports.getKey()).append('@');
+                    builder.append("localhost").append(':').append(ports.getValue());
+                    prefix = ",";
+                }
+
                 for (ControllerNode node : nodes.controllerNodes().values()) {
                     Map<String, String> props = new HashMap<>(configProps);
                     props.put(KafkaConfig$.MODULE$.ProcessRolesProp(), "controller");
@@ -130,13 +155,10 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.ListenerSecurityProtocolMapProp(),
                         "CONTROLLER:PLAINTEXT");
                     props.put(KafkaConfig$.MODULE$.ListenersProp(),
-                        "CONTROLLER://localhost:0");
+                        "CONTROLLER://localhost:" + controllerPorts.get(node.id()));
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
-                    // Note: we can't accurately set controller.quorum.voters yet, since we don't
-                    // yet know what ports each controller will pick.  Set it to an
-                    // empty string for now as a placeholder.
-                    props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), "");
+                    props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), builder.toString());
                     KafkaConfig config = new KafkaConfig(props, false,
                         OptionConverters.toScala(Optional.empty()));
 
@@ -155,12 +177,23 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         OptionConverters.toScala(Optional.empty()),
                         OptionConverters.toScala(Optional.of(node.id()))
                     );
+                    final int fakeId = 100; //Integer.MAX_VALUE;
+                    MetaProperties metaProperties = MetaProperties.apply(Uuid.ZERO_UUID,
+                            OptionConverters.toScala(Optional.of(fakeId)),
+                            OptionConverters.toScala(Optional.empty()));
+                    TopicPartition metadataPartition = new TopicPartition(KafkaServer.metadataTopicName(), 0);
+                    KafkaRaftManager raftManager = new KafkaRaftManager(
+                            metaProperties,
+                            metadataPartition,
+                            config,
+                            Time.SYSTEM,
+                            new Metrics());
 
                     Kip500Controller controller = new Kip500Controller(
                         properties,
                         config,
                         metaLogManager,
-                        new MockRaftManager(),
+                        raftManager,
                         time,
                         new Metrics(),
                         OptionConverters.toScala(Optional.of(threadNamePrefix)),

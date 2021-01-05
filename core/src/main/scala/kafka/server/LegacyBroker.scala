@@ -713,9 +713,9 @@ class LegacyBroker(val config: KafkaConfig,
   /**
    * After calling shutdown(), use this API to wait until the shutdown is complete
    */
-  def awaitShutdown(): Unit = shutdownLatch.await()
+  override def awaitShutdown(): Unit = shutdownLatch.await()
 
-  def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
+  override def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
 
   /**
    * Checkpoint the BrokerMetadata to all the online log.dirs

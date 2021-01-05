@@ -31,6 +31,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.common.internals.ClusterResourceListeners
 import org.apache.kafka.common.metrics.{KafkaMetricsContext, MetricConfig, Metrics, MetricsReporter, Sensor}
 import org.apache.kafka.common.ClusterResource
+import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.metadata.BrokerState
 import org.apache.kafka.server.authorizer.Authorizer
@@ -144,6 +145,7 @@ trait KafkaBroker extends Logging with KafkaMetricsGroup {
   def startup(): Unit
   def shutdown(): Unit
   def awaitShutdown(): Unit
+  def boundPort(listenerName: ListenerName): Int
   def metrics(): Metrics
   def currentState(): BrokerState
   def clusterId(): String

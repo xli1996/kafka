@@ -26,11 +26,13 @@ import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.server.MetaProperties;
 import kafka.tools.StorageTool;
+import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.requests.RequestHeader;
 import org.apache.kafka.common.utils.LogContext;
@@ -46,6 +48,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -54,6 +57,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Random;
@@ -102,7 +106,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
     }
 
     public static class Builder {
-        private final TestKitNodes nodes;
+        private TestKitNodes nodes;
         private Map<String, String> configProps = new HashMap<>();
 
         public Builder(TestKitNodes nodes) {
@@ -116,14 +120,18 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
         public KafkaClusterTestKit build() throws Exception {
             Map<Integer, Kip500Controller> controllers = new HashMap<>();
+            Map<Integer, Kip500Broker> kip500Brokers = new HashMap<>();
             ExecutorService executorService = null;
             ControllerQuorumVotersFutureManager connectFutureManager =
                 new ControllerQuorumVotersFutureManager(nodes.controllerNodes().size());
             File baseDirectory = null;
             LocalLogManager metaLogManager = null;
+            LocalLogManager.SharedLogData sharedLogData = new LocalLogManager.SharedLogData();
             try {
                 baseDirectory = TestUtils.tempDirectory();
-                executorService = Executors.newFixedThreadPool(4,
+                nodes = nodes.copyWithAbsolutePaths(baseDirectory.getAbsolutePath());
+                executorService = Executors.newFixedThreadPool(
+                    nodes.brokerNodes().size() + nodes.controllerNodes().size(),
                     ThreadUtils.createThreadFactory("KafkaClusterTestKit%d", false));
                 Time time = Time.SYSTEM;
 
@@ -150,8 +158,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.ControllerIdProp(),
                         Integer.toString(node.id()));
                     props.put(KafkaConfig$.MODULE$.MetadataLogDirProp(),
-                        Paths.get(baseDirectory.getAbsolutePath(),
-                            node.logDirectories().get(0)).toAbsolutePath().toString());
+                        node.metadataDirectory());
                     props.put(KafkaConfig$.MODULE$.ListenerSecurityProtocolMapProp(),
                         "CONTROLLER:PLAINTEXT");
                     props.put(KafkaConfig$.MODULE$.ListenersProp(),
@@ -159,6 +166,8 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
                     props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), builder.toString());
+                    setupNodeDirectories(baseDirectory, node.metadataDirectory(),
+                        Collections.emptyList());
                     KafkaConfig config = new KafkaConfig(props, false,
                         OptionConverters.toScala(Optional.empty()));
 
@@ -168,7 +177,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     metaLogManager = new LocalLogManager(
                         logContext,
                         node.id(),
-                        config.metadataLogDir(),
+                        sharedLogData,
                         threadNamePrefix
                     );
                     metaLogManager.initialize();
@@ -188,9 +197,8 @@ public class KafkaClusterTestKit implements AutoCloseable {
                             config,
                             Time.SYSTEM,
                             new Metrics());
-
                     Kip500Controller controller = new Kip500Controller(
-                        properties,
+                        nodes.controllerProperties(node.id()),
                         config,
                         metaLogManager,
                         raftManager,
@@ -214,15 +222,46 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.BrokerIdProp(),
                         Integer.toString(node.id()));
                     props.put(KafkaConfig$.MODULE$.MetadataLogDirProp(),
-                        Paths.get(baseDirectory.getAbsolutePath(),
-                            node.logDirectories().get(0)).toAbsolutePath().toString());
+                        node.metadataDirectory());
+                    props.put(KafkaConfig$.MODULE$.LogDirsProp(),
+                        String.join(",", node.logDataDirectories()));
                     props.put(KafkaConfig$.MODULE$.ListenerSecurityProtocolMapProp(),
-                        "BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT");
+                        "EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT");
                     props.put(KafkaConfig$.MODULE$.ListenersProp(),
-                        "BROKER://localhost:0");
+                        "EXTERNAL://localhost:0");
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
 
+                    setupNodeDirectories(baseDirectory, node.metadataDirectory(),
+                        node.logDataDirectories());
+
+                    // Just like above, we set a placeholder voter list here until we
+                    //find out what ports the controllers picked.
+                    props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), "");
+                    KafkaConfig config = new KafkaConfig(props, false,
+                        OptionConverters.toScala(Optional.empty()));
+
+                    String threadNamePrefix = String.format("broker%d_", node.id());
+                    LogContext logContext = new LogContext("[Broker id=" + node.id() + "] ");
+
+                    metaLogManager = new LocalLogManager(
+                        logContext,
+                        node.id(),
+                        sharedLogData,
+                        threadNamePrefix
+                    );
+                    metaLogManager.initialize();
+                    Kip500Broker broker = new Kip500Broker(
+                        config,
+                        nodes.brokerProperties(node.id()),
+                        metaLogManager,
+                        time,
+                        new Metrics(),
+                        OptionConverters.toScala(Optional.of(threadNamePrefix)),
+                        JavaConverters.asScala(Collections.<String>emptyList()).toSeq(),
+                        connectFutureManager.future
+                    );
+                    kip500Brokers.put(node.id(), broker);
                 }
             } catch (Exception e) {
                 if (executorService != null) {
@@ -231,6 +270,9 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 }
                 for (Kip500Controller controller : controllers.values()) {
                     controller.shutdown();
+                }
+                for (Kip500Broker kip500Broker : kip500Brokers.values()) {
+                    kip500Broker.shutdown();
                 }
                 if (metaLogManager != null) {
                     metaLogManager.close();
@@ -242,7 +284,17 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 throw e;
             }
             return new KafkaClusterTestKit(executorService, nodes, controllers,
-                connectFutureManager, baseDirectory);
+                kip500Brokers, connectFutureManager, baseDirectory);
+        }
+
+        static private void setupNodeDirectories(File baseDirectory,
+                                                 String metadataDirectory,
+                                                 Collection<String> logDataDirectories) throws Exception {
+            Files.createDirectories(new File(baseDirectory, "local").toPath());
+            Files.createDirectories(Paths.get(metadataDirectory));
+            for (String logDataDirectory : logDataDirectories) {
+                Files.createDirectories(Paths.get(logDataDirectory));
+            }
         }
     }
 
@@ -259,17 +311,20 @@ public class KafkaClusterTestKit implements AutoCloseable {
     private final ExecutorService executorService;
     private final TestKitNodes nodes;
     private final Map<Integer, Kip500Controller> controllers;
+    private final Map<Integer, Kip500Broker> kip500Brokers;
     private final ControllerQuorumVotersFutureManager controllerQuorumVotersFutureManager;
     private final File baseDirectory;
 
     private KafkaClusterTestKit(ExecutorService executorService,
                                 TestKitNodes nodes,
                                 Map<Integer, Kip500Controller> controllers,
+                                Map<Integer, Kip500Broker> kip500Brokers,
                                 ControllerQuorumVotersFutureManager controllerQuorumVotersFutureManager,
                                 File baseDirectory) {
         this.executorService = executorService;
         this.nodes = nodes;
         this.controllers = controllers;
+        this.kip500Brokers = kip500Brokers;
         this.controllerQuorumVotersFutureManager = controllerQuorumVotersFutureManager;
         this.baseDirectory = baseDirectory;
     }
@@ -277,27 +332,41 @@ public class KafkaClusterTestKit implements AutoCloseable {
     public void format() throws Exception {
         List<Future<?>> futures = new ArrayList<>();
         try {
-            for (Map.Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
+            for (Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
                 int nodeId = entry.getKey();
                 Kip500Controller controller = entry.getValue();
-
-                MetaProperties properties = MetaProperties.apply(
-                    nodes.clusterId(),
-                    OptionConverters.toScala(Optional.empty()),
-                    OptionConverters.toScala(Optional.of(nodeId))
-                );
-
                 futures.add(executorService.submit(() -> {
                     try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
                         try (PrintStream out = new PrintStream(stream)) {
                             StorageTool.formatCommand(out,
                                 JavaConverters.asScalaBuffer(Collections.singletonList(
                                     controller.config().metadataLogDir())).toSeq(),
-                                properties,
+                                nodes.controllerProperties(nodeId),
                                 false);
                         } finally {
                             for (String line : stream.toString().split(String.format("%n"))) {
                                 controller.info(() -> line);
+                            }
+                        }
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }));
+            }
+            for (Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
+                int nodeId = entry.getKey();
+                Kip500Broker broker = entry.getValue();
+                futures.add(executorService.submit(() -> {
+                    try (ByteArrayOutputStream stream = new ByteArrayOutputStream()) {
+                        try (PrintStream out = new PrintStream(stream)) {
+                            StorageTool.formatCommand(out,
+                                JavaConverters.asScalaBuffer(Collections.singletonList(
+                                    broker.config().metadataLogDir())).toSeq(),
+                                nodes.brokerProperties(nodeId),
+                                false);
+                        } finally {
+                            for (String line : stream.toString().split(String.format("%n"))) {
+                                broker.info(() -> line);
                             }
                         }
                     } catch (IOException e) {
@@ -324,6 +393,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     controller.startup();
                 }));
             }
+            for (Kip500Broker broker : kip500Brokers.values()) {
+                futures.add(executorService.submit(() -> {
+                    broker.startup();
+                }));
+            }
             for (Future<?> future: futures) {
                 future.get();
             }
@@ -335,7 +409,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
         }
     }
 
-    public Properties clientProperties() throws ExecutionException, InterruptedException {
+    public Properties controllerClientProperties() throws ExecutionException, InterruptedException {
         Properties properties = new Properties();
         if (!controllers.isEmpty()) {
             Collection<Node> controllerNodes = JavaConverters.asJavaCollection(
@@ -349,11 +423,46 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 prefix = ",";
             }
             properties.setProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), bld.toString());
-            properties.setProperty("bootstrap.servers",
+            properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG,
                 controllerNodes.stream().map(n -> n.host() + ":" + n.port()).
                     collect(Collectors.joining(",")));
         }
         return properties;
+    }
+
+    public Properties clientProperties() {
+        Properties properties = new Properties();
+        if (!kip500Brokers.isEmpty()) {
+            StringBuilder bld = new StringBuilder();
+            String prefix = "";
+            for (Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
+                int brokerId = entry.getKey();
+                Kip500Broker broker = entry.getValue();
+                ListenerName listenerName = nodes.externalListenerName();
+                int port = broker.boundPort(listenerName);
+                if (port <= 0) {
+                    throw new RuntimeException("Broker " + brokerId + " does not yet " +
+                        "have a bound port for " + listenerName + ".  Did you start " +
+                        "the cluster yet?");
+                }
+                bld.append(prefix).append("localhost:").append(port);
+                prefix = ",";
+            }
+            properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bld.toString());
+        }
+        return properties;
+    }
+
+    public Map<Integer, Kip500Controller> controllers() {
+        return controllers;
+    }
+
+    public Map<Integer, Kip500Broker> kip500Brokers() {
+        return kip500Brokers;
+    }
+
+    public TestKitNodes nodes() {
+        return nodes;
     }
 
     @Override
@@ -364,6 +473,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
             for (Kip500Controller controller : controllers.values()) {
                 futures.add(executorService.submit(() -> {
                     controller.shutdown();
+                }));
+            }
+            for (Kip500Broker kip500Broker : kip500Brokers.values()) {
+                futures.add(executorService.submit(() -> {
+                    kip500Broker.shutdown();
                 }));
             }
             for (Future<?> future: futures) {

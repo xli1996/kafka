@@ -19,6 +19,7 @@ package org.apache.kafka.metalog;
 
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.metalog.LocalLogManager.SharedLogData;
 import org.apache.kafka.test.TestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +46,11 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
     private final File dir;
 
     /**
+     * The shared data for our LocalLogManager instances.
+     */
+    private final SharedLogData shared;
+
+    /**
      * A list of log managers.
      */
     private final List<LocalLogManager> logManagers;
@@ -64,15 +70,15 @@ public class LocalLogManagerTestEnv implements AutoCloseable {
 
     public LocalLogManagerTestEnv(int numManagers) throws Exception {
         dir = TestUtils.tempDirectory();
+        shared = new SharedLogData();
         List<LocalLogManager> newLogManagers = new ArrayList<>(numManagers);
         try {
             for (int nodeId = 0; nodeId < numManagers; nodeId++) {
                 newLogManagers.add(new LocalLogManager(
                     new LogContext(String.format("[LocalLogManager %d] ", nodeId)),
                     nodeId,
-                    dir.getAbsolutePath(),
-                    String.format("LocalLogManager-%d_", nodeId),
-                    50));
+                    shared,
+                    String.format("LocalLogManager-%d_", nodeId)));
             }
             for (LocalLogManager logManager : newLogManagers) {
                 logManager.initialize();

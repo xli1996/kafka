@@ -45,7 +45,7 @@ class Kip500ControllerTest {
     try {
       cluster.format()
       cluster.startup()
-      val adminClient = Admin.create(cluster.clientProperties())
+      val adminClient = Admin.create(cluster.controllerClientProperties())
       try {
         // List topics and verify all the topics were created
         val listTopicsResult = adminClient.listTopics()

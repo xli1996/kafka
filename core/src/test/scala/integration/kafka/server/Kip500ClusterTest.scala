@@ -18,9 +18,11 @@
 package kafka.server
 
 import kafka.testkit.{KafkaClusterTestKit, TestKitNodes}
-import org.apache.kafka.clients.admin.{Admin, NewTopic}
+import kafka.utils.TestUtils
+import org.apache.kafka.clients.admin.Admin
+import org.apache.kafka.metadata.BrokerState
 import org.junit.rules.Timeout
-import org.junit.{Rule, Test}
+import org.junit.{Assert, Rule, Test}
 
 import java.time.Duration
 import java.util.Collections
@@ -43,7 +45,7 @@ class Kip500ClusterTest {
   }
 
   @Test
-  def testCreateTopic(): Unit = {
+  def testCreateClusterAndWaitForBrokerInRunningState(): Unit = {
     val cluster = new KafkaClusterTestKit.Builder(
       new TestKitNodes.Builder().
         setNumKip500BrokerNodes(1).
@@ -51,13 +53,14 @@ class Kip500ClusterTest {
     try {
       cluster.format()
       cluster.startup()
-      val adminClient = Admin.create(cluster.clientProperties())
+      TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
+        "Broker never made it to RUNNING state.")
+      val admin = Admin.create(cluster.clientProperties())
       try {
-        val newTopic = new NewTopic("test-topic", 1, 1.toShort)
-        val createTopicResult = adminClient.createTopics(Collections.singletonList(newTopic))
-        createTopicResult.all().get(10, TimeUnit.SECONDS)
+        Assert.assertEquals(cluster.nodes().clusterId().toString,
+          admin.describeCluster().clusterId().get())
       } finally {
-        adminClient.close(Duration.ofSeconds(10))
+        admin.close()
       }
     } finally {
       cluster.close()

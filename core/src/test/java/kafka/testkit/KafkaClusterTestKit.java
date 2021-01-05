@@ -371,7 +371,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
         }
     }
 
-    public Properties clientProperties() throws ExecutionException, InterruptedException {
+    public Properties controllerClientProperties() throws ExecutionException, InterruptedException {
         Properties properties = new Properties();
         if (!controllers.isEmpty()) {
             Collection<Node> controllerNodes = JavaConverters.asJavaCollection(
@@ -389,6 +389,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 controllerNodes.stream().map(n -> n.host() + ":" + n.port()).
                     collect(Collectors.joining(",")));
         }
+        return properties;
+    }
+
+    public Properties clientProperties() {
+        Properties properties = new Properties();
         if (!kip500Brokers.isEmpty()) {
             StringBuilder bld = new StringBuilder();
             String prefix = "";

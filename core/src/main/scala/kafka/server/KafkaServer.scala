@@ -18,18 +18,26 @@
 package kafka.server
 
 import java.util
+import java.util.Collections
 import java.util.concurrent.CompletableFuture
 
 import kafka.metrics.{KafkaMetricsReporter, KafkaYammerMetrics}
 import kafka.raft.KafkaRaftManager
 import kafka.server.KafkaServer.{BrokerRole, ControllerRole}
 import kafka.utils.{Logging, Mx4jLoader}
-import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.{ClusterResource, Endpoint, TopicPartition}
 import org.apache.kafka.common.config.ConfigException
 import org.apache.kafka.common.metrics.{JmxReporter, Metrics, MetricsReporter}
 import org.apache.kafka.common.utils.{AppInfoParser, Time}
+import org.apache.kafka.metadata.VersionRange
+import org.apache.kafka.server.authorizer.AuthorizerServerInfo
 
 import scala.jdk.CollectionConverters._
+
+private[kafka] case class KafkaAuthorizerServerInfo(clusterResource: ClusterResource,
+                                                    brokerId: Int,
+                                                    endpoints: util.List[Endpoint],
+                                                    interBrokerEndpoint: Endpoint) extends AuthorizerServerInfo
 
 trait KafkaServer {
   def startup(): Unit
@@ -119,7 +127,8 @@ class Kip500Server(
       metrics,
       threadNamePrefix,
       offlineDirs,
-      CompletableFuture.completedFuture(config.controllerQuorumVoters)
+      CompletableFuture.completedFuture(config.controllerQuorumVoters),
+      KafkaServer.SUPPORTED_FEATURES
     ))
   } else {
     None
@@ -213,4 +222,6 @@ object KafkaServer {
   sealed trait ProcessRole
   case object BrokerRole extends ProcessRole
   case object ControllerRole extends ProcessRole
+
+  val SUPPORTED_FEATURES = Collections.unmodifiableMap(Map[String, VersionRange]().asJava)
 }

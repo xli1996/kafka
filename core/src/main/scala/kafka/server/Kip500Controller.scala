@@ -17,7 +17,6 @@
 
 package kafka.server
 
-import java.util
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.locks.ReentrantLock
 
@@ -37,14 +36,9 @@ import org.apache.kafka.common.{ClusterResource, Endpoint}
 import org.apache.kafka.controller.{Controller, QuorumController}
 import org.apache.kafka.metadata.VersionRange
 import org.apache.kafka.metalog.MetaLogManager
-import org.apache.kafka.server.authorizer.{Authorizer, AuthorizerServerInfo}
+import org.apache.kafka.server.authorizer.Authorizer
 
 import scala.jdk.CollectionConverters._
-
-private[kafka] case class ControllerAuthorizerInfo(clusterResource: ClusterResource,
-                                                   brokerId: Int,
-                                                   endpoints: util.List[Endpoint],
-                                                   interBrokerEndpoint: Endpoint) extends AuthorizerServerInfo
 
 /**
  * A KIP-500 Kafka controller.
@@ -118,7 +112,7 @@ class Kip500Controller(
           // It would be nice to remove some of the broker-specific assumptions from
           // AuthorizerServerInfo, such as the assumption that there is an inter-broker
           // listener, or that ID is named brokerId.
-          val controllerAuthorizerInfo = ControllerAuthorizerInfo(
+          val controllerAuthorizerInfo = KafkaAuthorizerServerInfo(
             new ClusterResource(clusterId), config.controllerId, javaListeners, javaListeners.get(0))
           authZ.start(controllerAuthorizerInfo).asScala.map { case (ep, cs) =>
             ep -> cs.toCompletableFuture

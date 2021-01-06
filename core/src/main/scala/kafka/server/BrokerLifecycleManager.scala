@@ -16,19 +16,21 @@
  */
 package kafka.server
 
+import java.util
 import java.util.concurrent.TimeUnit.{MILLISECONDS, NANOSECONDS}
 import java.util.concurrent.{CompletableFuture, TimeUnit}
 
 import kafka.utils.Logging
 import org.apache.kafka.clients.{ClientResponse, RequestCompletionHandler}
 import org.apache.kafka.common.Uuid
-import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
+import org.apache.kafka.common.message.BrokerRegistrationRequestData.ListenerCollection
 import org.apache.kafka.common.message.{BrokerHeartbeatRequestData, BrokerRegistrationRequestData}
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{BrokerHeartbeatRequest, BrokerHeartbeatResponse, BrokerRegistrationRequest, BrokerRegistrationResponse}
 import org.apache.kafka.common.utils.EventQueue.DeadlineFunction
 import org.apache.kafka.common.utils.{EventQueue, ExponentialBackoff, KafkaEventQueue, LogContext, Time}
-import org.apache.kafka.metadata.BrokerState
+import org.apache.kafka.metadata.{BrokerState, VersionRange}
+import scala.jdk.CollectionConverters._
 
 class BrokerLifecycleManager(val config: KafkaConfig,
                              val time: Time,
@@ -66,22 +68,10 @@ class BrokerLifecycleManager(val config: KafkaConfig,
   val incarnationId = Uuid.randomUuid()
 
   /**
-   * The advertised listeners of this broker.
-   */
-  val advertisedListeners = new ListenerCollection()
-
-  /**
    * A future which is completed just as soon as the broker has caught up with the latest
    * metadata offset for the first time.
    */
   val initialCatchUpFuture = new CompletableFuture[Void]()
-
-  config.advertisedListeners.foreach { ep =>
-    advertisedListeners.add(new Listener().setHost(ep.host).
-        setName(ep.listenerName.value()).
-        setPort(ep.port.shortValue()).
-        setSecurityProtocol(ep.securityProtocol.id))
-  }
 
   /**
    * The broker epoch, or -1 if the broker has not yet registered.
@@ -126,7 +116,17 @@ class BrokerLifecycleManager(val config: KafkaConfig,
   private var _clusterId: Uuid = null
 
   /**
-   * The channel manager, or null if this manager has not been started yet.
+   * The listeners which this broker advertises.
+   */
+  private var _advertisedListeners: ListenerCollection = null
+
+  /**
+   * The features supported by this broker.
+   */
+  private var _supportedFeatures: util.Map[String, VersionRange] = null
+
+    /**
+     * The channel manager, or null if this manager has not been started yet.
    * This variable can only be accessed from the event queue thread.
    */
   var _channelManager: BrokerToControllerChannelManager = null
@@ -147,9 +147,11 @@ class BrokerLifecycleManager(val config: KafkaConfig,
    */
   def start(highestMetadataOffsetProvider: () => Long,
             channelManager: BrokerToControllerChannelManager,
-            clusterId: Uuid): Unit = {
+            clusterId: Uuid,
+            advertisedListeners: ListenerCollection,
+            supportedFeatures: util.Map[String, VersionRange]): Unit = {
     eventQueue.append(new StartupEvent(highestMetadataOffsetProvider,
-      channelManager, clusterId))
+      channelManager, clusterId, advertisedListeners, supportedFeatures))
   }
 
   def setReadyToUnfence(): Unit = {
@@ -184,13 +186,17 @@ class BrokerLifecycleManager(val config: KafkaConfig,
 
   class StartupEvent(highestMetadataOffsetProvider: () => Long,
                      channelManager: BrokerToControllerChannelManager,
-                     clusterId: Uuid) extends EventQueue.Event {
+                     clusterId: Uuid,
+                     advertisedListeners: ListenerCollection,
+                     supportedFeatures: util.Map[String, VersionRange]) extends EventQueue.Event {
     override def run(): Unit = {
       _highestMetadataOffsetProvider = highestMetadataOffsetProvider
       _channelManager = channelManager
       _channelManager.start()
       _state = BrokerState.STARTING
       _clusterId = clusterId
+      _advertisedListeners = advertisedListeners
+      _supportedFeatures = supportedFeatures
       eventQueue.scheduleDeferred("initialRegistrationTimeout",
         new DeadlineFunction(time.nanoseconds() + initialTimeoutNs),
         new RegistrationTimeoutEvent())
@@ -201,12 +207,19 @@ class BrokerLifecycleManager(val config: KafkaConfig,
   }
 
   private def sendBrokerRegistration(): Unit = {
+    val features = new BrokerRegistrationRequestData.FeatureCollection()
+    _supportedFeatures.asScala.foreach {
+      case (name, range) => features.add(new BrokerRegistrationRequestData.Feature().
+        setName(name).
+        setMinSupportedVersion(range.min()).
+        setMaxSupportedVersion(range.max()))
+    }
     val data = new BrokerRegistrationRequestData().
         setBrokerId(brokerId).
         setClusterId(_clusterId).
-      //setFeatures(...).
+        setFeatures(features).
         setIncarnationId(incarnationId).
-        setListeners(advertisedListeners).
+        setListeners(_advertisedListeners).
         setRack(rack)
     _channelManager.sendRequest(new BrokerRegistrationRequest.Builder(data),
       new BrokerRegistrationResponseHandler())

@@ -24,7 +24,6 @@ import kafka.log.LogConfig
 import kafka.message.ProducerCompressionCodec
 import kafka.server._
 import kafka.utils.Logging
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.JoinGroupResponseData.JoinGroupResponseMember
@@ -104,9 +103,10 @@ class GroupCoordinator(val brokerId: Int,
   /**
    * Startup logic executed at the same time when the server starts up.
    */
-  def startup(enableMetadataExpiration: Boolean = true): Unit = {
+  def startup(groupMetadataTopicPartitionCount: Int,
+              enableMetadataExpiration: Boolean = true): Unit = {
     info("Starting up.")
-    groupManager.startup(enableMetadataExpiration)
+    groupManager.startup(groupMetadataTopicPartitionCount, enableMetadataExpiration)
     isActive.set(true)
     info("Startup complete.")
   }
@@ -1324,79 +1324,33 @@ object GroupCoordinator {
   val NewMemberJoinTimeoutMs: Int = 5 * 60 * 1000
 
   def apply(config: KafkaConfig,
-            zkClient: KafkaZkClient,
-            replicaManager: ReplicaManager,
-            time: Time,
-            metrics: Metrics): GroupCoordinator = {
-    apply(config, Some(zkClient), None, replicaManager, time, metrics)
-  }
-
-  def apply(config: KafkaConfig,
-            groupMetadataTopicPartitionCountFunc: () => Int,
-            replicaManager: ReplicaManager,
-            time: Time,
-            metrics: Metrics): GroupCoordinator = {
-    apply(config, None, Some(groupMetadataTopicPartitionCountFunc), replicaManager, time, metrics)
-  }
-
-  def apply(config: KafkaConfig,
-            zkClient: Option[KafkaZkClient],
-            groupMetadataTopicPartitionCountFunc: Option[() => Int],
             replicaManager: ReplicaManager,
             time: Time,
             metrics: Metrics): GroupCoordinator = {
     val heartbeatPurgatory = DelayedOperationPurgatory[DelayedHeartbeat]("Heartbeat", config.brokerId)
     val joinPurgatory = DelayedOperationPurgatory[DelayedJoin]("Rebalance", config.brokerId)
-    apply(config, zkClient, groupMetadataTopicPartitionCountFunc, replicaManager, heartbeatPurgatory, joinPurgatory, time, metrics)
+    apply(config, replicaManager, heartbeatPurgatory, joinPurgatory, time, metrics)
   }
 
   def apply(config: KafkaConfig,
-            zkClient: KafkaZkClient,
             replicaManager: ReplicaManager,
             heartbeatPurgatory: DelayedOperationPurgatory[DelayedHeartbeat],
             joinPurgatory: DelayedOperationPurgatory[DelayedJoin],
             time: Time,
             metrics: Metrics): GroupCoordinator = {
-    apply(config, Some(zkClient), None, replicaManager, heartbeatPurgatory, joinPurgatory, time, metrics)
-  }
-
-  def apply(config: KafkaConfig,
-            groupMetadataTopicPartitionCountFunc: () => Int,
-            replicaManager: ReplicaManager,
-            heartbeatPurgatory: DelayedOperationPurgatory[DelayedHeartbeat],
-            joinPurgatory: DelayedOperationPurgatory[DelayedJoin],
-            time: Time,
-            metrics: Metrics): GroupCoordinator = {
-    apply(config, None, Some(groupMetadataTopicPartitionCountFunc), replicaManager, heartbeatPurgatory, joinPurgatory, time, metrics)
-  }
-
-  def apply(config: KafkaConfig,
-            zkClient: Option[KafkaZkClient],
-            groupMetadataTopicPartitionCountFunc: Option[() => Int],
-            replicaManager: ReplicaManager,
-            heartbeatPurgatory: DelayedOperationPurgatory[DelayedHeartbeat],
-            joinPurgatory: DelayedOperationPurgatory[DelayedJoin],
-            time: Time,
-            metrics: Metrics): GroupCoordinator = {
-    if (zkClient.isEmpty && groupMetadataTopicPartitionCountFunc.isEmpty) {
-      throw new IllegalArgumentException("Must supply either a ZK Client or a topic partition count function")
-    }
-    if (zkClient.nonEmpty && groupMetadataTopicPartitionCountFunc.nonEmpty) {
-      throw new IllegalArgumentException("Cannot supply both a ZK Client and a topic partition count function")
-    }
     val offsetConfig = this.offsetConfig(config)
     val groupConfig = GroupConfig(groupMinSessionTimeoutMs = config.groupMinSessionTimeoutMs,
       groupMaxSessionTimeoutMs = config.groupMaxSessionTimeoutMs,
       groupMaxSize = config.groupMaxSize,
       groupInitialRebalanceDelayMs = config.groupInitialRebalanceDelay)
-    val groupMetadataManager = if (zkClient.nonEmpty) {
-      new GroupMetadataManager(config.brokerId, config.interBrokerProtocolVersion, offsetConfig, replicaManager,
-        zkClient.get, time, metrics)
-    } else {
-      new GroupMetadataManager(config.brokerId, config.interBrokerProtocolVersion, offsetConfig, replicaManager,
-        groupMetadataTopicPartitionCountFunc.get, time, metrics)
-    }
-    new GroupCoordinator(config.brokerId, groupConfig, offsetConfig, groupMetadataManager, heartbeatPurgatory, joinPurgatory, time, metrics)
+    val groupMetadataManager = new GroupMetadataManager(config.brokerId,
+      config.interBrokerProtocolVersion,
+      offsetConfig,
+      replicaManager,
+      time,
+      metrics)
+    new GroupCoordinator(config.brokerId, groupConfig, offsetConfig, groupMetadataManager,
+      heartbeatPurgatory, joinPurgatory, time, metrics)
   }
 
   private[group] def offsetConfig(config: KafkaConfig) = OffsetConfig(

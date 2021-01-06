@@ -35,7 +35,6 @@ import kafka.server.{FetchLogEnd, ReplicaManager}
 import kafka.utils.CoreUtils.inLock
 import kafka.utils.Implicits._
 import kafka.utils._
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.internals.ConsumerProtocol
 import org.apache.kafka.common.internals.Topic
@@ -57,19 +56,8 @@ class GroupMetadataManager(brokerId: Int,
                            interBrokerProtocolVersion: ApiVersion,
                            config: OffsetConfig,
                            val replicaManager: ReplicaManager,
-                           groupMetadataTopicPartitionCountFunc: () => Int,
                            time: Time,
                            metrics: Metrics) extends Logging with KafkaMetricsGroup {
-
-  def this(brokerId: Int,
-           interBrokerProtocolVersion: ApiVersion,
-           config: OffsetConfig,
-           replicaManager: ReplicaManager,
-           zkClient: KafkaZkClient,
-           time: Time,
-           metrics: Metrics) = this(brokerId, interBrokerProtocolVersion, config, replicaManager,
-    () => zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.offsetsTopicNumPartitions),
-    time, metrics)
 
   private val compressionType: CompressionType = CompressionType.forId(config.offsetsTopicCompressionCodec.codec)
 
@@ -88,20 +76,7 @@ class GroupMetadataManager(brokerId: Int,
   private val shuttingDown = new AtomicBoolean(false)
 
   /* number of partitions for the consumer metadata topic */
-  private var _groupMetadataTopicPartitionCount: Option[Int] = Option.empty // lazy, once-only evaluation
-  private def groupMetadataTopicPartitionCount: Int = {
-    _groupMetadataTopicPartitionCount match {
-      case Some(partitionCount) => partitionCount
-      case None => synchronized { // make sure we only invoke the function once
-        _groupMetadataTopicPartitionCount match {
-          case Some(partitionCount) => partitionCount // another thread beat us to it
-          case None =>
-            _groupMetadataTopicPartitionCount = Some(groupMetadataTopicPartitionCountFunc())
-            _groupMetadataTopicPartitionCount.get
-        }
-      }
-    }
-  }
+  var groupMetadataTopicPartitionCount: Int = -1
 
   /* single-thread scheduler to handle offset/group metadata cache loading and unloading */
   private val scheduler = new KafkaScheduler(threads = 1, threadNamePrefix = "group-metadata-manager-")
@@ -193,7 +168,13 @@ class GroupMetadataManager(brokerId: Int,
       }
     })
 
-  def startup(enableMetadataExpiration: Boolean): Unit = {
+  def startup(groupMetadataTopicPartitionCount: Int,
+              enableMetadataExpiration: Boolean): Unit = {
+    if (groupMetadataTopicPartitionCount <= 0) {
+      throw new RuntimeException("Can't set groupMetadataTopicPartitionCount to " +
+        s"${groupMetadataTopicPartitionCount}. This value must be positive.")
+    }
+    this.groupMetadataTopicPartitionCount = groupMetadataTopicPartitionCount
     scheduler.startup()
     if (enableMetadataExpiration) {
       scheduler.schedule(name = "delete-expired-group-metadata",
@@ -209,7 +190,12 @@ class GroupMetadataManager(brokerId: Int,
 
   def isPartitionLoading(partition: Int) = inLock(partitionLock) { loadingPartitions.contains(partition) }
 
-  def partitionFor(groupId: String): Int = Utils.abs(groupId.hashCode) % groupMetadataTopicPartitionCount
+  def partitionFor(groupId: String): Int = {
+    if (groupMetadataTopicPartitionCount <= 0) {
+      throw new RuntimeException("GroupMetadataManager has not yet been initialized.")
+    }
+    Utils.abs(groupId.hashCode) % groupMetadataTopicPartitionCount
+  }
 
   def isGroupLocal(groupId: String): Boolean = isPartitionOwned(partitionFor(groupId))
 

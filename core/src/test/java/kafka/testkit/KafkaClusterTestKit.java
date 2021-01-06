@@ -215,6 +215,8 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         "EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT");
                     props.put(KafkaConfig$.MODULE$.ListenersProp(),
                         "EXTERNAL://localhost:0");
+                    props.put(KafkaConfig$.MODULE$.InterBrokerListenerNameProp(),
+                        nodes.interBrokerListenerName().value());
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
 
@@ -238,7 +240,8 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         new Metrics(),
                         OptionConverters.toScala(Optional.of(threadNamePrefix)),
                         JavaConverters.asScala(Collections.<String>emptyList()).toSeq(),
-                        connectFutureManager.future
+                        connectFutureManager.future,
+                        KafkaServer.SUPPORTED_FEATURES()
                     );
                     kip500Brokers.put(node.id(), broker);
                 }

@@ -193,7 +193,8 @@ class Kip500Broker(
       forwardingChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
         time, metrics, config, 60000, "forwarding", threadNamePrefix)
       forwardingChannelManager.start()
-      val forwardingManager = new ForwardingManager(forwardingChannelManager, time, config.requestTimeoutMs.longValue)
+      val forwardingManager = new ForwardingManager(forwardingChannelManager, time,
+        config.requestTimeoutMs.longValue, logContext)
 
       /* start token manager */
       if (config.tokenAuthEnabled) {

@@ -24,14 +24,16 @@ import kafka.utils.Logging
 import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, EnvelopeRequest, EnvelopeResponse, RequestHeader}
-import org.apache.kafka.common.utils.Time
+import org.apache.kafka.common.utils.{LogContext, Time}
 
 import scala.compat.java8.OptionConverters._
 import scala.concurrent.TimeoutException
 
 class ForwardingManager(channelManager: BrokerToControllerChannelManager,
                         time: Time,
-                        retryTimeoutMs: Long) extends Logging {
+                        retryTimeoutMs: Long,
+                        logContext: LogContext) extends Logging {
+  this.logIdent = logContext.logPrefix()
 
   def forwardRequest(request: RequestChannel.Request,
                      responseCallback: AbstractResponse => Unit): Unit = {

@@ -38,7 +38,6 @@ import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.LeaderAndIsrRequest
 import org.apache.kafka.common.security.auth.SecurityProtocol
-import org.apache.kafka.common.utils.LogContext
 import org.apache.kafka.common.{Node, TopicPartition, Uuid}
 
 import scala.collection.mutable.ArrayBuffer
@@ -108,9 +107,6 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  txnCoordinator: TransactionCoordinator,
                                  configHandlers: Map[ConfigResource.Type, ConfigHandler]) extends BrokerMetadataProcessor
   with ConfigRepository with Logging {
-  // used only for onLeadershipChange() (TODO: factor out?)
-  private val apisUtils = new ApisUtils(new LogContext(""),
-    null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
 
   // visible for testing
   private[metadata] var brokerEpoch: Long = -1
@@ -480,7 +476,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       // no need to log results since they already get logged
       replicaManager.becomeLeaderOrFollower(correlationId,
         leaderAndIsrRequest,
-        apisUtils.onLeadershipChange,
+        ApisUtils.onLeadershipChange(groupCoordinator, txnCoordinator, _, _),
         mgr.getCurrentAliveBrokers().values.toSeq)
     }
   }

@@ -223,5 +223,6 @@ object KafkaServer {
   case object BrokerRole extends ProcessRole
   case object ControllerRole extends ProcessRole
 
-  val SUPPORTED_FEATURES = Collections.unmodifiableMap(Map[String, VersionRange]().asJava)
+  val SUPPORTED_FEATURES = Collections.
+    unmodifiableMap[String, VersionRange](Map[String, VersionRange]().asJava)
 }

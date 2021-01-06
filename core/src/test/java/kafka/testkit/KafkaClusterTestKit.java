@@ -223,7 +223,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         time,
                         new Metrics(),
                         OptionConverters.toScala(Optional.of(threadNamePrefix)),
-                        JavaConverters.asScala(Collections.<String>emptyList()).toSeq(),
+                        JavaConverters.asScalaBuffer(Collections.<String>emptyList()).toSeq(),
                         connectFutureManager.future,
                         KafkaServer.SUPPORTED_FEATURES()
                     );

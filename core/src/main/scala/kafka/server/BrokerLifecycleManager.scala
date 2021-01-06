@@ -129,8 +129,8 @@ class BrokerLifecycleManager(val config: KafkaConfig,
    */
   private var _supportedFeatures: util.Map[String, VersionRange] = null
 
-    /**
-     * The channel manager, or null if this manager has not been started yet.
+  /**
+   * The channel manager, or null if this manager has not been started yet.
    * This variable can only be accessed from the event queue thread.
    */
   var _channelManager: BrokerToControllerChannelManager = null

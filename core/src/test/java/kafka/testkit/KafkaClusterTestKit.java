@@ -177,15 +177,10 @@ public class KafkaClusterTestKit implements AutoCloseable {
                             OptionConverters.toScala(Optional.empty()),
                             OptionConverters.toScala(Optional.of(node.id())));
                     TopicPartition metadataPartition = new TopicPartition(KafkaServer.metadataTopicName(), 0);
-                    KafkaRaftManager raftManager = new KafkaRaftManager(
-                            metaProperties,
-                            metadataPartition,
-                            config,
+                    KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
                             Time.SYSTEM,
                             new Metrics());
-                    Kip500Controller controller = new Kip500Controller(
-                        nodes.controllerProperties(node.id()),
-                        config,
+                    Kip500Controller controller = new Kip500Controller(nodes.controllerProperties(node.id()), config,
                         metaLogManager,
                         raftManager,
                         time,
@@ -232,10 +227,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
                     metaLogManager = new LocalLogManager(logContext, node.id(), sharedLogData, threadNamePrefix);
                     metaLogManager.initialize();
-                    Kip500Broker broker = new Kip500Broker(
-                        config,
-                        nodes.brokerProperties(node.id()),
-                        metaLogManager,
+                    Kip500Broker broker = new Kip500Broker(config, nodes.brokerProperties(node.id()), metaLogManager,
                         time,
                         new Metrics(),
                         OptionConverters.toScala(Optional.of(threadNamePrefix)),

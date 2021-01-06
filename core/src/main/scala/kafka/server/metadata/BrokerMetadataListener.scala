@@ -27,7 +27,6 @@ import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.metalog.{MetaLogLeader, MetaLogListener}
-
 import java.util
 import java.util.Properties
 import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
@@ -120,6 +119,8 @@ class BrokerMetadataListener(
   processors: List[BrokerMetadataProcessor],
   eventQueueTimeoutMs: Long = BrokerMetadataListener.DefaultEventQueueTimeoutMs)
     extends MetaLogListener with KafkaMetricsGroup with ConfigRepository {
+
+  this.logIdent = s"[BrokerMetadataListener id=${config.brokerId}] "
 
   if (processors.isEmpty) {
     throw new IllegalArgumentException(s"Empty processors list!")

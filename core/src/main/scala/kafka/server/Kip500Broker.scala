@@ -66,6 +66,10 @@ class Kip500Broker(
 
   import kafka.server.KafkaServer._
 
+  private val logContext: LogContext = new LogContext(s"[Kip500Broker id=${config.brokerId}] ")
+
+  this.logIdent = logContext.logPrefix
+
   val lifecycleManager: BrokerLifecycleManager =
       new BrokerLifecycleManager(config, time, threadNamePrefix)
 
@@ -74,8 +78,6 @@ class Kip500Broker(
   val lock = new ReentrantLock()
   val awaitShutdownCond = lock.newCondition()
   var status: ProcessStatus = SHUTDOWN
-
-  private var logContext: LogContext = null
 
   var dataPlaneRequestProcessor: KafkaApis = null
   var controlPlaneRequestProcessor: KafkaApis = null
@@ -144,9 +146,6 @@ class Kip500Broker(
     if (!maybeChangeStatus(SHUTDOWN, STARTING)) return
     try {
       info("Starting broker")
-
-      logContext = new LogContext(s"[KIP-500 KafkaServer id=${config.brokerId}] ")
-      this.logIdent = logContext.logPrefix
 
       // initialize dynamic broker configs from static config. Any updates will be
       // applied as we process the metadata log.
@@ -314,7 +313,7 @@ class Kip500Broker(
       // We're now ready to unfence the broker.
       lifecycleManager.setReadyToUnfence()
 
-      info("started")
+      info(KafkaBroker.STARTED_MESSAGE)
       maybeChangeStatus(STARTING, STARTED)
     } catch {
       case e: Throwable =>

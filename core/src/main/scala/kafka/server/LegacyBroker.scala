@@ -206,7 +206,7 @@ class LegacyBroker(val config: KafkaConfig,
 
         /* generate brokerId */
         config.brokerId = getOrGenerateBrokerId(preloadedMetaProperties)
-        logContext = new LogContext(s"[Legacy KafkaServer id=${config.brokerId}] ")
+        logContext = new LogContext(s"[LegacyBroker id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
@@ -369,7 +369,7 @@ class LegacyBroker(val config: KafkaConfig,
         startupComplete.set(true)
         isStartingUp.set(false)
         AppInfoParser.registerAppInfo(metricsPrefix, config.brokerId.toString, metrics, time.milliseconds())
-        info("started")
+        info(KafkaBroker.STARTED_MESSAGE)
       }
     }
     catch {

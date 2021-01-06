@@ -133,6 +133,12 @@ object KafkaBroker {
     }
   }
 
+  /**
+   * The log message that we print when the broker has been successfully started.
+   * Since the ducktape system tests look for this, it is best not to change it.
+   */
+  val STARTED_MESSAGE = "Kafka Broker Server started"
+
   val MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS: Long = 120000
 }
 

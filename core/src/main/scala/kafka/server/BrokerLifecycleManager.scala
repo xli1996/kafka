@@ -35,6 +35,10 @@ import scala.jdk.CollectionConverters._
 class BrokerLifecycleManager(val config: KafkaConfig,
                              val time: Time,
                              val threadNamePrefix: Option[String]) extends Logging {
+  val logContext = new LogContext(s"[BrokerLifecycleManager id=${config.brokerId}] ")
+
+  this.logIdent = logContext.logPrefix()
+
   /**
    * The broker id.
    */
@@ -134,9 +138,7 @@ class BrokerLifecycleManager(val config: KafkaConfig,
   /**
    * The event queue.
    */
-  val eventQueue = new KafkaEventQueue(time,
-      new LogContext("[" + threadNamePrefix.getOrElse("") + "BrokerLifeycleManager] "),
-        threadNamePrefix.getOrElse(""))
+  val eventQueue = new KafkaEventQueue(time, logContext, threadNamePrefix.getOrElse(""))
 
   /**
    * Start the BrokerLifecycleManager.

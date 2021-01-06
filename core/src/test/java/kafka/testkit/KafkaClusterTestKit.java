@@ -29,7 +29,6 @@ import kafka.tools.StorageTool;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.network.ListenerName;
@@ -166,30 +165,17 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
                     props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), builder.toString());
-                    setupNodeDirectories(baseDirectory, node.metadataDirectory(),
-                        Collections.emptyList());
-                    KafkaConfig config = new KafkaConfig(props, false,
-                        OptionConverters.toScala(Optional.empty()));
+                    setupNodeDirectories(baseDirectory, node.metadataDirectory(), Collections.emptyList());
+                    KafkaConfig config = new KafkaConfig(props, false, OptionConverters.toScala(Optional.empty()));
 
                     String threadNamePrefix = String.format("controller%d_", node.id());
                     LogContext logContext = new LogContext("[Controller id=" + node.id() + "] ");
 
-                    metaLogManager = new LocalLogManager(
-                        logContext,
-                        node.id(),
-                        sharedLogData,
-                        threadNamePrefix
-                    );
+                    metaLogManager = new LocalLogManager(logContext, node.id(), sharedLogData, threadNamePrefix);
                     metaLogManager.initialize();
-                    MetaProperties properties = MetaProperties.apply(
-                        nodes.clusterId(),
-                        OptionConverters.toScala(Optional.empty()),
-                        OptionConverters.toScala(Optional.of(node.id()))
-                    );
-                    final int fakeId = 100; //Integer.MAX_VALUE;
-                    MetaProperties metaProperties = MetaProperties.apply(Uuid.ZERO_UUID,
-                            OptionConverters.toScala(Optional.of(fakeId)),
-                            OptionConverters.toScala(Optional.empty()));
+                    MetaProperties metaProperties = MetaProperties.apply(nodes.clusterId(),
+                            OptionConverters.toScala(Optional.empty()),
+                            OptionConverters.toScala(Optional.of(node.id())));
                     TopicPartition metadataPartition = new TopicPartition(KafkaServer.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(
                             metaProperties,
@@ -232,24 +218,17 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     props.put(KafkaConfig$.MODULE$.ControllerListenerNamesProp(),
                         "CONTROLLER");
 
-                    setupNodeDirectories(baseDirectory, node.metadataDirectory(),
-                        node.logDataDirectories());
+                    setupNodeDirectories(baseDirectory, node.metadataDirectory(), node.logDataDirectories());
 
                     // Just like above, we set a placeholder voter list here until we
                     //find out what ports the controllers picked.
                     props.put(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(), "");
-                    KafkaConfig config = new KafkaConfig(props, false,
-                        OptionConverters.toScala(Optional.empty()));
+                    KafkaConfig config = new KafkaConfig(props, false, OptionConverters.toScala(Optional.empty()));
 
                     String threadNamePrefix = String.format("broker%d_", node.id());
                     LogContext logContext = new LogContext("[Broker id=" + node.id() + "] ");
 
-                    metaLogManager = new LocalLogManager(
-                        logContext,
-                        node.id(),
-                        sharedLogData,
-                        threadNamePrefix
-                    );
+                    metaLogManager = new LocalLogManager(logContext, node.id(), sharedLogData, threadNamePrefix);
                     metaLogManager.initialize();
                     Kip500Broker broker = new Kip500Broker(
                         config,

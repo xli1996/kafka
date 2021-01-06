@@ -24,10 +24,6 @@ import org.apache.kafka.metadata.BrokerState
 import org.junit.rules.Timeout
 import org.junit.{Assert, Rule, Test}
 
-import java.time.Duration
-import java.util.Collections
-import java.util.concurrent.TimeUnit
-
 class Kip500ClusterTest {
   @Rule
   def globalTimeout = Timeout.millis(120000)

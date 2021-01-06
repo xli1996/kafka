@@ -47,7 +47,6 @@ class Kip500ControllerTest {
       cluster.startup()
       val adminClient = Admin.create(cluster.controllerClientProperties())
       try {
-        // List topics and verify all the topics were created
         val listTopicsResult = adminClient.listTopics()
         val listOfTopics = listTopicsResult.names().get(10, TimeUnit.SECONDS)
         assert(listOfTopics.size() == 0)

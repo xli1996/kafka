@@ -133,7 +133,6 @@ object KafkaBroker {
     }
   }
 
-
   val MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS: Long = 120000
 }
 

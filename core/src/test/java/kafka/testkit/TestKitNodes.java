@@ -151,6 +151,10 @@ public class TestKitNodes {
             OptionConverters.toScala(Optional.empty()));
     }
 
+    public ListenerName interBrokerListenerName() {
+        return new ListenerName("EXTERNAL");
+    }
+
     public ListenerName externalListenerName() {
         return new ListenerName("EXTERNAL");
     }

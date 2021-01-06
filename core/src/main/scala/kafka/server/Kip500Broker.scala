@@ -208,9 +208,9 @@ class Kip500Broker(
 
       // Create transaction coordinator, but don't start it until we've started replica manager.
       // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-      transactionCoordinator = TransactionCoordinator(config, replicaManager, new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"),
-        createTemporaryProducerIdManager(), getTransactionTopicPartitionCount,
-        metrics, metadataCache, Time.SYSTEM)
+      transactionCoordinator = TransactionCoordinator(config, replicaManager,
+        new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"),
+        createTemporaryProducerIdManager(), metrics, metadataCache, Time.SYSTEM)
 
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
@@ -306,7 +306,8 @@ class Kip500Broker(
       replicaManager.startup()
       groupCoordinator.startup(metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).
         getOrElse(config.offsetsTopicPartitions))
-      transactionCoordinator.startup()
+      transactionCoordinator.startup(metadataCache.numPartitions(Topic.TRANSACTION_STATE_TOPIC_NAME).
+        getOrElse(config.transactionTopicPartitions))
 
       socketServer.startProcessingRequests(authorizerFutures)
 
@@ -349,17 +350,6 @@ class Kip500Broker(
     val zkClient: Option[KafkaZkClient] = None
     new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
       brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager, None, Some(_brokerMetadataListenerFuture))
-  }
-
-  /**
-   * Gets the partition count of the transaction log topic from the metadata log.
-   * If the topic does not exist, the default partition count is returned.
-   */
-  def getTransactionTopicPartitionCount(): Int = {
-    // wait until we are caught up on the metadata log if necessary
-    lifecycleManager.initialCatchUpFuture.get()
-    // now return the number of partitions if the topic exists, otherwise the default
-    metadataCache.numPartitions(Topic.TRANSACTION_STATE_TOPIC_NAME).getOrElse(config.transactionTopicPartitions)
   }
 
   /**

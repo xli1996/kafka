@@ -25,7 +25,6 @@ import javax.management.ObjectName
 import kafka.log.{AppendOrigin, Log}
 import kafka.server.{FetchDataInfo, FetchLogEnd, LogOffsetMetadata, ReplicaManager}
 import kafka.utils.{MockScheduler, Pool, TestUtils}
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.Topic.TRANSACTION_STATE_TOPIC_NAME
 import org.apache.kafka.common.metrics.{JmxReporter, KafkaMetricsContext, Metrics}
@@ -54,19 +53,14 @@ class TransactionStateManagerTest {
 
   val time = new MockTime()
   val scheduler = new MockScheduler(time)
-  val zkClient: KafkaZkClient = EasyMock.createNiceMock(classOf[KafkaZkClient])
   val replicaManager: ReplicaManager = EasyMock.createNiceMock(classOf[ReplicaManager])
 
-  EasyMock.expect(zkClient.getTopicPartitionCount(TRANSACTION_STATE_TOPIC_NAME))
-    .andReturn(Some(numPartitions))
-    .anyTimes()
-
-  EasyMock.replay(zkClient)
   val metrics = new Metrics()
 
   val txnConfig = TransactionConfig()
-  val transactionManager: TransactionStateManager = new TransactionStateManager(0, zkClient, scheduler,
+  val transactionManager: TransactionStateManager = new TransactionStateManager(0, scheduler,
     replicaManager, txnConfig, time, metrics)
+  transactionManager.startup(numPartitions)
 
   val transactionalId1: String = "one"
   val transactionalId2: String = "two"
@@ -87,7 +81,6 @@ class TransactionStateManagerTest {
 
   @After
   def tearDown(): Unit = {
-    EasyMock.reset(zkClient, replicaManager)
     transactionManager.shutdown()
   }
 

@@ -57,6 +57,7 @@ class TransactionCoordinatorTest {
     transactionMarkerChannelManager,
     time,
     new LogContext)
+  coordinator.setTransactionTopicPartitionCount(TransactionLog.DefaultNumPartitions)
 
   var result: InitProducerIdResult = _
   var error: Errors = Errors.NONE
@@ -966,7 +967,7 @@ class TransactionCoordinatorTest {
 
     EasyMock.replay(transactionManager, transactionMarkerChannelManager)
 
-    coordinator.startup(false)
+    coordinator.startup(TransactionLog.DefaultNumPartitions, false)
     time.sleep(TransactionStateManager.DefaultAbortTimedOutTransactionsIntervalMs)
     scheduler.tick()
     EasyMock.verify(transactionManager)
@@ -1011,7 +1012,7 @@ class TransactionCoordinatorTest {
 
     EasyMock.replay(transactionManager, transactionMarkerChannelManager)
 
-    coordinator.startup(false)
+    coordinator.startup(TransactionLog.DefaultNumPartitions, false)
     time.sleep(TransactionStateManager.DefaultAbortTimedOutTransactionsIntervalMs)
     scheduler.tick()
     EasyMock.verify(transactionManager)
@@ -1049,7 +1050,7 @@ class TransactionCoordinatorTest {
 
     EasyMock.replay(transactionManager, transactionMarkerChannelManager)
 
-    coordinator.startup(false)
+    coordinator.startup(TransactionLog.DefaultNumPartitions, false)
     time.sleep(TransactionStateManager.DefaultAbortTimedOutTransactionsIntervalMs)
     scheduler.tick()
     EasyMock.verify(transactionManager)

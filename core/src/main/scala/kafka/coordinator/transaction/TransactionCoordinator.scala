@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import kafka.server.{KafkaConfig, MetadataCache, ReplicaManager}
 import kafka.utils.{Logging, Scheduler}
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.metrics.Metrics
@@ -31,24 +30,10 @@ import org.apache.kafka.common.requests.TransactionResult
 import org.apache.kafka.common.utils.{LogContext, ProducerIdAndEpoch, Time}
 
 object TransactionCoordinator {
-
-  def apply(config: KafkaConfig,
-            replicaManager: ReplicaManager,
-            scheduler: Scheduler,
-            zkClient: KafkaZkClient,
-            metrics: Metrics,
-            metadataCache: MetadataCache,
-            time: Time): TransactionCoordinator = {
-    TransactionCoordinator(config, replicaManager, scheduler, new ProducerIdManager(config.brokerId, zkClient),
-      () => zkClient.getTopicPartitionCount(Topic.TRANSACTION_STATE_TOPIC_NAME).getOrElse(config.transactionTopicPartitions),
-      metrics, metadataCache, time)
-  }
-
   def apply(config: KafkaConfig,
             replicaManager: ReplicaManager,
             scheduler: Scheduler,
             producerIdGenerator: ProducerIdGenerator,
-            transactionTopicPartitionCountFunc: () => Int,
             metrics: Metrics,
             metadataCache: MetadataCache,
             time: Time): TransactionCoordinator = {
@@ -64,8 +49,8 @@ object TransactionCoordinator {
       config.transactionRemoveExpiredTransactionalIdCleanupIntervalMs,
       config.requestTimeoutMs)
 
-    val txnStateManager = new TransactionStateManager(config.brokerId, transactionTopicPartitionCountFunc, scheduler, replicaManager, txnConfig,
-      time, metrics)
+    val txnStateManager = new TransactionStateManager(config.brokerId, scheduler,
+      replicaManager, txnConfig, time, metrics)
 
     val logContext = new LogContext(s"[TransactionCoordinator id=${config.brokerId}] ")
     val txnMarkerChannelManager = TransactionMarkerChannelManager(config, metrics, metadataCache, txnStateManager,
@@ -99,6 +84,7 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
                              txnMarkerChannelManager: TransactionMarkerChannelManager,
                              time: Time,
                              logContext: LogContext) extends Logging {
+
   this.logIdent = logContext.logPrefix
 
   import TransactionCoordinator._
@@ -602,20 +588,28 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
   /**
    * Startup logic executed at the same time when the server starts up.
    */
-  def startup(enableTransactionalIdExpiration: Boolean = true): Unit = {
+  def startup(transactionTopicPartitionCount: Int,
+              enableTransactionalIdExpiration: Boolean = true): Unit = {
     info("Starting up.")
+    txnManager.startup(transactionTopicPartitionCount)
+    if (enableTransactionalIdExpiration) {
+      txnManager.enableTransactionalIdExpiration()
+    }
     scheduler.startup()
     scheduler.schedule("transaction-abort",
       () => abortTimedOutTransactions(onEndTransactionComplete),
       txnConfig.abortTimedOutTransactionsIntervalMs,
       txnConfig.abortTimedOutTransactionsIntervalMs
     )
-    if (enableTransactionalIdExpiration)
-      txnManager.enableTransactionalIdExpiration()
     txnMarkerChannelManager.start()
     isActive.set(true)
 
     info("Startup complete.")
+  }
+
+  // Visible for testing only.
+  def setTransactionTopicPartitionCount(count: Int) = {
+    txnManager.startup(count)
   }
 
   /**

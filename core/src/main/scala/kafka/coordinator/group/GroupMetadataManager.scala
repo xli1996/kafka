@@ -76,7 +76,7 @@ class GroupMetadataManager(brokerId: Int,
   private val shuttingDown = new AtomicBoolean(false)
 
   /* number of partitions for the consumer metadata topic */
-  var groupMetadataTopicPartitionCount: Int = -1
+  private var groupMetadataTopicPartitionCount: Int = -1
 
   /* single-thread scheduler to handle offset/group metadata cache loading and unloading */
   private val scheduler = new KafkaScheduler(threads = 1, threadNamePrefix = "group-metadata-manager-")
@@ -182,6 +182,11 @@ class GroupMetadataManager(brokerId: Int,
         period = config.offsetsRetentionCheckIntervalMs,
         unit = TimeUnit.MILLISECONDS)
     }
+  }
+
+  // Visible for testing
+  def setGroupMetadataTopicPartitionCount(groupMetadataTopicPartitionCount: Int): Unit = {
+    this.groupMetadataTopicPartitionCount = groupMetadataTopicPartitionCount
   }
 
   def currentGroups: Iterable[GroupMetadata] = groupMetadataCache.values

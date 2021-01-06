@@ -204,7 +204,7 @@ class Kip500Broker(
 
       // Create group coordinator, but don't start it until we've started replica manager.
       // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-      groupCoordinator = GroupCoordinator(config, () => getGroupMetadataTopicPartitionCount(), replicaManager, Time.SYSTEM, metrics)
+      groupCoordinator = GroupCoordinator(config, replicaManager, Time.SYSTEM, metrics)
 
       // Create transaction coordinator, but don't start it until we've started replica manager.
       // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
@@ -304,7 +304,8 @@ class Kip500Broker(
       logManager.startup()
       // Start other services that we've delayed starting, in the appropriate order.
       replicaManager.startup()
-      groupCoordinator.startup()
+      groupCoordinator.startup(metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).
+        getOrElse(config.offsetsTopicPartitions))
       transactionCoordinator.startup()
 
       socketServer.startProcessingRequests(authorizerFutures)
@@ -348,17 +349,6 @@ class Kip500Broker(
     val zkClient: Option[KafkaZkClient] = None
     new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
       brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager, None, Some(_brokerMetadataListenerFuture))
-  }
-
-  /**
-   * Gets the partition count of the group metadata topic from the metadata log.
-   * If the topic does not exist, the configured partition count is returned.
-   */
-  def getGroupMetadataTopicPartitionCount(): Int = {
-    // wait until we are caught up on the metadata log if necessary
-    lifecycleManager.initialCatchUpFuture.get()
-    // now return the number of partitions if the topic exists, otherwise the default
-    metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.offsetsTopicPartitions)
   }
 
   /**

@@ -22,7 +22,6 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 
-import kafka.controller.KafkaController
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.{ProducerIdGenerator, TransactionCoordinator}
 import kafka.log.LogManager
@@ -278,11 +277,9 @@ class Kip500Broker(
 
       // Start processing requests once we've caught up on the metadata log, recovered logs if necessary,
       // and started all services that we previously delayed starting.
-      val adminManager: LegacyAdminManager = null
-      val kafkaController: KafkaController = null
       dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
-        replicaManager, adminManager, groupCoordinator, transactionCoordinator,
-        kafkaController, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
+        replicaManager, null, groupCoordinator, transactionCoordinator,
+        null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
         fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener)
 
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
@@ -290,8 +287,8 @@ class Kip500Broker(
 
       socketServer.controlPlaneRequestChannelOpt.foreach { controlPlaneRequestChannel =>
         controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
-          replicaManager, adminManager, groupCoordinator, transactionCoordinator,
-          kafkaController, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
+          replicaManager, null, groupCoordinator, transactionCoordinator,
+          null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
           fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener)
 
         controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,

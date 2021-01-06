@@ -592,15 +592,15 @@ class TransactionCoordinator(txnConfig: TransactionConfig,
               enableTransactionalIdExpiration: Boolean = true): Unit = {
     info("Starting up.")
     txnManager.startup(transactionTopicPartitionCount)
-    if (enableTransactionalIdExpiration) {
-      txnManager.enableTransactionalIdExpiration()
-    }
     scheduler.startup()
     scheduler.schedule("transaction-abort",
       () => abortTimedOutTransactions(onEndTransactionComplete),
       txnConfig.abortTimedOutTransactionsIntervalMs,
       txnConfig.abortTimedOutTransactionsIntervalMs
     )
+    if (enableTransactionalIdExpiration) {
+      txnManager.enableTransactionalIdExpiration()
+    }
     txnMarkerChannelManager.start()
     isActive.set(true)
 

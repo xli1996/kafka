@@ -176,7 +176,8 @@ class Kip500Broker(
       // Create and start the socket server acceptor threads so that the bound port is known.
       // Delay starting processors until the end of the initialization sequence to ensure
       // that credentials have been loaded before processing authentications.
-      socketServer = new SocketServer(config, metrics, time, credentialProvider)
+      socketServer = new SocketServer(config, metrics, time, credentialProvider, Some(config.brokerId),
+        Some(new LogContext(s"[SocketServer brokerId=${config.controllerId}] ")))
       socketServer.startup(startProcessingRequests = false)
 
       // Create replica manager, but don't start it until we've started log manager.

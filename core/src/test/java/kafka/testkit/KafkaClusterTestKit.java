@@ -360,14 +360,14 @@ public class KafkaClusterTestKit implements AutoCloseable {
     public void startup() throws ExecutionException, InterruptedException {
         List<Future<?>> futures = new ArrayList<>();
         try {
+            for (KafkaRaftManager raftManager : raftManagers.values()) {
+                futures.add(executorService.submit(raftManager::startup));
+            }
             for (Kip500Controller controller : controllers.values()) {
                 futures.add(executorService.submit(controller::startup));
             }
             for (Kip500Broker broker : kip500Brokers.values()) {
                 futures.add(executorService.submit(broker::startup));
-            }
-            for (KafkaRaftManager raftManager : raftManagers.values()) {
-                futures.add(executorService.submit(raftManager::startup));
             }
             for (Future<?> future: futures) {
                 future.get();
@@ -445,11 +445,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
         List<Future<?>> futures = new ArrayList<>();
         try {
             controllerQuorumVotersFutureManager.close();
-            for (Kip500Controller controller : controllers.values()) {
-                futures.add(executorService.submit(controller::shutdown));
-            }
             for (Kip500Broker kip500Broker : kip500Brokers.values()) {
                 futures.add(executorService.submit(kip500Broker::shutdown));
+            }
+            for (Kip500Controller controller : controllers.values()) {
+                futures.add(executorService.submit(controller::shutdown));
             }
             for (KafkaRaftManager raftManager : raftManagers.values()) {
                 futures.add(executorService.submit(raftManager::shutdown));

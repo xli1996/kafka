@@ -47,7 +47,7 @@ class Kip500ClusterTest {
     val cluster = new KafkaClusterTestKit.Builder(
       new TestKitNodes.Builder().
         setNumKip500BrokerNodes(3).
-        setNumControllerNodes(3).build()).build()
+        setNumControllerNodes(1).build()).build()
     try {
       cluster.format()
       cluster.startup()

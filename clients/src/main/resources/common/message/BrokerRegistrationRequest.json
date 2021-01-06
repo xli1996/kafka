@@ -32,7 +32,7 @@
           "about": "The name of the endpoint." },
         { "name": "Host", "type": "string", "versions": "0+",
           "about": "The hostname." },
-        { "name": "Port", "type": "int32", "versions": "0+",
+        { "name": "Port", "type": "uint16", "versions": "0+",
           "about": "The port." },
         { "name": "SecurityProtocol", "type": "int16", "versions": "0+",
           "about": "The security protocol." }

@@ -46,16 +46,7 @@ trait ControllerNodeProvider {
 class MetadataCacheControllerNodeProvider(val metadataCache: kafka.server.MetadataCache,
                                           val listenerName: ListenerName) extends ControllerNodeProvider {
   override def controllerNode(): Option[Node] = {
-    val snapshot = metadataCache.readState()
-    snapshot.controllerId match {
-      case None => None
-      case Some(id) => {
-          snapshot.aliveNodes.get(id) match {
-          case None => None
-          case Some(listenerMap) => listenerMap.get(listenerName)
-        }
-      }
-    }
+    metadataCache.controller().flatMap(_.endPoints.get(listenerName.value()))
   }
 }
 

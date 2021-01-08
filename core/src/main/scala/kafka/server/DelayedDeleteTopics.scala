@@ -78,6 +78,6 @@ class DelayedDeleteTopics(delayMs: Long,
   override def onExpiration(): Unit = { }
 
   private def topicExists(topic: String): Boolean = {
-    adminManager.metadataCache.contains(topic)
+    adminManager.metadataCache.partitions.iterator(topic).hasNext
   }
 }

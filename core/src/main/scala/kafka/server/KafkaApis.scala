@@ -1216,12 +1216,12 @@ class KafkaApis(val requestChannel: RequestChannel,
     if (topic == null)
       throw new IllegalArgumentException("topic must not be null")
 
-    val aliveBrokers = metadataCache.getAliveBrokers
+    val numAliveBrokers = metadataCache.numAliveBrokers()
 
     topic match {
       case GROUP_METADATA_TOPIC_NAME =>
-        if (aliveBrokers.size < config.offsetsTopicReplicationFactor) {
-          error(s"Number of alive brokers '${aliveBrokers.size}' does not meet the required replication factor " +
+        if (numAliveBrokers < config.offsetsTopicReplicationFactor) {
+          error(s"Number of alive brokers '${numAliveBrokers}' does not meet the required replication factor " +
             s"'${config.offsetsTopicReplicationFactor}' for the offsets topic (configured via " +
             s"'${KafkaConfig.OffsetsTopicReplicationFactorProp}'). This error can be ignored if the cluster is starting up " +
             s"and not all brokers are up yet.")
@@ -1231,8 +1231,8 @@ class KafkaApis(val requestChannel: RequestChannel,
             groupCoordinator.offsetsTopicConfigs)
         }
       case TRANSACTION_STATE_TOPIC_NAME =>
-        if (aliveBrokers.size < config.transactionTopicReplicationFactor) {
-          error(s"Number of alive brokers '${aliveBrokers.size}' does not meet the required replication factor " +
+        if (numAliveBrokers < config.transactionTopicReplicationFactor) {
+          error(s"Number of alive brokers '${numAliveBrokers}' does not meet the required replication factor " +
             s"'${config.transactionTopicReplicationFactor}' for the transactions state topic (configured via " +
             s"'${KafkaConfig.TransactionsTopicReplicationFactorProp}'). This error can be ignored if the cluster is starting up " +
             s"and not all brokers are up yet.")
@@ -1246,8 +1246,9 @@ class KafkaApis(val requestChannel: RequestChannel,
   }
 
   private def getOrCreateInternalTopic(topic: String, listenerName: ListenerName): MetadataResponseData.MetadataResponseTopic = {
-    val topicMetadata = metadataCache.getTopicMetadata(Set(topic), listenerName)
-    topicMetadata.headOption.getOrElse(createInternalTopic(topic))
+    if (!metadataCache.contains(topic)) {
+      createInternalTopic(topic)
+    }
   }
 
   private def getTopicMetadata(allowAutoTopicCreation: Boolean, isFetchAllMetadata: Boolean,
@@ -1292,9 +1293,10 @@ class KafkaApis(val requestChannel: RequestChannel,
     val metadataRequest = request.body[MetadataRequest]
     val requestVersion = request.header.apiVersion
 
-    val topics = if (metadataRequest.isAllTopics)
+    val topics = if (metadataRequest.isAllTopics) {
+      metadataCache.partitions.iterator().
       metadataCache.getAllTopics()
-    else
+    } else
       metadataRequest.topics.asScala.toSet
 
     val authorizedForDescribeTopics = filterByAuthorized(request.context, DESCRIBE, TOPIC,
@@ -3104,7 +3106,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(error)(partitionErrors)
     } else {
       val partitions = if (electionRequest.data.topicPartitions == null) {
-        metadataCache.getAllPartitions()
+        metadataCache.partitions.iterator().asScala.map(_.toTopicPartition()).toSet
       } else {
         electionRequest.topicPartitions
       }

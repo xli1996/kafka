@@ -96,7 +96,7 @@ class DelayedCreatePartitions(delayMs: Long,
   }
 
   private def isMissingLeader(topic: String, partition: Int): Boolean = {
-    val partitionInfo = adminManager.metadataCache.getPartitionInfo(topic, partition)
-    partitionInfo.forall(_.leader == LeaderAndIsr.NoLeader)
+    val partitionInfo = adminManager.metadataCache.partitions.get(topic, partition)
+    partitionInfo.forall(_.leaderId < 0)
   }
 }

@@ -38,8 +38,7 @@ object MetadataBrokers {
 }
 
 class MetadataBrokersBuilder(brokers: MetadataBrokers) {
-  var brokerList = brokers.brokerList.clone().
-      asInstanceOf[util.ArrayList[MetadataBroker]]
+  var brokerList = brokers.cloneBrokerList()
 
   val newBrokersList = new util.ArrayList[MetadataBroker]
 
@@ -57,14 +56,26 @@ class MetadataBrokersBuilder(brokers: MetadataBrokers) {
       brokerList.addAll(newBrokersList)
       brokerList.sort(MetadataBrokers.COMPARATOR)
     }
-    val result = MetadataBrokers(brokerList)
+    val result = new MetadataBrokers(brokerList)
     brokerList = null
     result
   }
 }
 
-case class MetadataBrokers(brokerList: util.ArrayList[MetadataBroker]) {
+class MetadataBrokers(private val brokerList: util.ArrayList[MetadataBroker]) {
   def iterator(): MetadataBrokersIterator = MetadataBrokersIterator(brokerList, 0)
+
+  def cloneBrokerList(): util.ArrayList[MetadataBroker] =
+    brokerList.clone().asInstanceOf[util.ArrayList[MetadataBroker]]
+
+  def getAlive(id: Int): Option[MetadataBroker] = {
+    val broker = get(id)
+    if (broker.isDefined && !broker.get.fenced) {
+      broker
+    } else {
+      None
+    }
+  }
 
   def get(id: Int): Option[MetadataBroker] = {
     val exemplar = new MetadataBroker(id)

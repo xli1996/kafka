@@ -22,7 +22,7 @@ import java.util
 import java.util.{Collections, Comparator}
 
 import kafka.server.MetadataPartitions.NAME_COMPARATOR
-import org.apache.kafka.common.Uuid
+import org.apache.kafka.common.{TopicPartition, Uuid}
 
 
 case class MetadataPartition(topicName: String,
@@ -33,6 +33,9 @@ case class MetadataPartition(topicName: String,
                              replicas: Seq[Int] = Seq(),
                              isr: Seq[Int] = Seq(),
                              offlineReplicas: Seq[Int] = Seq()) {
+  def toTopicPartition(): TopicPartition = {
+    new TopicPartition(topicName, partitionIndex)
+  }
 }
 
 class MetadataPartitionTopicNameComparator extends Comparator[MetadataPartition] with Serializable {
@@ -57,19 +60,17 @@ class MetadataPartitionTopicIdComparator extends Comparator[MetadataPartition] w
   }
 }
 
-
 object MetadataPartitions {
   val NAME_COMPARATOR = new MetadataPartitionTopicNameComparator()
   val ID_COMPARATOR = new MetadataPartitionTopicIdComparator()
 }
 
 class MetadataPartitionsBuilder(partitions: MetadataPartitions) {
-  var nameList = partitions.nameList.clone().
-      asInstanceOf[util.ArrayList[MetadataPartition]]
-  var idList = partitions.idList.clone().
+  private var nameList = partitions.cloneNameList()
+  private var idList = partitions.cloneIdList()
     asInstanceOf[util.ArrayList[MetadataPartition]]
-  val newNameListEntries = new util.ArrayList[MetadataPartition]
-  val newIdListEntries = new util.ArrayList[MetadataPartition]
+  private val newNameListEntries = new util.ArrayList[MetadataPartition]
+  private val newIdListEntries = new util.ArrayList[MetadataPartition]
 
   def set(partition: MetadataPartition): Unit = {
     val nameResult = Collections.binarySearch(nameList, partition, MetadataPartitions.NAME_COMPARATOR)
@@ -102,17 +103,23 @@ class MetadataPartitionsBuilder(partitions: MetadataPartitions) {
   }
 }
 
-case class MetadataPartitions(nameList: util.ArrayList[MetadataPartition],
-                              idList: util.ArrayList[MetadataPartition]) {
-  def iterator(): MetadataPartitionsIterator = MetadataPartitionsIterator(nameList, 0)
+class MetadataPartitions(private val nameList: util.ArrayList[MetadataPartition],
+                         private val idList: util.ArrayList[MetadataPartition]) {
+  def cloneNameList(): util.ArrayList[MetadataPartition] =
+    nameList.clone().asInstanceOf[util.ArrayList[MetadataPartition]]
 
-  def iterator(topicName: String): MetadataPartitionsIterator = {
+  def cloneIdList(): util.ArrayList[MetadataPartition] =
+    idList.clone().asInstanceOf[util.ArrayList[MetadataPartition]]
+
+  def iterator(): PartitionsIterator = new PartitionsIterator(nameList, 0)
+
+  def iterator(topicName: String): PartitionsInTopicIterator = {
     val exemplar = MetadataPartition(topicName, 0)
     val result = Collections.binarySearch(nameList, exemplar, NAME_COMPARATOR)
     if (result < 0) {
-      MetadataPartitionsIterator(nameList, nameList.size())
+      new PartitionsInTopicIterator(nameList, nameList.size(), topicName)
     } else {
-      MetadataPartitionsIterator(nameList, result)
+      new PartitionsInTopicIterator(nameList, result, topicName)
     }
   }
 
@@ -127,8 +134,40 @@ case class MetadataPartitions(nameList: util.ArrayList[MetadataPartition],
   }
 }
 
-case class MetadataPartitionsIterator(partitionList: util.ArrayList[MetadataPartition],
-                                      var index: Int) extends util.Iterator[MetadataPartition] {
+class PartitionsInTopicIterator(private val partitionList: util.ArrayList[MetadataPartition],
+                                private var index: Int,
+                                private val topic: String) extends util.Iterator[MetadataPartition] {
+  var _next: MetadataPartition = null
+
+  override def hasNext: Boolean = {
+    if (_next != null) {
+      true
+    } else if (index >= partitionList.size()) {
+      false
+    } else {
+      val partition = partitionList.get(index)
+      if (!partition.topicName.equals(topic)) {
+        false
+      } else {
+        _next = partition
+        index = index + 1
+        true
+      }
+    }
+  }
+
+  override def next(): MetadataPartition = {
+    if (!hasNext()) {
+      throw new NoSuchElementException()
+    }
+    val result = _next
+    _next = null
+    result
+  }
+}
+
+class PartitionsIterator(private val partitionList: util.ArrayList[MetadataPartition],
+                         private var index: Int) extends util.Iterator[MetadataPartition] {
   override def hasNext: Boolean = index < partitionList.size()
 
   override def next(): MetadataPartition = {

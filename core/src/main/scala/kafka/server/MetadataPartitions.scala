@@ -17,142 +17,145 @@
 
 package kafka.server
 
-import java.io.Serializable
 import java.util
-import java.util.{Collections, Comparator}
+import java.util.Collections
+import java.util.function.BiConsumer
 
-import kafka.server.MetadataPartitions.NAME_COMPARATOR
 import org.apache.kafka.common.{TopicPartition, Uuid}
 
 
 case class MetadataPartition(topicName: String,
                              partitionIndex: Int,
-                             topicUuid: Uuid = null,
-                             leaderId: Int = -1,
-                             leaderEpoch: Int = -1,
-                             replicas: Seq[Int] = Seq(),
-                             isr: Seq[Int] = Seq(),
-                             offlineReplicas: Seq[Int] = Seq()) {
+                             topicUuid: Uuid,
+                             leaderId: Int,
+                             leaderEpoch: Int,
+                             replicas: util.List[Integer],
+                             isr: util.List[Integer],
+                             offlineReplicas: Seq[Int]) {
   def toTopicPartition(): TopicPartition = {
     new TopicPartition(topicName, partitionIndex)
   }
 }
 
-class MetadataPartitionTopicNameComparator extends Comparator[MetadataPartition] with Serializable {
-  override def compare(a: MetadataPartition, b: MetadataPartition): Int = {
-    val topicNameResult = a.topicName.compareTo(b.topicName)
-    if (topicNameResult != 0) {
-      topicNameResult
-    } else {
-      Integer.compare(a.partitionIndex, b.partitionIndex)
-    }
-  }
-}
-
-class MetadataPartitionTopicIdComparator extends Comparator[MetadataPartition] with Serializable {
-  override def compare(a: MetadataPartition, b: MetadataPartition): Int = {
-    val uuidResult = a.topicUuid.compareTo(b.topicUuid)
-    if (uuidResult != 0) {
-      uuidResult
-    } else {
-      Integer.compare(a.partitionIndex, b.partitionIndex)
-    }
-  }
-}
-
-object MetadataPartitions {
-  val NAME_COMPARATOR = new MetadataPartitionTopicNameComparator()
-  val ID_COMPARATOR = new MetadataPartitionTopicIdComparator()
-}
-
-class MetadataPartitionsBuilder(partitions: MetadataPartitions) {
-  private var nameList = partitions.cloneNameList()
-  private var idList = partitions.cloneIdList()
-    asInstanceOf[util.ArrayList[MetadataPartition]]
-  private val newNameListEntries = new util.ArrayList[MetadataPartition]
-  private val newIdListEntries = new util.ArrayList[MetadataPartition]
+class MetadataPartitionsBuilder(prevPartitions: MetadataPartitions) {
+  private var newNameMap = prevPartitions.copyNameMap()
+  private var newIdMap = prevPartitions.copyIdMap()
+  private val changed = new util.IdentityHashMap[Any, Boolean]()
 
   def set(partition: MetadataPartition): Unit = {
-    val nameResult = Collections.binarySearch(nameList, partition, MetadataPartitions.NAME_COMPARATOR)
-    if (nameResult >= 0) {
-      nameList.set(nameResult, partition)
-    } else {
-      newNameListEntries.add(partition)
+    val prevNameMapping = newIdMap.get(partition.topicUuid)
+    if (prevNameMapping == null) {
+      newIdMap.put(partition.topicUuid, partition.topicName)
+    } else if (!prevNameMapping.equals(partition.topicName)) {
+      throw new RuntimeException("Inconsistent topic ID mappings: topic " +
+        s"${partition.topicUuid} was formerly known as ${prevNameMapping}, but now is " +
+        s"known as ${partition.topicName}")
     }
-    val uuidResult = Collections.binarySearch(idList, partition, MetadataPartitions.ID_COMPARATOR)
-    if (uuidResult >= 0) {
-      idList.set(uuidResult, partition)
+    val prevPartitionMap = newNameMap.get(partition.topicName)
+    val newPartitionMap = if (prevPartitionMap == null) {
+      val m = new util.HashMap[Int, MetadataPartition](1)
+      changed.put(m, true)
+      m
+    } else if (changed.containsKey(prevPartitionMap)) {
+      prevPartitionMap
     } else {
-      newIdListEntries.add(partition)
+      val m = new util.HashMap[Int, MetadataPartition](prevPartitionMap.size() + 1)
+      m.putAll(prevPartitionMap)
+      changed.put(m, true)
+      m
+    }
+    newPartitionMap.put(partition.partitionIndex, partition)
+    newNameMap.put(partition.topicName, newPartitionMap)
+  }
+
+  def remove(topicName: String, partitionId: Int): Unit = {
+    val prevPartitionMap = newNameMap.get(topicName)
+    if (prevPartitionMap != null) {
+      if (changed.containsKey(prevPartitionMap)) {
+        prevPartitionMap.remove(partitionId)
+      } else {
+        val newPartitionMap = new util.HashMap[Int, MetadataPartition](prevPartitionMap.size() - 1)
+        prevPartitionMap.forEach(new BiConsumer[Int, MetadataPartition]() {
+          override def accept(key: Int, value: MetadataPartition): Unit =
+            if (!key.equals(partitionId)) {
+              newPartitionMap.put(key, value)
+            }
+        })
+        changed.put(newPartitionMap, true)
+        newNameMap.put(topicName, newPartitionMap)
+      }
     }
   }
 
   def build(): MetadataPartitions = {
-    if (!newNameListEntries.isEmpty()) {
-      nameList.addAll(newNameListEntries)
-      nameList.sort(MetadataPartitions.NAME_COMPARATOR)
-    }
-    if (!newIdListEntries.isEmpty()) {
-      idList.addAll(newIdListEntries)
-      idList.sort(MetadataPartitions.ID_COMPARATOR)
-    }
-    val result = MetadataPartitions(nameList, idList)
-    nameList = null
-    idList = null
+    val result = new MetadataPartitions(newNameMap, newIdMap)
+    newNameMap = null
+    newIdMap = null
     result
   }
 }
 
-class MetadataPartitions(private val nameList: util.ArrayList[MetadataPartition],
-                         private val idList: util.ArrayList[MetadataPartition]) {
-  def cloneNameList(): util.ArrayList[MetadataPartition] =
-    nameList.clone().asInstanceOf[util.ArrayList[MetadataPartition]]
+class MetadataPartitions(private val nameMap: util.Map[String, util.Map[Int, MetadataPartition]],
+                         private val idMap: util.Map[Uuid, String]) {
 
-  def cloneIdList(): util.ArrayList[MetadataPartition] =
-    idList.clone().asInstanceOf[util.ArrayList[MetadataPartition]]
+  def copyNameMap(): util.Map[String, util.Map[Int, MetadataPartition]] = {
+    val copy = new util.HashMap[String, util.Map[Int, MetadataPartition]]
+    val iterator = nameMap.entrySet().iterator()
+    while (iterator.hasNext) {
+      val entry = iterator.next()
+      copy.put(entry.getKey, entry.getValue)
+    }
+    copy
+  }
 
-  def iterator(): PartitionsIterator = new PartitionsIterator(nameList, 0)
+  def copyIdMap(): util.Map[Uuid, String] = {
+    val copy = new util.HashMap[Uuid, String]
+    val iterator = idMap.entrySet().iterator()
+    while (iterator.hasNext) {
+      val entry = iterator.next()
+      copy.put(entry.getKey, entry.getValue)
+    }
+    copy
+  }
 
-  def iterator(topicName: String): PartitionsInTopicIterator = {
-    val exemplar = MetadataPartition(topicName, 0)
-    val result = Collections.binarySearch(nameList, exemplar, NAME_COMPARATOR)
-    if (result < 0) {
-      new PartitionsInTopicIterator(nameList, nameList.size(), topicName)
+  def allPartitions(): util.Iterator[MetadataPartition] = new AllPartitionsIterator(nameMap)
+
+  def topicPartitions(topicName: String): util.Iterator[MetadataPartition] = {
+    val partitionMap = nameMap.get(topicName)
+    if (partitionMap == null) {
+      Collections.emptyIterator()
     } else {
-      new PartitionsInTopicIterator(nameList, result, topicName)
+      partitionMap.values().iterator()
     }
   }
 
   def get(topicName: String, partitionId: Int): Option[MetadataPartition] = {
-    val exemplar = MetadataPartition(topicName, partitionId)
-    val result = Collections.binarySearch(nameList, exemplar, NAME_COMPARATOR)
-    if (result < 0) {
-      None
-    } else {
-      Some(nameList.get(result))
-    }
+    Option(nameMap.get(topicName)).flatMap(_.get(partitionId))
   }
 }
 
-class PartitionsInTopicIterator(private val partitionList: util.ArrayList[MetadataPartition],
-                                private var index: Int,
-                                private val topic: String) extends util.Iterator[MetadataPartition] {
+class AllPartitionsIterator(nameMap: util.Map[String, util.Map[Int, MetadataPartition]])
+    extends util.Iterator[MetadataPartition] {
+
+  val outerIterator = nameMap.values().iterator()
+
+  var innerIterator: util.Iterator[MetadataPartition] = Collections.emptyIterator()
+
   var _next: MetadataPartition = null
 
   override def hasNext: Boolean = {
     if (_next != null) {
       true
-    } else if (index >= partitionList.size()) {
-      false
     } else {
-      val partition = partitionList.get(index)
-      if (!partition.topicName.equals(topic)) {
-        false
-      } else {
-        _next = partition
-        index = index + 1
-        true
+      while (!innerIterator.hasNext) {
+        if (!outerIterator.hasNext) {
+          return false
+        } else {
+          innerIterator = outerIterator.next().values().iterator()
+        }
       }
+      _next = innerIterator.next()
+      true
     }
   }
 
@@ -162,20 +165,6 @@ class PartitionsInTopicIterator(private val partitionList: util.ArrayList[Metada
     }
     val result = _next
     _next = null
-    result
-  }
-}
-
-class PartitionsIterator(private val partitionList: util.ArrayList[MetadataPartition],
-                         private var index: Int) extends util.Iterator[MetadataPartition] {
-  override def hasNext: Boolean = index < partitionList.size()
-
-  override def next(): MetadataPartition = {
-    if (!hasNext()) {
-      throw new NoSuchElementException()
-    }
-    val result = partitionList.get(index)
-    index = index + 1
     result
   }
 }

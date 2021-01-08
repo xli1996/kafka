@@ -63,6 +63,8 @@ class MetadataBrokersBuilder(brokers: MetadataBrokers) {
 }
 
 class MetadataBrokers(private val brokerList: util.ArrayList[MetadataBroker]) {
+  def size(): Int = brokerList.size()
+
   def iterator(): MetadataBrokersIterator = MetadataBrokersIterator(brokerList, 0)
 
   def cloneBrokerList(): util.ArrayList[MetadataBroker] =

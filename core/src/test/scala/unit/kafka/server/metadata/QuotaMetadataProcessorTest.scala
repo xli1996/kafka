@@ -25,7 +25,7 @@ import org.apache.kafka.common.config.internals.QuotaConfigs
 import org.apache.kafka.common.errors.{InvalidRequestException, UnsupportedVersionException}
 import org.apache.kafka.common.metadata.QuotaRecord
 import org.apache.kafka.common.metrics.{Metrics, Quota}
-import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilter, ClientQuotaFilterComponent}
+import org.apache.kafka.common.quota.{ClientQuotaEntity, ClientQuotaFilterComponent}
 import org.junit.Assert.{assertEquals, assertFalse, assertThrows}
 import org.junit.{Before, Test}
 import org.mockito.ArgumentMatchers.{any, eq => _eq}

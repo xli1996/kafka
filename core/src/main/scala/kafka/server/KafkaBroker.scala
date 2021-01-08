@@ -31,6 +31,7 @@ import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.common.internals.ClusterResourceListeners
 import org.apache.kafka.common.metrics.{KafkaMetricsContext, MetricConfig, Metrics, MetricsReporter, Sensor}
 import org.apache.kafka.common.ClusterResource
+import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.metadata.BrokerState
 import org.apache.kafka.server.authorizer.Authorizer
@@ -132,6 +133,11 @@ object KafkaBroker {
     }
   }
 
+  /**
+   * The log message that we print when the broker has been successfully started.
+   * Since the ducktape system tests look for this, it is best not to change it.
+   */
+  val STARTED_MESSAGE = "Kafka Broker Server started"
 
   val MIN_INCREMENTAL_FETCH_SESSION_EVICTION_MS: Long = 120000
 }
@@ -144,6 +150,7 @@ trait KafkaBroker extends Logging with KafkaMetricsGroup {
   def startup(): Unit
   def shutdown(): Unit
   def awaitShutdown(): Unit
+  def boundPort(listenerName: ListenerName): Int
   def metrics(): Metrics
   def currentState(): BrokerState
   def clusterId(): String

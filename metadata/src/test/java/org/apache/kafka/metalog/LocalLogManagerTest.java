@@ -19,21 +19,14 @@ package org.apache.kafka.metalog;
 
 import org.apache.kafka.common.metadata.RegisterBrokerRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
-import org.apache.kafka.metalog.LocalLogManager.LockRegistry;
 import org.apache.kafka.test.TestUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.metalog.MockMetaLogManagerListener.COMMIT;
@@ -44,67 +37,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @Timeout(value = 40)
 public class LocalLogManagerTest {
     private static final Logger log = LoggerFactory.getLogger(LocalLogManagerTest.class);
-
-    /**
-     * Test that when a bunch of threads race to take a lock registry lock, only one
-     * thread at a time can get it.
-     */
-    @Test
-    public void testLockRegistryWithRacingThreads() throws Exception {
-        List<Thread> threads = new ArrayList<>();
-        try (LocalLogManagerTestEnv env = LocalLogManagerTestEnv.createWithMockListeners(0)) {
-            final Path leaderPath = env.dir().toPath().resolve("leader").toAbsolutePath();
-            final LockRegistry registry = new LockRegistry();
-            final AtomicInteger threadsWithLock = new AtomicInteger(0);
-            try (FileChannel leaderChannel = FileChannel.open(leaderPath,
-                    StandardOpenOption.WRITE, StandardOpenOption.CREATE)) {
-                for (int i = 0; i < 20; i++) {
-                    Thread thread = new Thread(() -> {
-                        try {
-                            registry.lock(leaderPath.toString(), leaderChannel, () -> {
-                                if (threadsWithLock.getAndIncrement() != 0) {
-                                    env.firstError().compareAndSet(null, "threadsWithLock " +
-                                        "was non-zero when we got the lock.");
-                                    return;
-                                }
-                                try {
-                                    Thread.sleep(0, 1000);
-                                } catch (InterruptedException e) {
-                                }
-                                threadsWithLock.decrementAndGet();
-                            });
-                        } catch (Throwable t) {
-                            env.firstError().compareAndSet(null, "unexpected " +
-                                t.getClass().getName() + " :" + t.getMessage());
-                        }
-                    });
-                    threads.add(thread);
-                    thread.start();
-                }
-                joinAll(threads);
-            }
-            assertEquals(null, env.firstError.get());
-        } finally {
-            joinAll(threads);
-        }
-    }
-
-    private static void joinAll(List<Thread> threads) throws Exception {
-        for (Thread thread : threads) {
-            thread.join();
-        }
-    }
-
-    @Test
-    public void testRoundTripLeaderInfo() {
-        MetaLogLeader leader = new MetaLogLeader(123, 123456789L);
-        ByteBuffer buffer = ByteBuffer.allocate(LocalLogManager.leaderSize(leader));
-        buffer.clear();
-        LocalLogManager.writeLeader(buffer, leader);
-        buffer.flip();
-        MetaLogLeader leader2 = LocalLogManager.readLeader(buffer);
-        assertEquals(leader, leader2);
-    }
 
     /**
      * Test creating a LocalLogManager and closing it.
@@ -147,7 +79,7 @@ public class LocalLogManagerTest {
                     Thread.sleep(1);
                     next = env.waitForLeader();
                 }
-                long expectedNextEpoch = cur.epoch() + 1;
+                long expectedNextEpoch = cur.epoch() + 2;
                 assertEquals(expectedNextEpoch, next.epoch(), "Expected next epoch to be " + expectedNextEpoch +
                     ", but found  " + next);
                 cur = next;
@@ -195,9 +127,9 @@ public class LocalLogManagerTest {
                 new ApiMessageAndVersion(new RegisterBrokerRecord().setBrokerId(0), (short) 0),
                 new ApiMessageAndVersion(new RegisterBrokerRecord().setBrokerId(1), (short) 0),
                 new ApiMessageAndVersion(new RegisterBrokerRecord().setBrokerId(2), (short) 0));
-            assertEquals(2, activeLogManager.scheduleWrite(epoch, messages));
+            assertEquals(3, activeLogManager.scheduleWrite(epoch, messages));
             for (LocalLogManager logManager : env.logManagers()) {
-                waitForLastCommittedOffset(2, logManager);
+                waitForLastCommittedOffset(3, logManager);
             }
             List<MockMetaLogManagerListener> listeners = env.logManagers().stream().
                 map(m -> (MockMetaLogManagerListener) m.listeners().get(0)).

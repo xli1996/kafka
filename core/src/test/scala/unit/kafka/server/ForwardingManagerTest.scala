@@ -19,6 +19,7 @@ package kafka.server
 import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.util.Optional
+
 import kafka.network
 import kafka.network.RequestChannel
 import kafka.utils.MockTime
@@ -31,6 +32,7 @@ import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, AlterConfigsRequest, AlterConfigsResponse, EnvelopeRequest, EnvelopeResponse, RequestContext, RequestHeader, RequestTestUtils}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
 import org.apache.kafka.common.security.authenticator.DefaultKafkaPrincipalBuilder
+import org.apache.kafka.common.utils.LogContext
 import org.junit.Assert._
 import org.junit.Test
 import org.mockito.ArgumentMatchers._
@@ -45,7 +47,8 @@ class ForwardingManagerTest {
 
   @Test
   def testResponseCorrelationIdMismatch(): Unit = {
-    val forwardingManager = new ForwardingManager(brokerToController, time, Long.MaxValue)
+    val forwardingManager = new ForwardingManager(brokerToController, time, Long.MaxValue,
+      new LogContext())
     val requestCorrelationId = 27
     val envelopeCorrelationId = 39
     val clientPrincipal = new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "client")

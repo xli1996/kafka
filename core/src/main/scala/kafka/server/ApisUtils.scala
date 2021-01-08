@@ -40,6 +40,30 @@ import org.apache.kafka.server.authorizer.{Action, AuthorizationResult, Authoriz
 
 import scala.jdk.CollectionConverters._
 
+object ApisUtils {
+  def onLeadershipChange(groupCoordinator: GroupCoordinator,
+                         txnCoordinator: TransactionCoordinator,
+                         updatedLeaders: Iterable[Partition],
+                         updatedFollowers: Iterable[Partition]): Unit = {
+    // for each new leader or follower, call coordinator to handle consumer group migration.
+    // this callback is invoked under the replica state change lock to ensure proper order of
+    // leadership changes
+    updatedLeaders.foreach { partition =>
+      if (partition.topic == Topic.GROUP_METADATA_TOPIC_NAME)
+        groupCoordinator.onElection(partition.partitionId)
+      else if (partition.topic == Topic.TRANSACTION_STATE_TOPIC_NAME)
+        txnCoordinator.onElection(partition.partitionId, partition.getLeaderEpoch)
+    }
+
+    updatedFollowers.foreach { partition =>
+      if (partition.topic == Topic.GROUP_METADATA_TOPIC_NAME)
+        groupCoordinator.onResignation(partition.partitionId)
+      else if (partition.topic == Topic.TRANSACTION_STATE_TOPIC_NAME)
+        txnCoordinator.onResignation(partition.partitionId, Some(partition.getLeaderEpoch))
+    }
+  }
+}
+
 /**
  * Helper class for request handlers. Provides common functionality around throttling, authorizations, and error handling
  */
@@ -155,27 +179,5 @@ class ApisUtils(
   def sendNoOpResponseExemptThrottle(request: RequestChannel.Request): Unit = {
     quotas.request.maybeRecordExempt(request)
     requestChannel.sendResponse(request, None, None)
-  }
-
-  def onLeadershipChange(updatedLeaders: Iterable[Partition], updatedFollowers: Iterable[Partition]): Unit = {
-    if (groupCoordinator.isEmpty || txnCoordinator.isEmpty) {
-      throw new IllegalStateException("Need both group and txn coordinators")
-    }
-    // for each new leader or follower, call coordinator to handle consumer group migration.
-    // this callback is invoked under the replica state change lock to ensure proper order of
-    // leadership changes
-    updatedLeaders.foreach { partition =>
-      if (partition.topic == Topic.GROUP_METADATA_TOPIC_NAME)
-        groupCoordinator.get.onElection(partition.partitionId)
-      else if (partition.topic == Topic.TRANSACTION_STATE_TOPIC_NAME)
-        txnCoordinator.get.onElection(partition.partitionId, partition.getLeaderEpoch)
-    }
-
-    updatedFollowers.foreach { partition =>
-      if (partition.topic == Topic.GROUP_METADATA_TOPIC_NAME)
-        groupCoordinator.get.onResignation(partition.partitionId)
-      else if (partition.topic == Topic.TRANSACTION_STATE_TOPIC_NAME)
-        txnCoordinator.get.onResignation(partition.partitionId, Some(partition.getLeaderEpoch))
-    }
   }
 }

@@ -42,7 +42,7 @@ class Kip500ControllerTest {
     try {
       cluster.format()
       cluster.startup()
-      val adminClient = Admin.create(cluster.clientProperties())
+      val adminClient = Admin.create(cluster.controllerClientProperties())
       try {
       } finally  {
         adminClient.close()

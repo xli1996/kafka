@@ -28,7 +28,6 @@ import kafka.server.{Defaults, FetchLogEnd, ReplicaManager}
 import kafka.utils.CoreUtils.{inReadLock, inWriteLock}
 import kafka.utils.{Logging, Pool, Scheduler}
 import kafka.utils.Implicits._
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.metrics.stats.{Avg, Max}
@@ -37,7 +36,7 @@ import org.apache.kafka.common.record.{FileRecords, MemoryRecords, SimpleRecord}
 import org.apache.kafka.common.requests.ProduceResponse.PartitionResponse
 import org.apache.kafka.common.requests.TransactionResult
 import org.apache.kafka.common.utils.{Time, Utils}
-import org.apache.kafka.common.{KafkaException, TopicPartition}
+import org.apache.kafka.common.TopicPartition
 
 import scala.jdk.CollectionConverters._
 import scala.collection.mutable
@@ -72,23 +71,11 @@ object TransactionStateManager {
  * </ul>
  */
 class TransactionStateManager(brokerId: Int,
-                              transactionTopicPartitionCountFunc: () => Int,
                               scheduler: Scheduler,
                               replicaManager: ReplicaManager,
                               config: TransactionConfig,
                               time: Time,
                               metrics: Metrics) extends Logging {
-  def this(brokerId: Int,
-           zkClient: KafkaZkClient,
-           scheduler: Scheduler,
-           replicaManager: ReplicaManager,
-           config: TransactionConfig,
-           time: Time,
-           metrics: Metrics) = {
-    this(brokerId, () => zkClient.getTopicPartitionCount(Topic.TRANSACTION_STATE_TOPIC_NAME).getOrElse(config.transactionLogNumPartitions),
-      scheduler, replicaManager, config, time, metrics)
-  }
-
   this.logIdent = "[Transaction State Manager " + brokerId + "]: "
 
   type SendTxnMarkersCallback = (Int, TransactionResult, TransactionMetadata, TxnTransitMetadata) => Unit
@@ -106,20 +93,7 @@ class TransactionStateManager(brokerId: Int,
   private[transaction] val transactionMetadataCache: mutable.Map[Int, TxnMetadataCacheEntry] = mutable.Map()
 
   /** number of partitions for the transaction log topic */
-  private var _transactionTopicPartitionCount: Option[Int] = Option.empty // lazy, once-only evaluation
-  private def transactionTopicPartitionCount: Int = {
-    _transactionTopicPartitionCount match {
-      case Some(partitionCount) => partitionCount
-      case None => synchronized { // make sure we only invoke the function once
-        _transactionTopicPartitionCount match {
-          case Some(partitionCount) => partitionCount // another thread beat us to it
-          case None =>
-            _transactionTopicPartitionCount = Some(transactionTopicPartitionCountFunc())
-            _transactionTopicPartitionCount.get
-        }
-      }
-    }
-  }
+  private var _transactionTopicPartitionCount = -1
 
   /** setup metrics*/
   private val partitionLoadSensor = metrics.sensor(TransactionStateManager.LoadTimeSensor)
@@ -130,6 +104,10 @@ class TransactionStateManager(brokerId: Int,
   partitionLoadSensor.add(metrics.metricName("partition-load-time-avg",
     TransactionStateManager.MetricsGroup,
     "The avg time it took to load the partitions in the last 30sec"), new Avg())
+
+  def startup(transactionTopicPartitionCount: Int) = {
+    _transactionTopicPartitionCount = transactionTopicPartitionCount
+  }
 
   // visible for testing only
   private[transaction] def addLoadingPartition(partitionId: Int, coordinatorEpoch: Int): Unit = {
@@ -297,7 +275,12 @@ class TransactionStateManager(brokerId: Int,
     props
   }
 
-  def partitionFor(transactionalId: String): Int = Utils.abs(transactionalId.hashCode) % transactionTopicPartitionCount
+  def partitionFor(transactionalId: String): Int = {
+    if (_transactionTopicPartitionCount <= 0) {
+      throw new RuntimeException("TransactionStateManager has not been initialized yet.")
+    }
+    Utils.abs(transactionalId.hashCode) % _transactionTopicPartitionCount
+  }
 
   private def loadTransactionMetadata(topicPartition: TopicPartition, coordinatorEpoch: Int): Pool[String, TransactionMetadata] =  {
     def logEndOffset = replicaManager.getLogEndOffset(topicPartition).getOrElse(-1L)
@@ -405,7 +388,6 @@ class TransactionStateManager(brokerId: Int,
     def loadTransactions(startTimeMs: java.lang.Long): Unit = {
       val schedulerTimeMs = time.milliseconds() - startTimeMs
       info(s"Loading transaction metadata from $topicPartition at epoch $coordinatorEpoch")
-      validateTransactionTopicPartitionCountIsStable()
 
       val loadedTransactions = loadTransactionMetadata(topicPartition, coordinatorEpoch)
       val endTimeMs = time.milliseconds()
@@ -484,13 +466,6 @@ class TransactionStateManager(brokerId: Int,
           info(s"No cached transaction metadata found for $topicPartition during become-follower transition")
       }
     }
-  }
-
-  private def validateTransactionTopicPartitionCountIsStable(): Unit = {
-    val alreadyDeterminedPartitionCount = transactionTopicPartitionCount
-    val curTransactionTopicPartitionCount = transactionTopicPartitionCountFunc()
-    if (alreadyDeterminedPartitionCount != curTransactionTopicPartitionCount)
-      throw new KafkaException(s"Transaction topic number of partitions has changed from $alreadyDeterminedPartitionCount to $curTransactionTopicPartitionCount")
   }
 
   def appendTransactionToLog(transactionalId: String,

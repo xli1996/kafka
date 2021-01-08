@@ -17,13 +17,14 @@
 
 package kafka.server
 
-import java.util.Properties
+import java.util.{Collections, Properties}
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
 import kafka.utils.{MockTime, TestUtils}
 import org.apache.kafka.clients.{ManualMetadataUpdater, Metadata, MockClient}
 import org.apache.kafka.common.{Node, Uuid}
 import org.apache.kafka.common.internals.ClusterResourceListeners
+import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
 import org.apache.kafka.common.message.BrokerRegistrationResponseData
 import org.apache.kafka.common.protocol.Errors
 import org.apache.kafka.common.requests.BrokerRegistrationResponse
@@ -62,6 +63,13 @@ class BrokerLifecycleManagerTest {
     val channelManager = new BrokerToControllerChannelManager(mockClient,
       metadataUpdater, controllerNodeProvider, time, 60000, config, "channelManager", None)
     val clusterId = Uuid.fromString("x4AJGXQSRnephtTZzujw4w")
+    val advertisedListeners = new ListenerCollection()
+    config.advertisedListeners.foreach { ep =>
+      advertisedListeners.add(new Listener().setHost(ep.host).
+        setName(ep.listenerName.value()).
+        setPort(ep.port.shortValue()).
+        setSecurityProtocol(ep.securityProtocol.id))
+    }
   }
 
   @Test
@@ -77,7 +85,8 @@ class BrokerLifecycleManagerTest {
     val manager = new BrokerLifecycleManager(context.config, context.time, None)
     Assert.assertEquals(BrokerState.NOT_RUNNING, manager.state())
     manager.start(() => context.highestMetadataOffset.get(),
-      context.channelManager, context.clusterId)
+      context.channelManager, context.clusterId, context.advertisedListeners,
+      Collections.emptyMap())
     TestUtils.retry(60000) {
       Assert.assertEquals(BrokerState.STARTING, manager.state())
     }
@@ -94,7 +103,8 @@ class BrokerLifecycleManagerTest {
     context.mockClient.prepareResponseFrom(new BrokerRegistrationResponse(
       new BrokerRegistrationResponseData().setBrokerEpoch(1000)), controllerNode)
     manager.start(() => context.highestMetadataOffset.get(),
-      context.channelManager, context.clusterId)
+      context.channelManager, context.clusterId, context.advertisedListeners,
+      Collections.emptyMap())
     TestUtils.retry(10000) {
       context.mockClient.wakeup()
       Assert.assertEquals(1000L, manager.brokerEpoch())
@@ -116,7 +126,8 @@ class BrokerLifecycleManagerTest {
     newDuplicateRegistrationResponse()
     Assert.assertEquals(1, context.mockClient.futureResponses().size)
     manager.start(() => context.highestMetadataOffset.get(),
-      context.channelManager, context.clusterId)
+      context.channelManager, context.clusterId, context.advertisedListeners,
+      Collections.emptyMap())
     // We should send the first registration request and get a failure immediately
     TestUtils.retry(60000) {
       context.mockClient.wakeup()

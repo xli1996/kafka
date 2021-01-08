@@ -28,7 +28,6 @@ import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.metalog.{MetaLogLeader, MetaLogListener}
-
 import java.util
 import java.util.Properties
 import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
@@ -74,16 +73,6 @@ sealed trait BrokerMetadataEvent
  * @param lastOffset the metadata offset of the last message in the batch
  */
 final case class MetadataLogEvent(apiMessages: util.List[ApiMessage], lastOffset: Long) extends BrokerMetadataEvent
-
-/**
- * A register-broker event that occurs when the broker heartbeat receives a successful registration response.
- * It will only occur once in the lifetime of the broker process, and it will occur before
- * any metadata log message batches appear.  The listener injects this event into the event stream,
- * and processors will receive it immediately.
- *
- * @param brokerEpoch the epoch assigned to the broker by the active controller
- */
-final case class RegisterBrokerEvent(brokerEpoch: Long) extends BrokerMetadataEvent
 
 /**
  * A fence-broker event that occurs when either:
@@ -134,6 +123,8 @@ class BrokerMetadataListener(
   processors: List[BrokerMetadataProcessor],
   eventQueueTimeoutMs: Long = BrokerMetadataListener.DefaultEventQueueTimeoutMs)
     extends MetaLogListener with KafkaMetricsGroup with ConfigRepository {
+
+  this.logIdent = s"[BrokerMetadataListener id=${config.brokerId}] "
 
   if (processors.isEmpty) {
     throw new IllegalArgumentException(s"Empty processors list!")
@@ -247,8 +238,6 @@ class BrokerMetadataListener(
           _currentMetadataOffset = logEvent.lastOffset
         case fenceBrokerEvent: FenceBrokerEvent =>
           process(fenceBrokerEvent)
-        case registerBrokerEvent: RegisterBrokerEvent =>
-          process(registerBrokerEvent)
       }
     }
   }

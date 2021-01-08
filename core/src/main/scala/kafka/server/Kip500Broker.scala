@@ -17,11 +17,11 @@
 
 package kafka.server
 
+import java.util
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
-import kafka.cluster.{Broker, EndPoint}
-import kafka.controller.KafkaController
+
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.{ProducerIdGenerator, TransactionCoordinator}
 import kafka.log.LogManager
@@ -32,22 +32,20 @@ import kafka.server.KafkaBroker.metricsPrefix
 import kafka.server.metadata.{BrokerMetadataListener, QuotaCache}
 import kafka.utils.{CoreUtils, KafkaScheduler}
 import kafka.zk.KafkaZkClient
-import org.apache.kafka.common.feature.{Features, SupportedVersionRange}
 import org.apache.kafka.common.internals.Topic
-import org.apache.kafka.common.message.BrokerRegistrationRequestData.{FeatureCollection, Listener, ListenerCollection}
+import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
 import org.apache.kafka.common.metrics.Metrics
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.security.scram.internals.ScramMechanism
 import org.apache.kafka.common.security.token.delegation.internals.DelegationTokenCache
 import org.apache.kafka.common.utils.{AppInfoParser, LogContext, Time}
-import org.apache.kafka.common.{Endpoint, KafkaException}
-import org.apache.kafka.metadata.BrokerState
+import org.apache.kafka.common.{ClusterResource, Endpoint, KafkaException}
+import org.apache.kafka.metadata.{BrokerState, VersionRange}
 import org.apache.kafka.metalog.MetaLogManager
 import org.apache.kafka.server.authorizer.Authorizer
 
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.{Map, Seq, mutable}
+import scala.collection.{Map, Seq}
 import scala.jdk.CollectionConverters._
 
 /**
@@ -61,10 +59,15 @@ class Kip500Broker(
   val metrics: Metrics,
   val threadNamePrefix: Option[String],
   val initialOfflineDirs: Seq[String],
-  val controllerQuorumVotersFuture: CompletableFuture[String]
+  val controllerQuorumVotersFuture: CompletableFuture[String],
+  val supportedFeatures: util.Map[String, VersionRange]
 ) extends KafkaBroker {
 
   import kafka.server.KafkaServer._
+
+  private val logContext: LogContext = new LogContext(s"[Kip500Broker id=${config.brokerId}] ")
+
+  this.logIdent = logContext.logPrefix
 
   val lifecycleManager: BrokerLifecycleManager =
       new BrokerLifecycleManager(config, time, threadNamePrefix)
@@ -74,8 +77,6 @@ class Kip500Broker(
   val lock = new ReentrantLock()
   val awaitShutdownCond = lock.newCondition()
   var status: ProcessStatus = SHUTDOWN
-
-  private var logContext: LogContext = null
 
   var dataPlaneRequestProcessor: KafkaApis = null
   var controlPlaneRequestProcessor: KafkaApis = null
@@ -148,9 +149,6 @@ class Kip500Broker(
     try {
       info("Starting broker")
 
-      logContext = new LogContext(s"[KIP-500 KafkaServer id=${config.brokerId}] ")
-      this.logIdent = logContext.logPrefix
-
       // initialize dynamic broker configs from static config. Any updates will be
       // applied as we process the metadata log.
       config.dynamicConfig.initialize() // Currently we don't wait for catch-up on the metadata log.  TODO?
@@ -181,7 +179,8 @@ class Kip500Broker(
       // Create and start the socket server acceptor threads so that the bound port is known.
       // Delay starting processors until the end of the initialization sequence to ensure
       // that credentials have been loaded before processing authentications.
-      socketServer = new SocketServer(config, metrics, time, credentialProvider)
+      socketServer = new SocketServer(config, metrics, time, credentialProvider, Some(config.brokerId),
+        Some(new LogContext(s"[SocketServer brokerId=${config.controllerId}] ")))
       socketServer.startup(startProcessingRequests = false)
 
       // Create replica manager, but don't start it until we've started log manager.
@@ -197,7 +196,8 @@ class Kip500Broker(
       forwardingChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
         time, metrics, config, 60000, "forwarding", threadNamePrefix)
       forwardingChannelManager.start()
-      val forwardingManager = new ForwardingManager(forwardingChannelManager, time, config.requestTimeoutMs.longValue)
+      val forwardingManager = new ForwardingManager(forwardingChannelManager, time,
+        config.requestTimeoutMs.longValue, logContext)
 
       /* start token manager */
       if (config.tokenAuthEnabled) {
@@ -208,13 +208,13 @@ class Kip500Broker(
 
       // Create group coordinator, but don't start it until we've started replica manager.
       // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-      groupCoordinator = GroupCoordinator(config, () => getGroupMetadataTopicPartitionCount(), replicaManager, Time.SYSTEM, metrics)
+      groupCoordinator = GroupCoordinator(config, replicaManager, Time.SYSTEM, metrics)
 
       // Create transaction coordinator, but don't start it until we've started replica manager.
       // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-      transactionCoordinator = TransactionCoordinator(config, replicaManager, new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"),
-        createTemporaryProducerIdManager(), getTransactionTopicPartitionCount,
-        metrics, metadataCache, Time.SYSTEM)
+      transactionCoordinator = TransactionCoordinator(config, replicaManager,
+        new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"),
+        createTemporaryProducerIdManager(), metrics, metadataCache, Time.SYSTEM)
 
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
@@ -228,45 +228,52 @@ class Kip500Broker(
           logManager, socketServer, quotaCache))
       brokerMetadataListener.start()
 
+      val networkListeners = new ListenerCollection()
+      config.advertisedListeners.foreach { ep =>
+        networkListeners.add(new Listener().
+          setHost(ep.host).
+          setName(ep.listenerName.value()).
+          setPort(socketServer.boundPort(ep.listenerName)).
+          setSecurityProtocol(ep.securityProtocol.id))
+      }
       lifecycleManager.start(() => brokerMetadataListener.currentMetadataOffset(),
         BrokerToControllerChannelManager(controllerNodeProvider, time, metrics, config,
           config.brokerSessionTimeoutMs.toLong, "heartbeat", threadNamePrefix),
-        metaProps.clusterId)
+        metaProps.clusterId, networkListeners, supportedFeatures)
 
       // Register a listener with the Raft layer to receive metadata event notifications
       metaLogManager.register(brokerMetadataListener)
 
-      val listeners = new ListenerCollection()
-      config.advertisedListeners.foreach { ep =>
-        listeners.add(new Listener().setHost(ep.host).setName(ep.listenerName.value()).setPort(ep.port.shortValue())
-          .setSecurityProtocol(ep.securityProtocol.id))
+      val endpoints = new util.ArrayList[Endpoint](networkListeners.size())
+      var interBrokerListener: Endpoint = null
+      networkListeners.iterator().forEachRemaining(listener => {
+        val endPoint = new Endpoint(listener.name(),
+          SecurityProtocol.forId(listener.securityProtocol()),
+          listener.host(), listener.port())
+        endpoints.add(endPoint)
+        if (listener.name().equals(config.interBrokerListenerName.value())) {
+          interBrokerListener = endPoint
+        }
+      })
+      if (interBrokerListener == null) {
+        throw new RuntimeException("Unable to find inter-broker listener " +
+          config.interBrokerListenerName.value() + ". Found listener(s): " +
+          endpoints.asScala.map(ep => ep.listenerName().orElse("(none)")).mkString(", "))
       }
-
-      val features = new FeatureCollection()
-
-      val endPoints = new ArrayBuffer[EndPoint](listeners.size())
-      listeners.iterator().forEachRemaining(listener => {
-        endPoints += new EndPoint(listener.host(), listener.port(), new ListenerName(listener.name()),
-          SecurityProtocol.forId(listener.securityProtocol()))
-      })
-      val supportedFeaturesMap = mutable.Map[String, SupportedVersionRange]()
-      features.iterator().forEachRemaining(feature => {
-        supportedFeaturesMap(feature.name()) = new SupportedVersionRange(feature.minSupportedVersion(), feature.maxSupportedVersion())
-      })
-
-      val broker = Broker(config.brokerId, endPoints, config.rack, Features.supportedFeatures(supportedFeaturesMap.asJava))
+      val authorizerInfo = KafkaAuthorizerServerInfo(new ClusterResource(clusterId),
+        config.brokerId, endpoints, interBrokerListener)
 
       /* Get the authorizer and initialize it if one is specified.*/
       authorizer = config.authorizer
       authorizer.foreach(_.configure(config.originals))
       val authorizerFutures: Map[Endpoint, CompletableFuture[Void]] = authorizer match {
         case Some(authZ) =>
-          authZ.start(broker.toServerInfo(clusterId, config)).asScala.map { case (ep, cs) =>
+          authZ.start(authorizerInfo).asScala.map { case (ep, cs) =>
             ep -> cs.toCompletableFuture
           }
         case None =>
-          broker.endPoints.map { ep =>
-            ep.toJava -> CompletableFuture.completedFuture[Void](null)
+          authorizerInfo.endpoints.asScala.map { ep =>
+            ep -> CompletableFuture.completedFuture[Void](null)
           }.toMap
       }
 
@@ -276,24 +283,19 @@ class Kip500Broker(
 
       // Start processing requests once we've caught up on the metadata log, recovered logs if necessary,
       // and started all services that we previously delayed starting.
-      val adminManager: LegacyAdminManager = null
-      val zkClient: KafkaZkClient = null
-      val kafkaController: KafkaController = null
       dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
-        replicaManager, adminManager, groupCoordinator, transactionCoordinator,
-        kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener,
-        Some(quotaCache))
+        replicaManager, null, groupCoordinator, transactionCoordinator,
+        null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
+        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener, Some(quotaCache))
 
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
         config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
 
       socketServer.controlPlaneRequestChannelOpt.foreach { controlPlaneRequestChannel =>
         controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
-          replicaManager, adminManager, groupCoordinator, transactionCoordinator,
-          kafkaController, forwardingManager, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener,
-          Some(quotaCache))
+          replicaManager, null, groupCoordinator, transactionCoordinator,
+          null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
+          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener, Some(quotaCache))
 
         controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
           1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)
@@ -306,15 +308,17 @@ class Kip500Broker(
       logManager.startup()
       // Start other services that we've delayed starting, in the appropriate order.
       replicaManager.startup()
-      groupCoordinator.startup()
-      transactionCoordinator.startup()
+      groupCoordinator.startup(metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).
+        getOrElse(config.offsetsTopicPartitions))
+      transactionCoordinator.startup(metadataCache.numPartitions(Topic.TRANSACTION_STATE_TOPIC_NAME).
+        getOrElse(config.transactionTopicPartitions))
 
       socketServer.startProcessingRequests(authorizerFutures)
 
       // We're now ready to unfence the broker.
       lifecycleManager.setReadyToUnfence()
 
-      info("started")
+      info(KafkaBroker.STARTED_MESSAGE)
       maybeChangeStatus(STARTING, STARTED)
     } catch {
       case e: Throwable =>
@@ -350,28 +354,6 @@ class Kip500Broker(
     val zkClient: Option[KafkaZkClient] = None
     new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
       brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager, None, Some(_brokerMetadataListenerFuture))
-  }
-
-  /**
-   * Gets the partition count of the group metadata topic from the metadata log.
-   * If the topic does not exist, the configured partition count is returned.
-   */
-  def getGroupMetadataTopicPartitionCount(): Int = {
-    // wait until we are caught up on the metadata log if necessary
-    lifecycleManager.initialCatchUpFuture.get()
-    // now return the number of partitions if the topic exists, otherwise the default
-    metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).getOrElse(config.offsetsTopicPartitions)
-  }
-
-  /**
-   * Gets the partition count of the transaction log topic from the metadata log.
-   * If the topic does not exist, the default partition count is returned.
-   */
-  def getTransactionTopicPartitionCount(): Int = {
-    // wait until we are caught up on the metadata log if necessary
-    lifecycleManager.initialCatchUpFuture.get()
-    // now return the number of partitions if the topic exists, otherwise the default
-    metadataCache.numPartitions(Topic.TRANSACTION_STATE_TOPIC_NAME).getOrElse(config.transactionTopicPartitions)
   }
 
   /**
@@ -478,6 +460,8 @@ class Kip500Broker(
       lock.unlock()
     }
   }
+
+  override def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
 
   override def currentState(): BrokerState = lifecycleManager.state()
 

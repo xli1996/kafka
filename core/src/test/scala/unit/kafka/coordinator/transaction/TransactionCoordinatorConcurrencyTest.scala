@@ -66,13 +66,9 @@ class TransactionCoordinatorConcurrencyTest extends AbstractCoordinatorConcurren
   override def setUp(): Unit = {
     super.setUp()
 
-    EasyMock.expect(zkClient.getTopicPartitionCount(TRANSACTION_STATE_TOPIC_NAME))
-      .andReturn(Some(numPartitions))
-      .anyTimes()
-    EasyMock.replay(zkClient)
-
-    txnStateManager = new TransactionStateManager(0, zkClient, scheduler, replicaManager, txnConfig, time,
+    txnStateManager = new TransactionStateManager(0, scheduler, replicaManager, txnConfig, time,
       new Metrics())
+    txnStateManager.startup(numPartitions)
     for (i <- 0 until numPartitions)
       txnStateManager.addLoadedTransactionsToCache(i, coordinatorEpoch, new Pool[String, TransactionMetadata]())
 

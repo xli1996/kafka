@@ -27,7 +27,7 @@ import kafka.cluster.Broker
 import kafka.common.{GenerateBrokerIdException, InconsistentBrokerIdException, InconsistentClusterIdException}
 import kafka.controller.KafkaController
 import kafka.coordinator.group.GroupCoordinator
-import kafka.coordinator.transaction.TransactionCoordinator
+import kafka.coordinator.transaction.{ProducerIdManager, TransactionCoordinator}
 import kafka.log.LogManager
 import kafka.metrics.{KafkaMetricsReporter, KafkaYammerMetrics}
 import kafka.network.SocketServer
@@ -36,6 +36,7 @@ import kafka.server.metadata.QuotaCache
 import kafka.utils._
 import kafka.zk.{BrokerInfo, KafkaZkClient}
 import org.apache.kafka.clients.{ApiVersions, ClientDnsLookup, ManualMetadataUpdater, NetworkClient, NetworkClientUtils}
+import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.ControlledShutdownRequestData
 import org.apache.kafka.common.metrics.{JmxReporter, Metrics, MetricsReporter}
 import org.apache.kafka.common.network.{ChannelBuilders, ListenerName, NetworkReceive, Selectable, Selector}
@@ -205,7 +206,7 @@ class LegacyBroker(val config: KafkaConfig,
 
         /* generate brokerId */
         config.brokerId = getOrGenerateBrokerId(preloadedMetaProperties)
-        logContext = new LogContext(s"[Legacy KafkaServer id=${config.brokerId}] ")
+        logContext = new LogContext(s"[LegacyBroker id=${config.brokerId}] ")
         this.logIdent = logContext.logPrefix
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
@@ -289,20 +290,25 @@ class LegacyBroker(val config: KafkaConfig,
           forwardingChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
             time, metrics, config, 60000, "forwarding", threadNamePrefix)
           forwardingChannelManager.start()
-          forwardingManager = new ForwardingManager(forwardingChannelManager, time, config.requestTimeoutMs.longValue())
+          forwardingManager = new ForwardingManager(forwardingChannelManager, time,
+            config.requestTimeoutMs.longValue(), logContext)
         }
 
         adminManager = new LegacyAdminManager(config, metrics, metadataCache, zkClient)
 
         /* start group coordinator */
         // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-        groupCoordinator = GroupCoordinator(config, zkClient, replicaManager, Time.SYSTEM, metrics)
-        groupCoordinator.startup()
+        groupCoordinator = GroupCoordinator(config, replicaManager, Time.SYSTEM, metrics)
+        groupCoordinator.startup(zkClient.getTopicPartitionCount(Topic.GROUP_METADATA_TOPIC_NAME).
+          getOrElse(config.offsetsTopicPartitions))
 
         /* start transaction coordinator, with a separate background thread scheduler for transaction expiration and log loading */
         // Hardcode Time.SYSTEM for now as some Streams tests fail otherwise, it would be good to fix the underlying issue
-        transactionCoordinator = TransactionCoordinator(config, replicaManager, new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"), zkClient, metrics, metadataCache, Time.SYSTEM)
-        transactionCoordinator.startup()
+        transactionCoordinator = TransactionCoordinator(config, replicaManager,
+          new KafkaScheduler(threads = 1, threadNamePrefix = "transaction-log-manager-"),
+          new ProducerIdManager(config.brokerId, zkClient), metrics, metadataCache, Time.SYSTEM)
+        transactionCoordinator.startup(zkClient.getTopicPartitionCount(Topic.TRANSACTION_STATE_TOPIC_NAME).
+          getOrElse(config.transactionTopicPartitions))
 
         /* Get the authorizer and initialize it if one is specified.*/
         authorizer = config.authorizer
@@ -366,7 +372,7 @@ class LegacyBroker(val config: KafkaConfig,
         startupComplete.set(true)
         isStartingUp.set(false)
         AppInfoParser.registerAppInfo(metricsPrefix, config.brokerId.toString, metrics, time.milliseconds())
-        info("started")
+        info(KafkaBroker.STARTED_MESSAGE)
       }
     }
     catch {
@@ -715,9 +721,9 @@ class LegacyBroker(val config: KafkaConfig,
   /**
    * After calling shutdown(), use this API to wait until the shutdown is complete
    */
-  def awaitShutdown(): Unit = shutdownLatch.await()
+  override def awaitShutdown(): Unit = shutdownLatch.await()
 
-  def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
+  override def boundPort(listenerName: ListenerName): Int = socketServer.boundPort(listenerName)
 
   /**
    * Checkpoint the BrokerMetadata to all the online log.dirs

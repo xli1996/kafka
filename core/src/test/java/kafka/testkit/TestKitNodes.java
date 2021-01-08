@@ -17,11 +17,20 @@
 
 package kafka.testkit;
 
+import kafka.server.MetaProperties;
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.network.ListenerName;
+import scala.compat.java8.OptionConverters;
 
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
+import java.util.Optional;
 import java.util.TreeMap;
 
 public class TestKitNodes {
@@ -61,7 +70,7 @@ public class TestKitNodes {
                 throw new RuntimeException("Invalid negative value for numControllerNodes");
             }
             while (controllerNodes.size() > numControllerNodes) {
-                Iterator<Map.Entry<Integer, ControllerNode>> iter =
+                Iterator<Entry<Integer, ControllerNode>> iter =
                     controllerNodes.entrySet().iterator();
                 iter.next();
                 iter.remove();
@@ -82,7 +91,7 @@ public class TestKitNodes {
                 throw new RuntimeException("Invalid negative value for numBrokerNodes");
             }
             while (kip500BrokerNodes.size() > numBrokerNodes) {
-                Iterator<Map.Entry<Integer, Kip500BrokerNode>> iter =
+                Iterator<Entry<Integer, Kip500BrokerNode>> iter =
                     kip500BrokerNodes.entrySet().iterator();
                 iter.next();
                 iter.remove();
@@ -128,5 +137,57 @@ public class TestKitNodes {
 
     public NavigableMap<Integer, Kip500BrokerNode> brokerNodes() {
         return brokerNodes;
+    }
+
+    public MetaProperties controllerProperties(int id) {
+        return MetaProperties.apply(clusterId,
+            OptionConverters.toScala(Optional.empty()),
+            OptionConverters.toScala(Optional.of(id)));
+    }
+
+    public MetaProperties brokerProperties(int id) {
+        return MetaProperties.apply(clusterId,
+            OptionConverters.toScala(Optional.of(id)),
+            OptionConverters.toScala(Optional.empty()));
+    }
+
+    public ListenerName interBrokerListenerName() {
+        return new ListenerName("EXTERNAL");
+    }
+
+    public ListenerName externalListenerName() {
+        return new ListenerName("EXTERNAL");
+    }
+
+    public TestKitNodes copyWithAbsolutePaths(String baseDirectory) {
+        NavigableMap<Integer, ControllerNode> newControllerNodes = new TreeMap<>();
+        NavigableMap<Integer, Kip500BrokerNode> newBrokerNodes = new TreeMap<>();
+        for (Entry<Integer, ControllerNode> entry : controllerNodes.entrySet()) {
+            ControllerNode node = entry.getValue();
+            newControllerNodes.put(entry.getKey(), new ControllerNode(node.id(),
+                absolutize(baseDirectory, node.metadataDirectory())));
+        }
+        for (Entry<Integer, Kip500BrokerNode> entry : brokerNodes.entrySet()) {
+            Kip500BrokerNode node = entry.getValue();
+            newBrokerNodes.put(entry.getKey(), new Kip500BrokerNode(node.id(),
+                node.incarnationId(), absolutize(baseDirectory, node.metadataDirectory()),
+                absolutize(baseDirectory, node.logDataDirectories())));
+        }
+        return new TestKitNodes(clusterId, newControllerNodes, newBrokerNodes);
+    }
+
+    private static List<String> absolutize(String base, Collection<String> directories) {
+        List<String> newDirectories = new ArrayList<>();
+        for (String directory : directories) {
+            newDirectories.add(absolutize(base, directory));
+        }
+        return newDirectories;
+    }
+
+    private static String absolutize(String base, String directory) {
+        if (Paths.get(directory).isAbsolute()) {
+            return directory;
+        }
+        return Paths.get(base, directory).toAbsolutePath().toString();
     }
 }

@@ -38,7 +38,6 @@ import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests.LeaderAndIsrRequest
 import org.apache.kafka.common.security.auth.SecurityProtocol
-import org.apache.kafka.common.utils.LogContext
 import org.apache.kafka.common.{Node, TopicPartition, Uuid}
 
 import scala.collection.mutable.ArrayBuffer
@@ -108,9 +107,6 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  txnCoordinator: TransactionCoordinator,
                                  configHandlers: Map[ConfigResource.Type, ConfigHandler]) extends BrokerMetadataProcessor
   with ConfigRepository with Logging {
-  // used only for onLeadershipChange() (TODO: factor out?)
-  private val apisUtils = new ApisUtils(new LogContext(""),
-    null, None, null, null, Some(groupCoordinator), Some(txnCoordinator))
 
   // visible for testing
   private[metadata] var brokerEpoch: Long = -1
@@ -346,7 +342,6 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
   override def process(event: BrokerMetadataEvent): Unit = {
     event match {
       case metadataLogEvent: MetadataLogEvent => process(metadataLogEvent)
-      case registerBrokerEvent: RegisterBrokerEvent => process(registerBrokerEvent)
       case _ => // no-op
     }
   }
@@ -481,7 +476,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
       // no need to log results since they already get logged
       replicaManager.becomeLeaderOrFollower(correlationId,
         leaderAndIsrRequest,
-        apisUtils.onLeadershipChange,
+        ApisUtils.onLeadershipChange(groupCoordinator, txnCoordinator, _, _),
         mgr.getCurrentAliveBrokers().values.toSeq)
     }
   }
@@ -511,6 +506,10 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
     mgr.getCopiedFencedBrokers().remove(brokerId)
     // set the broker epoch
     mgr.getCopiedBrokerEpochs()(brokerId) = brokerRecord.brokerEpoch()
+    // update the cached broker epoch if the local broker is being registered
+    if (brokerId == kafkaConfig.brokerId) {
+      brokerEpoch = brokerRecord.brokerEpoch()
+    }
   }
 
   /**
@@ -802,30 +801,5 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
   private def process(config: ConfigRecord, mgr: MetadataMgr): Unit = {
     mgr.addConfigResourceChange(new ConfigResource(ConfigResource.Type.forId(config.resourceType()), config.resourceName()),
       config.name(), config.value())
-  }
-
-  def process(outOfBandRegisterLocalBrokerEvent: RegisterBrokerEvent): Unit = {
-    val requestedBrokerEpoch = outOfBandRegisterLocalBrokerEvent.brokerEpoch
-    if (requestedBrokerEpoch < 0) {
-      throw new IllegalArgumentException(s"Cannot change broker epoch to a negative value: $requestedBrokerEpoch")
-    }
-    // idempotent, and disallow changing the epoch once it is set to a positive value
-    if (brokerEpoch >= 0) {
-      if (requestedBrokerEpoch != brokerEpoch) {
-        throw new IllegalArgumentException(s"Cannot change broker epoch from already-set value $brokerEpoch: $requestedBrokerEpoch")
-      }
-    } else {
-      brokerEpoch = requestedBrokerEpoch
-      val numBrokersAdding = 1
-      val mgr = MetadataMgr(numBrokersAdding, 0, 0)
-      mgr.getCopiedBrokerEpochs().put(kafkaConfig.brokerId, requestedBrokerEpoch)
-      metadataCache.updatePartitionMetadata(
-        mgr.getCurrentPartitionStates(),
-        mgr.getCurrentAliveBrokers(),
-        mgr.getCurrentAliveNodes(),
-        mgr.getCurrentTopicIdMap(),
-        mgr.getCurrentFencedBrokers(),
-        mgr.getCurrentBrokerEpochs())
-    }
   }
 }

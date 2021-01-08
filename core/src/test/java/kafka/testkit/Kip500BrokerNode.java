@@ -27,15 +27,16 @@ public class Kip500BrokerNode implements TestKitNode {
     public static class Builder {
         private int id = -1;
         private Uuid incarnationId = null;
-        private List<String> logDirectories = null;
+        private String metadataDirectory = null;
+        private List<String> logDataDirectories = null;
 
         public Builder setId(int id) {
             this.id = id;
             return this;
         }
 
-        public Builder setLogDirectories(List<String> logDirectories) {
-            this.logDirectories = logDirectories;
+        public Builder setLogDirectories(List<String> logDataDirectories) {
+            this.logDataDirectories = logDataDirectories;
             return this;
         }
 
@@ -46,21 +47,31 @@ public class Kip500BrokerNode implements TestKitNode {
             if (incarnationId == null) {
                 incarnationId = Uuid.randomUuid();
             }
-            if (logDirectories == null) {
-                logDirectories  = Collections.singletonList(String.format("kip500broker_%d", id));
+            if (metadataDirectory == null) {
+                metadataDirectory = String.format("kip500broker_%d_meta", id);
             }
-            return new Kip500BrokerNode(id, incarnationId, logDirectories);
+            if (logDataDirectories == null) {
+                logDataDirectories  = Collections.
+                    singletonList(String.format("kip500broker_%d_data0", id));
+            }
+            return new Kip500BrokerNode(id, incarnationId, metadataDirectory,
+                logDataDirectories);
         }
     }
 
     private final int id;
     private final Uuid incarnationId;
-    private final List<String> logDirectories;
+    private final String metadataDirectory;
+    private final List<String> logDataDirectories;
 
-    private Kip500BrokerNode(int id, Uuid incarnationId, List<String> logDirectories) {
+    Kip500BrokerNode(int id,
+                     Uuid incarnationId,
+                     String metadataDirectory,
+                     List<String> logDataDirectories) {
         this.id = id;
         this.incarnationId = incarnationId;
-        this.logDirectories = new ArrayList<>(logDirectories);
+        this.metadataDirectory = metadataDirectory;
+        this.logDataDirectories = new ArrayList<>(logDataDirectories);
     }
 
     @Override
@@ -73,7 +84,11 @@ public class Kip500BrokerNode implements TestKitNode {
     }
 
     @Override
-    public List<String> logDirectories() {
-        return logDirectories;
+    public String metadataDirectory() {
+        return metadataDirectory;
+    }
+
+    public List<String> logDataDirectories() {
+        return logDataDirectories;
     }
 }

@@ -17,9 +17,7 @@
 
 package kafka.testkit;
 
-import java.util.List;
-
 public interface TestKitNode {
     int id();
-    List<String> logDirectories();
+    String metadataDirectory();
 }

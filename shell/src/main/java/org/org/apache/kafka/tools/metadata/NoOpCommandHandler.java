@@ -25,7 +25,7 @@ import java.util.Optional;
  */
 public final class NoOpCommandHandler implements Commands.Handler {
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) {
     }

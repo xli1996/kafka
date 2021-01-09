@@ -80,7 +80,7 @@ public final class FindCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) throws Exception {
         for (String path : CommandUtils.getEffectivePaths(paths)) {

@@ -17,158 +17,254 @@
 
 package org.apache.kafka.tools.metadata;
 
-import org.jline.reader.Candidate;
-import org.jline.reader.Completer;
-import org.jline.reader.EndOfFileException;
-import org.jline.reader.History;
-import org.jline.reader.LineReader;
-import org.jline.reader.LineReaderBuilder;
-import org.jline.reader.ParsedLine;
-import org.jline.reader.Parser;
-import org.jline.reader.UserInterruptException;
-import org.jline.reader.impl.DefaultParser;
-import org.jline.reader.impl.history.DefaultHistory;
-import org.jline.terminal.Terminal;
-import org.jline.terminal.TerminalBuilder;
+import kafka.raft.KafkaRaftManager;
+import kafka.server.KafkaConfig;
+import kafka.server.KafkaConfig$;
+import kafka.server.KafkaServer;
+import kafka.server.MetaProperties;
+import kafka.tools.TerseFailure;
+import net.sourceforge.argparse4j.ArgumentParsers;
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.Namespace;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.metrics.Metrics;
+import org.apache.kafka.common.utils.Exit;
+import org.apache.kafka.common.utils.Time;
+import org.apache.kafka.common.utils.Utils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import scala.compat.java8.OptionConverters;
 
-import java.io.IOException;
-import java.util.AbstractMap;
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
-import java.util.Map.Entry;
-import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Properties;
 
 /**
- * The Kafka metadata shell.
+ * The Kafka metadata tool.
  */
-public final class MetadataShell implements AutoCloseable {
-    static class MetadataShellCompleter implements Completer {
-        private final MetadataNodeManager nodeManager;
+public final class MetadataShell {
+    private static final Logger log = LoggerFactory.getLogger(MetadataShell.class);
 
-        MetadataShellCompleter(MetadataNodeManager nodeManager) {
-            this.nodeManager = nodeManager;
+    public static class Builder {
+        private String controllers;
+        private String configPath;
+        private File tempDir;
+        private String snapshotPath;
+
+        public Builder setControllers(String controllers) {
+            this.controllers = controllers;
+            return this;
         }
 
-        @Override
-        public void complete(LineReader reader, ParsedLine line, List<Candidate> candidates) {
-            if (line.words().size() == 0) {
-                CommandUtils.completeCommand("", candidates);
-            } else if (line.words().size() == 1) {
-                CommandUtils.completeCommand(line.words().get(0), candidates);
+        public Builder setConfigPath(String configPath) {
+            this.configPath = configPath;
+            return this;
+        }
+
+        public Builder setSnapshotPath(String snapshotPath) {
+            this.snapshotPath = snapshotPath;
+            return this;
+        }
+
+        public Builder setTempDir(File tempDir) {
+            this.tempDir = tempDir;
+            return this;
+        }
+
+        public MetadataShell build() throws Exception {
+            if (snapshotPath != null) {
+                if (controllers != null) {
+                    throw new RuntimeException("If you specify a snapshot path, you " +
+                        "must not also specify controllers to connect to.");
+                }
+                return buildWithSnapshotReader();
             } else {
-                Iterator<String> iter = line.words().iterator();
-                String command = iter.next();
-                List<String> nextWords = new ArrayList<>();
-                while (iter.hasNext()) {
-                    nextWords.add(iter.next());
+                return buildWithControllerConnect();
+            }
+        }
+
+        public MetadataShell buildWithControllerConnect() throws Exception {
+            Properties properties = null;
+            if (configPath != null) {
+                properties = Utils.loadProps(configPath);
+            } else {
+                properties = new Properties();
+            }
+            if (controllers != null) {
+                properties.setProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(),
+                    controllers);
+            }
+            if (properties.getProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp()) == null) {
+                throw new TerseFailure("Please use --controllers to specify the quorum voters.");
+            }
+            // TODO: we really shouldn't have to set up a fake broker config like this.
+            // In particular, it should be possible to run the KafkRaftManager without
+            // using a log directory at all.  And we should be able to set -1 as our ID,
+            // since we're not a voter.
+            final int fakeId = 100; //Integer.MAX_VALUE;
+            properties.setProperty(KafkaConfig$.MODULE$.MetadataLogDirProp(),
+                tempDir.getAbsolutePath());
+            properties.remove(KafkaConfig$.MODULE$.LogDirProp());
+            properties.remove(KafkaConfig$.MODULE$.LogDirsProp());
+            properties.remove(KafkaConfig$.MODULE$.ControllerIdProp());
+            properties.setProperty(KafkaConfig$.MODULE$.BrokerIdProp(), Integer.toString(fakeId));
+            properties.setProperty(KafkaConfig$.MODULE$.ProcessRolesProp(), "broker");
+            KafkaConfig config = new KafkaConfig(properties);
+            MetaProperties metaProperties = MetaProperties.apply(Uuid.ZERO_UUID,
+                OptionConverters.toScala(Optional.of(fakeId)),
+                OptionConverters.toScala(Optional.empty()));
+            TopicPartition metadataPartition =
+                new TopicPartition(KafkaServer.metadataTopicName(), 0);
+            KafkaRaftManager raftManager = null;
+            MetadataNodeManager nodeManager = null;
+            try {
+                raftManager = new KafkaRaftManager(metaProperties,
+                    metadataPartition,
+                    config,
+                    Time.SYSTEM,
+                    new Metrics());
+                nodeManager = new MetadataNodeManager();
+            } catch (Throwable e) {
+                log.error("Initialization error", e);
+                if (raftManager != null) {
+                    raftManager.shutdown();
                 }
-                Commands.Type type = Commands.TYPES.get(command);
-                if (type == null) {
-                    return;
+                if (nodeManager != null) {
+                    nodeManager.close();
                 }
-                try {
-                    type.completeNext(nodeManager, nextWords, candidates);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
+                throw e;
+            }
+            return new MetadataShell(raftManager, null, nodeManager);
+        }
+
+        public MetadataShell buildWithSnapshotReader() throws Exception {
+            MetadataNodeManager nodeManager = null;
+            SnapshotReader snapshotReader = null;
+            try {
+                nodeManager = new MetadataNodeManager();
+                snapshotReader = new SnapshotReader(snapshotPath, nodeManager.logListener());
+                return new MetadataShell(null, snapshotReader, nodeManager);
+            } catch (Throwable e) {
+                log.error("Initialization error", e);
+                if (snapshotReader != null) {
+                    snapshotReader.close();
                 }
+                if (nodeManager != null) {
+                    nodeManager.close();
+                }
+                throw e;
             }
         }
     }
+
+    private final KafkaRaftManager raftManager;
+
+    private final SnapshotReader snapshotReader;
 
     private final MetadataNodeManager nodeManager;
-    private final Terminal terminal;
-    private final Parser parser;
-    private final History history;
-    private final MetadataShellCompleter completer;
-    private final LineReader reader;
 
-    public MetadataShell(MetadataNodeManager nodeManager) throws IOException {
+    public MetadataShell(KafkaRaftManager raftManager,
+                        SnapshotReader snapshotReader,
+                        MetadataNodeManager nodeManager) {
+        this.raftManager = raftManager;
+        this.snapshotReader = snapshotReader;
         this.nodeManager = nodeManager;
-        TerminalBuilder builder = TerminalBuilder.builder().
-            system(true).
-            nativeSignals(true);
-        this.terminal = builder.build();
-        this.parser = new DefaultParser();
-        this.history = new DefaultHistory();
-        this.completer = new MetadataShellCompleter(nodeManager);
-        this.reader = LineReaderBuilder.builder().
-            terminal(terminal).
-            parser(parser).
-            history(history).
-            completer(completer).
-            option(LineReader.Option.AUTO_FRESH_LINE, false).
-            build();
     }
 
-    public void runMainLoop() throws Exception {
-        terminal.writer().println("[ Kafka Metadata Shell ]");
-        terminal.flush();
-        Commands commands = new Commands(true);
-        while (true) {
+    public void run(List<String> args) throws Exception {
+        nodeManager.setup();
+        if (raftManager != null) {
+            raftManager.startup();
+            raftManager.register(nodeManager.logListener());
+        } else if (snapshotReader != null) {
+            snapshotReader.startup();
+        } else {
+            throw new RuntimeException("Expected either a raft manager or snapshot reader");
+        }
+        if (args == null || args.isEmpty()) {
+            // Interactive mode.
+            try (InteractiveShell shell = new InteractiveShell(nodeManager)) {
+                shell.runMainLoop();
+            }
+        } else {
+            // Non-interactive mode.
+            Commands commands = new Commands(false);
+            try (PrintWriter writer = new PrintWriter(new BufferedWriter(
+                    new OutputStreamWriter(System.out, StandardCharsets.UTF_8)))) {
+                Commands.Handler handler = commands.parseCommand(args);
+                handler.run(Optional.empty(), writer, nodeManager);
+                writer.flush();
+            }
+        }
+    }
+
+    public void close() throws Exception {
+        if (raftManager != null) {
+            raftManager.shutdown();
+        }
+        if (snapshotReader != null) {
+            snapshotReader.close();
+        }
+        nodeManager.close();
+    }
+
+    public static void main(String[] args) throws Exception {
+        ArgumentParser parser = ArgumentParsers
+            .newArgumentParser("metadata-tool")
+            .defaultHelp(true)
+            .description("The Apache Kafka metadata tool");
+        parser.addArgument("--controllers", "-C")
+            .type(String.class)
+            .help("The quorum voter connection string to use.");
+        parser.addArgument("--config", "-c")
+            .type(String.class)
+            .help("The configuration file to use.");
+        parser.addArgument("--snapshot", "-s")
+            .type(String.class)
+            .help("The snapshot file to read.");
+        parser.addArgument("command")
+            .nargs("*")
+            .help("The command to run.");
+        Namespace res = parser.parseArgsOrFail(args);
+        try {
+            Builder builder = new Builder();
+            builder.setControllers(res.getString("controllers"));
+            builder.setConfigPath(res.getString("config"));
+            builder.setSnapshotPath(res.getString("snapshot"));
+            Path tempDir = Files.createTempDirectory("MetadataShell");
+            Exit.addShutdownHook("agent-shutdown-hook", () -> {
+                log.debug("Removing temporary directory " + tempDir.toAbsolutePath().toString());
+                try {
+                    Utils.delete(tempDir.toFile());
+                } catch (Exception e) {
+                    log.error("Got exception while removing temporary directory " +
+                        tempDir.toAbsolutePath().toString());
+                }
+            });
+            builder.setTempDir(tempDir.toFile());
+            MetadataShell shell = builder.build();
             try {
-                reader.readLine(">> ");
-                ParsedLine parsedLine = reader.getParsedLine();
-                Commands.Handler handler = commands.parseCommand(parsedLine.words());
-                handler.run(Optional.of(this), terminal.writer(), nodeManager);
-                terminal.writer().flush();
-            } catch (UserInterruptException eof) {
-                // Handle ths user pressing Control-C.
-                // TODO: how can we print this on the same line as the prompt like
-                // bash does?
-                terminal.writer().println("^C");
-            } catch (EndOfFileException eof) {
-                return;
+                shell.run(res.getList("command"));
+            } finally {
+                shell.close();
             }
+            Exit.exit(0);
+        } catch (TerseFailure e) {
+            System.err.println("Error: " + e.getMessage());
+            Exit.exit(1);
+        } catch (Throwable e) {
+            System.err.println("Unexpected error: " +
+                (e.getMessage() == null ? "" : e.getMessage()));
+            e.printStackTrace(System.err);
+            Exit.exit(1);
         }
-    }
-
-    public int screenWidth() {
-        return terminal.getWidth();
-    }
-
-    public Iterator<Entry<Integer, String>> history(int numEntriesToShow) {
-        if (numEntriesToShow < 0) {
-            numEntriesToShow = 0;
-        }
-        int last = history.last();
-        if (numEntriesToShow > last + 1) {
-            numEntriesToShow = last + 1;
-        }
-        int first = last - numEntriesToShow + 1;
-        if (first < history.first()) {
-            first = history.first();
-        }
-        return new HistoryIterator(first, last);
-    }
-
-    public class HistoryIterator implements  Iterator<Entry<Integer, String>> {
-        private int index;
-        private int last;
-
-        HistoryIterator(int index, int last) {
-            this.index = index;
-            this.last = last;
-        }
-
-        @Override
-        public boolean hasNext() {
-            return index <= last;
-        }
-
-        @Override
-        public Entry<Integer, String> next() {
-            if (index > last) {
-                throw new NoSuchElementException();
-            }
-            int p = index++;
-            return new AbstractMap.SimpleImmutableEntry<>(p, history.get(p));
-        }
-    }
-
-    @Override
-    public void close() throws IOException {
-        terminal.close();
     }
 }

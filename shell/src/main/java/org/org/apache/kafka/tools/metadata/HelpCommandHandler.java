@@ -68,7 +68,7 @@ public final class HelpCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) {
         writer.printf("Welcome to the Apache Kafka metadata shell.%n%n");

@@ -69,7 +69,7 @@ public final class ExitCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) {
         Exit.exit(0);

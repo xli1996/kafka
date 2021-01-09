@@ -98,7 +98,7 @@ public final class LsCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) throws Exception {
         List<String> targetFiles = new ArrayList<>();

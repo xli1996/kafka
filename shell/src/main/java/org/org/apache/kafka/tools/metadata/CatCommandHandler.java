@@ -84,7 +84,7 @@ public final class CatCommandHandler implements Commands.Handler {
     }
 
     @Override
-    public void run(Optional<MetadataShell> shell,
+    public void run(Optional<InteractiveShell> shell,
                     PrintWriter writer,
                     MetadataNodeManager manager) throws Exception {
         log.trace("cat " + targets);

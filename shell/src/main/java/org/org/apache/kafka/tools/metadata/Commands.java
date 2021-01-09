@@ -66,7 +66,7 @@ public final class Commands {
      * execute commands.
      */
     public interface Handler {
-        void run(Optional<MetadataShell> shell,
+        void run(Optional<InteractiveShell> shell,
                  PrintWriter writer,
                  MetadataNodeManager manager) throws Exception;
     }

@@ -268,9 +268,9 @@ subprojects {
 
   def shouldUseJUnit5 = [
     "common",
-    "meta",
     "metadata",
     "raft",
+    "shell",
     "trogdor"
   ].contains(it.project.name)
 
@@ -975,8 +975,6 @@ project(':core') {
     from(project.siteDocsTar) { into("site-docs/") }
     from(project(':tools:common').jar) { into("libs/") }
     from(project(':tools:common').configurations.runtime) { into("libs/") }
-    from(project(':tools:meta').jar) { into("libs/") }
-    from(project(':tools:meta').configurations.runtime) { into("libs/") }
     from(project(':tools:trogdor').jar) { into("libs/") }
     from(project(':tools:trogdor').configurations.runtime) { into("libs/") }
     from(project(':connect:api').jar) { into("libs/") }
@@ -1371,50 +1369,6 @@ project(':tools:common') {
   }
 }
 
-project(':tools:meta') {
-  archivesBaseName = "kafka-tools-meta"
-
-  dependencies {
-    compile libs.argparse4j
-    compile libs.jacksonDatabind
-    compile libs.jacksonJDK8Datatypes
-    compile libs.jline
-    compile libs.slf4jApi
-    compile project(':clients')
-    compile project(':core')
-    compile project(':log4j-appender')
-    compile project(':metadata')
-
-    compile libs.jacksonJaxrsJsonProvider
-
-    testCompile project(':clients')
-    testCompile libs.junitJupiter
-    testCompile project(':clients').sourceSets.test.output
-
-    testRuntime libs.slf4jlog4j
-  }
-
-  javadoc {
-    enabled = false
-  }
-
-  tasks.create(name: "copyDependantLibs", type: Copy) {
-    from (configurations.testRuntime) {
-      include('slf4j-log4j12*')
-      include('log4j*jar')
-    }
-    from (configurations.runtime) {
-      exclude('kafka-clients*')
-    }
-    into "$buildDir/dependant-libs-${versions.scala}"
-    duplicatesStrategy 'exclude'
-  }
-
-  jar {
-    dependsOn 'copyDependantLibs'
-  }
-}
-
 project(':tools:trogdor') {
   archivesBaseName = "trogdor"
 
@@ -1461,6 +1415,46 @@ project(':tools:trogdor') {
 
   jar {
     dependsOn 'copyDependantLibs'
+  }
+}
+
+project(':shell') {
+  archivesBaseName = "kafka-shell"
+
+  dependencies {
+    compile libs.argparse4j
+    compile libs.jacksonDatabind
+    compile libs.jacksonJDK8Datatypes
+    compile libs.jline
+    compile libs.slf4jApi
+    compile project(':clients')
+    compile project(':core')
+    compile project(':log4j-appender')
+    compile project(':metadata')
+
+    compile libs.jacksonJaxrsJsonProvider
+
+    testCompile project(':clients')
+    testCompile libs.junitJupiter
+    testCompile project(':clients').sourceSets.test.output
+
+    testRuntime libs.slf4jlog4j
+  }
+
+  javadoc {
+    enabled = false
+  }
+
+  tasks.create(name: "copyDependantLibs", type: Copy) {
+    from (configurations.testRuntime) {
+      include('slf4j-log4j12*')
+      include('log4j*jar')
+    }
+    from (configurations.runtime) {
+      exclude('kafka-clients*')
+    }
+    into "$buildDir/dependant-libs-${versions.scala}"
+    duplicatesStrategy 'exclude'
   }
 }
 

@@ -20,9 +20,13 @@ package kafka.server
 import kafka.testkit.{KafkaClusterTestKit, TestKitNodes}
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.Admin
+import org.apache.kafka.common.quota.{ClientQuotaAlteration, ClientQuotaEntity, ClientQuotaFilter, ClientQuotaFilterComponent}
 import org.apache.kafka.metadata.BrokerState
 import org.junit.rules.Timeout
 import org.junit.{Assert, Rule, Test}
+
+import scala.jdk.CollectionConverters._
+
 
 class Kip500ClusterTest {
   @Rule
@@ -55,6 +59,40 @@ class Kip500ClusterTest {
       try {
         Assert.assertEquals(cluster.nodes().clusterId().toString,
           admin.describeCluster().clusterId().get())
+      } finally {
+        admin.close()
+      }
+    } finally {
+      cluster.close()
+    }
+  }
+
+  @Test
+  def testClientQuotasEndToEnd(): Unit = {
+    val cluster = new KafkaClusterTestKit.Builder(
+      new TestKitNodes.Builder().
+        setNumKip500BrokerNodes(1).
+        setNumControllerNodes(1).build()).build()
+    try {
+      cluster.format()
+      cluster.startup()
+      TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
+        "Broker never made it to RUNNING state.")
+      val admin = Admin.create(cluster.clientProperties())
+      try {
+        val entity = new ClientQuotaEntity(Map("user" -> "testkit").asJava)
+        val quota = new ClientQuotaAlteration.Op("request_percentage", 0.99)
+        admin.alterClientQuotas(Seq(new ClientQuotaAlteration(entity, Seq(quota).asJava)).asJava)
+
+        val filter = ClientQuotaFilter.containsOnly(
+          List(ClientQuotaFilterComponent.ofEntity("user", "testkit")).asJava)
+
+        val (describeResult, ok) = TestUtils.computeUntilTrue(admin.describeClientQuotas(filter).entities().get()) {
+          results => results.size() == 1
+        }
+
+        Assert.assertTrue("Broker never saw new client quotas", ok)
+        Assert.assertEquals(0.99, describeResult.get(entity).get("request_percentage"), 1e-6)
       } finally {
         admin.close()
       }

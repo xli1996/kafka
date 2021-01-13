@@ -100,7 +100,7 @@ trait BrokerMetadataProcessor {
   def process(event: BrokerMetadataEvent): Unit
 }
 
-trait ConfigRepository {
+trait ListenerConfigRepository {
   def topicConfigProperties(topicName: String): Properties = {
     configProperties(new ConfigResource(ConfigResource.Type.TOPIC, topicName))
   }
@@ -118,7 +118,7 @@ class BrokerMetadataListener(
   time: Time,
   processors: List[BrokerMetadataProcessor],
   eventQueueTimeoutMs: Long = BrokerMetadataListener.DefaultEventQueueTimeoutMs)
-    extends MetaLogListener with KafkaMetricsGroup with ConfigRepository {
+    extends MetaLogListener with KafkaMetricsGroup with ListenerConfigRepository {
 
   this.logIdent = s"[BrokerMetadataListener id=${config.brokerId}] "
 
@@ -126,15 +126,15 @@ class BrokerMetadataListener(
     throw new IllegalArgumentException(s"Empty processors list!")
   }
 
-  private val configRepositoryProcessor: Option[ConfigRepository] = {
-    val configRepositoryProcessors = processors.filter(_.isInstanceOf[ConfigRepository])
+  private val configRepositoryProcessor: Option[ListenerConfigRepository] = {
+    val configRepositoryProcessors = processors.filter(_.isInstanceOf[ListenerConfigRepository])
     if (configRepositoryProcessors.isEmpty) {
       warn("No config repository processors")
       None
     } else if (configRepositoryProcessors.size > 1) {
       throw new IllegalArgumentException(s"Cannot provide multiple config repository processors: $configRepositoryProcessors")
     } else {
-      Some(configRepositoryProcessors.head.asInstanceOf[ConfigRepository])
+      Some(configRepositoryProcessors.head.asInstanceOf[ListenerConfigRepository])
     }
   }
 

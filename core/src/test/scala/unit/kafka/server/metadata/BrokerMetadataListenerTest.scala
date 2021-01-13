@@ -75,14 +75,14 @@ class BrokerMetadataListenerTest {
 
   @Test(expected = classOf[IllegalArgumentException])
   def testMultipleConfigMetadataProcessors(): Unit = {
-    trait ConfigRepositoryProcessor extends BrokerMetadataProcessor with ConfigRepository
+    trait ConfigRepositoryProcessor extends BrokerMetadataProcessor with ListenerConfigRepository
     new BrokerMetadataListener(mock(classOf[KafkaConfig]), metadataCache, new MockTime(),
       List(mock(classOf[ConfigRepositoryProcessor]), mock(classOf[ConfigRepositoryProcessor])))
   }
 
   @Test
   def testConfigMetadataProcessor(): Unit = {
-    trait ConfigRepositoryProcessor extends BrokerMetadataProcessor with ConfigRepository
+    trait ConfigRepositoryProcessor extends BrokerMetadataProcessor with ListenerConfigRepository
     val configProcessor = mock(classOf[ConfigRepositoryProcessor])
     val listener = new BrokerMetadataListener(mock(classOf[KafkaConfig]), metadataCache, new MockTime(), List(configProcessor))
     val brokerId = 0

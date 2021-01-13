@@ -106,7 +106,7 @@ class PartitionMetadataProcessor(kafkaConfig: KafkaConfig,
                                  replicaManager: ReplicaManager,
                                  txnCoordinator: TransactionCoordinator,
                                  configHandlers: Map[ConfigResource.Type, ConfigHandler]) extends BrokerMetadataProcessor
-  with ConfigRepository with Logging {
+  with ListenerConfigRepository with Logging {
 
   // visible for testing
   private[metadata] var brokerEpoch: Long = -1

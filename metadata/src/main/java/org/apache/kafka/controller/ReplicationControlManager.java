@@ -151,6 +151,7 @@ public class ReplicationControlManager {
     private final Logger log;
     private final Random random;
     private final int defaultReplicationFactor;
+    private final int defaultNumPartitions;
     private final ConfigurationControlManager configurationControl;
     private final ClusterControlManager clusterControl;
     private final TimelineHashMap<String, Uuid> topicsByName;
@@ -160,12 +161,14 @@ public class ReplicationControlManager {
                               LogContext logContext,
                               Random random,
                               int defaultReplicationFactor,
+                              int defaultNumPartitions,
                               ConfigurationControlManager configurationControl,
                               ClusterControlManager clusterControl) {
         this.snapshotRegistry = snapshotRegistry;
         this.log = logContext.logger(ReplicationControlManager.class);
         this.random = random;
         this.defaultReplicationFactor = defaultReplicationFactor;
+        this.defaultNumPartitions = defaultNumPartitions;
         this.configurationControl = configurationControl;
         this.clusterControl = clusterControl;
         this.topicsByName = new TimelineHashMap<>(snapshotRegistry, 0);
@@ -261,10 +264,6 @@ public class ReplicationControlManager {
 
     private ApiError createTopic(CreatableTopic topic, List<ApiMessageAndVersion> records) {
         Map<Integer, PartitionControlInfo> newParts = new HashMap<>();
-        if (topic.numPartitions() <= 0) {
-            return new ApiError(Errors.INVALID_REQUEST,
-                "The number of partitions must be greater than 0.");
-        }
         if (!topic.assignments().isEmpty()) {
             if (topic.replicationFactor() != -1) {
                 return new ApiError(Errors.INVALID_REQUEST,
@@ -311,10 +310,15 @@ public class ReplicationControlManager {
             return new ApiError(Errors.INVALID_REQUEST,
                 "Replication factor was not set to -1 but a manual partition " +
                     "assignment was specified.");
+        } else if (topic.numPartitions() < -1 || topic.numPartitions() == 0) {
+            return new ApiError(Errors.INVALID_REQUEST,
+                "Number of partitions was set to an invalid non-positive value.");
         } else {
+            int numPartitions = topic.numPartitions() == -1 ?
+                defaultNumPartitions : topic.numPartitions();
             int replicationFactor = topic.replicationFactor() == -1 ?
                 defaultReplicationFactor : topic.replicationFactor();
-            for (int partitionId = 0; partitionId < topic.numPartitions(); partitionId++) {
+            for (int partitionId = 0; partitionId < numPartitions; partitionId++) {
                 List<Integer> replicas;
                 try {
                     replicas = clusterControl.chooseRandomUsable(random, replicationFactor);

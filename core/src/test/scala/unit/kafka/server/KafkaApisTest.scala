@@ -186,7 +186,7 @@ class KafkaApisTest {
 
     EasyMock.replay(authorizer)
 
-    val result = createKafkaApis(authorizer = Some(authorizer)).apisUtils.authorize(
+    val result = createKafkaApis(authorizer = Some(authorizer)).authHelper.authorize(
       requestContext, operation, resourceType, resourceName)
 
     verify(authorizer)

@@ -27,6 +27,7 @@ import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCollection;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
 import org.apache.kafka.common.message.CreateTopicsResponseData.CreatableTopicResult;
+import org.apache.kafka.common.metadata.IsrChangeRecord;
 import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
@@ -89,6 +90,15 @@ public class ReplicationControlManager {
             this.addingReplicas = addingReplicas;
             this.leader = leader;
             this.leaderEpoch = leaderEpoch;
+        }
+
+        PartitionControlInfo merge(IsrChangeRecord record) {
+            return new PartitionControlInfo(replicas,
+                toArray(record.isr()),
+                removingReplicas,
+                addingReplicas,
+                record.leader(),
+                record.leaderEpoch());
         }
 
         String diff(PartitionControlInfo prev) {
@@ -220,34 +230,57 @@ public class ReplicationControlManager {
         log.info("Created topic {} with ID {}.", record.name(), record.topicId());
     }
 
-    public void replay(PartitionRecord message) {
-        TopicControlInfo topicInfo = topics.get(message.topicId());
+    public void replay(PartitionRecord record) {
+        TopicControlInfo topicInfo = topics.get(record.topicId());
         if (topicInfo == null) {
-            throw new RuntimeException("Tried to create partition " + message.topicId() +
-                "-" + message.partitionId() + ", but no topic with that ID was found.");
+            throw new RuntimeException("Tried to create partition " + record.topicId() +
+                ":" + record.partitionId() + ", but no topic with that ID was found.");
         }
-        PartitionControlInfo newPartInfo = new PartitionControlInfo(message);
-        PartitionControlInfo prevPartInfo = topicInfo.parts.get(message.partitionId());
+        PartitionControlInfo newPartInfo = new PartitionControlInfo(record);
+        PartitionControlInfo prevPartInfo = topicInfo.parts.get(record.partitionId());
         if (prevPartInfo == null) {
-            log.info("Created partition {}-{} with {}.", message.topicId(),
-                message.partitionId(), newPartInfo.toString());
-            topicInfo.parts.put(message.partitionId(), newPartInfo);
-            updateIsrMembers(message.topicId(), message.partitionId(), EMPTY, newPartInfo.isr);
+            log.info("Created partition {}:{} with {}.", record.topicId(),
+                record.partitionId(), newPartInfo.toString());
+            topicInfo.parts.put(record.partitionId(), newPartInfo);
+            updateIsrMembers(record.topicId(), record.partitionId(), EMPTY, newPartInfo.isr);
         } else {
             String diff = newPartInfo.diff(prevPartInfo);
             if (!diff.isEmpty()) {
-                log.info("Modified partition {}-{}: {}.", message.topicId(),
-                    message.partitionId(), diff);
-                topicInfo.parts.put(message.partitionId(), newPartInfo);
-                updateIsrMembers(message.topicId(), message.partitionId(),
+                log.info("Modified partition {}:{}: {}.", record.topicId(),
+                    record.partitionId(), diff);
+                topicInfo.parts.put(record.partitionId(), newPartInfo);
+                updateIsrMembers(record.topicId(), record.partitionId(),
                     prevPartInfo.isr, newPartInfo.isr);
             }
         }
     }
 
+    public void replay(IsrChangeRecord record) {
+        TopicControlInfo topicInfo = topics.get(record.topicId());
+        if (topicInfo == null) {
+            throw new RuntimeException("Tried to create partition " + record.topicId() +
+                ":" + record.partitionId() + ", but no topic with that ID was found.");
+        }
+        PartitionControlInfo prevPartitionInfo = topicInfo.parts.get(record.partitionId());
+        if (prevPartitionInfo == null) {
+            throw new RuntimeException("Tried to create partition " + record.topicId() +
+                ":" + record.partitionId() + ", but no partition with that id was found.");
+        }
+        PartitionControlInfo newPartitionInfo = prevPartitionInfo.merge(record);
+        topicInfo.parts.put(record.partitionId(), newPartitionInfo);
+        updateIsrMembers(record.topicId(), record.partitionId(),
+            prevPartitionInfo.isr, newPartitionInfo.isr);
+    }
+
     private void updateIsrMembers(Uuid topicId, int partitionId, int[] prevIsr, int[] nextIsr) {
         List<Integer> added = new ArrayList<>();
         List<Integer> removed = new ArrayList<>();
+        if (prevIsr.length == 0) {
+            prevIsr = new int[] {-1};
+        }
+        if (nextIsr.length == 0) {
+            nextIsr = new int[] {-1};
+        }
         int i = 0, j = 0;
         while (true) {
             if (i == prevIsr.length) {

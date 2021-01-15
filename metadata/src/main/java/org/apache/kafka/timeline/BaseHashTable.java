@@ -19,6 +19,7 @@ package org.apache.kafka.timeline;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 /**
  * A hash table which uses separate chaining.
@@ -242,5 +243,20 @@ class BaseHashTable<T> {
         }
         bld.append(String.format("%n}"));
         return bld.toString();
+    }
+
+    public T pickRandomElement(Random random) {
+        while (true) {
+            int slot = random.nextInt(elements.length);
+            T value = (T) elements[slot];
+            if (value != null) {
+                if (value instanceof Object[]) {
+                    Object[] array = (Object[]) value;
+                    return (T) array[random.nextInt(array.length)];
+                } else {
+                    return value;
+                }
+            }
+        }
     }
 }

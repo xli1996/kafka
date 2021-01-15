@@ -24,9 +24,7 @@ import org.apache.kafka.metalog.MetaLogManager;
 import org.apache.kafka.raft.BatchReader;
 import org.apache.kafka.raft.LeaderAndEpoch;
 import org.apache.kafka.raft.RaftClient;
-import org.apache.kafka.raft.RaftConfig;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 

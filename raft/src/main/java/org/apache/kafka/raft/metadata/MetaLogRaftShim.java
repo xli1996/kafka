@@ -24,6 +24,7 @@ import org.apache.kafka.metalog.MetaLogManager;
 import org.apache.kafka.raft.BatchReader;
 import org.apache.kafka.raft.LeaderAndEpoch;
 import org.apache.kafka.raft.RaftClient;
+import org.apache.kafka.raft.RaftConfig;
 
 import java.io.IOException;
 import java.util.List;
@@ -48,11 +49,7 @@ public class MetaLogRaftShim implements MetaLogManager {
 
     @Override
     public void initialize() {
-        try {
-            client.initialize();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        // NO-OP - The RaftClient is initialized externally
     }
 
     @Override

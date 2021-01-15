@@ -106,9 +106,9 @@ public class ReplicationControlManagerTest {
             setNumPartitions(1).setReplicationFactor((short) 3));
         assertEquals(expectedResponse2, result2.response());
         ControllerTestUtils.replayAll(replicationControl, result2.records());
-        assertEquals(new PartitionControlInfo(new int[] {2, 1, 0},
-            new int[] {2, 1, 0}, null, null, 0, 0),
-            replicationControl.getPartition(Uuid.fromString("rcVYHlwSsT8ms646oalucA"), 0));
+        assertEquals(new PartitionControlInfo(new int[] {1, 2, 0},
+            new int[] {1, 2, 0}, null, null, 1, 0),
+            replicationControl.getPartition(Uuid.fromString("5sxVbzQc-jzRErUhNcPf0Q"), 0));
     }
 
     @Test

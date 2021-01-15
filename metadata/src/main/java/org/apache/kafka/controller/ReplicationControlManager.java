@@ -20,6 +20,8 @@ package org.apache.kafka.controller;
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.errors.InvalidReplicationFactorException;
+import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.internals.Topic;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableReplicaAssignment;
@@ -47,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Random;
 
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.SET;
 import static org.apache.kafka.common.config.ConfigResource.Type.TOPIC;
@@ -167,7 +170,7 @@ public class ReplicationControlManager {
     /**
      * The random number generator used by this object.
      */
-    private final RandomSource random;
+    private final Random random;
 
     /**
      * The KIP-464 default replication factor that is used if a CreateTopics request does
@@ -209,7 +212,7 @@ public class ReplicationControlManager {
 
     ReplicationControlManager(SnapshotRegistry snapshotRegistry,
                               LogContext logContext,
-                              RandomSource random,
+                              Random random,
                               int defaultReplicationFactor,
                               int defaultNumPartitions,
                               ConfigurationControlManager configurationControl,
@@ -489,7 +492,7 @@ public class ReplicationControlManager {
                 List<Integer> replicas;
                 try {
                     replicas = clusterControl.chooseRandomUsable(random, replicationFactor);
-                } catch (Exception e) {
+                } catch (InvalidReplicationFactorException e) {
                     return new ApiError(Errors.INVALID_REPLICATION_FACTOR,
                         "Unable to replicate the partition " + replicationFactor +
                             " times: " + e.getMessage());
@@ -548,9 +551,9 @@ public class ReplicationControlManager {
             if (topicErrors.containsKey(topic.name())) continue;
             try {
                 Topic.validate(topic.name());
-            } catch (Exception e) {
+            } catch (InvalidTopicException e) {
                 topicErrors.put(topic.name(),
-                    new ApiError(Errors.INVALID_REQUEST, "Illegal topic name."));
+                    new ApiError(Errors.INVALID_TOPIC_EXCEPTION, e.getMessage()));
             }
         }
     }
@@ -571,4 +574,14 @@ public class ReplicationControlManager {
         }
         return configChanges;
     }
+
+    // VisibleForTesting
+    PartitionControlInfo getPartition(Uuid topicId, int partitionId) {
+        TopicControlInfo topic = topics.get(topicId);
+        if (topic == null) {
+            return null;
+        }
+        return topic.parts.get(partitionId);
+    }
+
 }

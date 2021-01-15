@@ -19,6 +19,7 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.Endpoint;
 import org.apache.kafka.common.errors.DuplicateBrokerRegistrationException;
+import org.apache.kafka.common.errors.InvalidReplicationFactorException;
 import org.apache.kafka.common.errors.StaleBrokerEpochException;
 import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
@@ -46,6 +47,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -347,9 +349,9 @@ public class ClusterControlManager {
         return usable.contains(brokerId);
     }
 
-    public List<Integer> chooseRandomUsable(RandomSource random, int numBrokers) {
+    public List<Integer> chooseRandomUsable(Random random, int numBrokers) {
         if (usable.size() < numBrokers) {
-            throw new RuntimeException("there are only " + usable.size() +
+            throw new InvalidReplicationFactorException("there are only " + usable.size() +
                 " usable brokers");
         }
         List<Integer> choices = new ArrayList<>();
@@ -367,7 +369,7 @@ public class ClusterControlManager {
                 choices.add(brokerId);
             }
         }
-        Collections.shuffle(choices);
+        Collections.shuffle(choices, random);
         return choices;
     }
 }

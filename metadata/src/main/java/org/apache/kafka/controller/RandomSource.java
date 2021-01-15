@@ -18,7 +18,16 @@
 package org.apache.kafka.controller;
 
 
+/**
+ * An interface for random number generators.  Random sources must be thread-safe.
+ */
 public interface RandomSource {
+    /**
+     * Returns a pseudorandom, uniformly distributed int value between 0
+     * (inclusive) and 2**64 (exclusive).
+     */
+    long nextLong();
+
     /**
      * Returns a pseudorandom, uniformly distributed int value between 0
      * (inclusive) and the specified value (exclusive).

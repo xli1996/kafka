@@ -17,17 +17,26 @@
 
 package org.apache.kafka.controller;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 
 /**
- * A very crude but deterministic random source intended for unit tests.
+ * A crude but deterministic random source intended for unit tests.
+ *
+ * This is not intended to be a good random number generator, but it does always
+ * return the same results every time it is run.  That is not guaranteed for
+ * java.util.Random, which may have different implementations in different JVM versions.
  */
 public class MockRandomSource implements RandomSource {
-    private final AtomicInteger val = new AtomicInteger(0);
+    private long state = 17;
+
+    @Override
+    public synchronized long nextLong() {
+        state = (state * 2862933555777941757L) + 3037000493L;
+        return state;
+    }
 
     @Override
     public int nextInt(int bound) {
-        return val.getAndAdd(123) % bound;
+        int i = (int) nextLong() & 0x7fffffff;
+        return i % bound;
     }
 }

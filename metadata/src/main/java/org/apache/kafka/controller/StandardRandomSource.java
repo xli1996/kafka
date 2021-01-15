@@ -32,6 +32,11 @@ public class StandardRandomSource implements RandomSource {
     }
 
     @Override
+    public long nextLong() {
+        return random.nextLong();
+    }
+
+    @Override
     public int nextInt(int bound) {
         return random.nextInt(bound);
     }

@@ -498,7 +498,7 @@ public class ReplicationControlManager {
                     toArray(replicas), null, null, replicas.get(0), 0));
             }
         }
-        Uuid topicId = Uuid.randomUuid();
+        Uuid topicId = new Uuid(random.nextLong(), random.nextLong());
         successes.put(topic.name(), new CreatableTopicResult().
             setName(topic.name()).
             setErrorCode((short) 0).

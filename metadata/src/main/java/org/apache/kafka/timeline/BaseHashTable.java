@@ -245,7 +245,10 @@ class BaseHashTable<T> {
         return bld.toString();
     }
 
-    public T pickRandomElement(Random random) {
+    T pickRandomEntry(Random random) {
+        if (size == 0) {
+            throw new RuntimeException("No elements in map.");
+        }
         while (true) {
             int slot = random.nextInt(elements.length);
             T value = (T) elements[slot];

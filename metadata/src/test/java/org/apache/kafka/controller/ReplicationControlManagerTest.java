@@ -24,6 +24,7 @@ import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCol
 import org.apache.kafka.common.message.CreateTopicsResponseData;
 import org.apache.kafka.common.message.CreateTopicsResponseData.CreatableTopicResult;
 import org.apache.kafka.common.metadata.RegisterBrokerRecord;
+import org.apache.kafka.common.metadata.TopicRecord;
 import org.apache.kafka.common.metadata.UnfenceBrokerRecord;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
@@ -108,7 +109,8 @@ public class ReplicationControlManagerTest {
         ControllerTestUtils.replayAll(replicationControl, result2.records());
         assertEquals(new PartitionControlInfo(new int[] {1, 2, 0},
             new int[] {1, 2, 0}, null, null, 1, 0),
-            replicationControl.getPartition(Uuid.fromString("5sxVbzQc-jzRErUhNcPf0Q"), 0));
+            replicationControl.getPartition(
+                ((TopicRecord) result2.records().get(0).message()).topicId(), 0));
     }
 
     @Test

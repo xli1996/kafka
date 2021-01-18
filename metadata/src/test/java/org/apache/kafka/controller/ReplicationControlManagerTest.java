@@ -109,6 +109,13 @@ public class ReplicationControlManagerTest {
         assertEquals(new PartitionControlInfo(new int[] {1, 2, 0},
             new int[] {1, 2, 0}, null, null, 1, 0),
             replicationControl.getPartition(Uuid.fromString("5sxVbzQc-jzRErUhNcPf0Q"), 0));
+        ControllerResult<CreateTopicsResponseData> result3 =
+                replicationControl.createTopics(request);
+        CreateTopicsResponseData expectedResponse3 = new CreateTopicsResponseData();
+        expectedResponse3.topics().add(new CreatableTopicResult().setName("foo").
+                setErrorCode(Errors.TOPIC_ALREADY_EXISTS.code()).
+                setErrorMessage(Errors.TOPIC_ALREADY_EXISTS.exception().getMessage()));
+        assertEquals(expectedResponse3, result3.response());
     }
 
     @Test

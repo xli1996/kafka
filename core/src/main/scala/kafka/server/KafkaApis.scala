@@ -144,7 +144,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     if (!config.metadataQuorumEnabled || !envelope.context.fromPrivilegedListener) {
       // If the designated forwarding request is not coming from a privileged listener, or
       // forwarding is not enabled yet, we would not handle the request.
-      requestChannel.closeConnection(envelope, Collections.emptyMap())
+      requestHelper.closeConnection(envelope, Collections.emptyMap())
       true
     } else if (!authHelper.authorize(envelope.context, CLUSTER_ACTION, CLUSTER, CLUSTER_NAME)) {
       // Forwarding request must have CLUSTER_ACTION authorization to reduce the risk of impersonation.
@@ -258,10 +258,10 @@ class KafkaApis(val requestChannel: RequestChannel,
 
         // Until we are ready to integrate the Raft layer, these APIs are treated as
         // unexpected and we just close the connection.
-        case ApiKeys.VOTE => requestChannel.closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.BEGIN_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.END_QUORUM_EPOCH => requestChannel.closeConnection(request, util.Collections.emptyMap())
-        case ApiKeys.DESCRIBE_QUORUM => requestChannel.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.VOTE => requestHelper.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.BEGIN_QUORUM_EPOCH => requestHelper.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.END_QUORUM_EPOCH => requestHelper.closeConnection(request, util.Collections.emptyMap())
+        case ApiKeys.DESCRIBE_QUORUM => requestHelper.closeConnection(request, util.Collections.emptyMap())
 
         // Handle requests that should have been sent to the KIP-500 controller.
         case ApiKeys.BROKER_REGISTRATION => handleBrokerRegistration(request)
@@ -677,14 +677,14 @@ class KafkaApis(val requestChannel: RequestChannel,
               s"from client id ${request.header.clientId} with ack=0\n" +
               s"Topic and partition to exceptions: $exceptionsSummary"
           )
-          requestChannel.closeConnection(request, new ProduceResponse(mergedResponseStatus.asJava).errorCounts)
+          requestHelper.closeConnection(request, new ProduceResponse(mergedResponseStatus.asJava).errorCounts)
         } else {
           // Note that although request throttling is exempt for acks == 0, the channel may be throttled due to
           // bandwidth quota violation.
           requestHelper.sendNoOpResponseExemptThrottle(request)
         }
       } else {
-        requestChannel.sendResponse(request, Some(new ProduceResponse(mergedResponseStatus.asJava, maxThrottleTimeMs)), None)
+        requestHelper.sendResponse(request, Some(new ProduceResponse(mergedResponseStatus.asJava, maxThrottleTimeMs)), None)
       }
     }
 
@@ -949,7 +949,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
 
         // Send the response immediately.
-        requestChannel.sendResponse(request, Some(createResponse(maxThrottleTimeMs)), Some(updateConversionStats))
+        requestHelper.sendResponse(request, Some(createResponse(maxThrottleTimeMs)), Some(updateConversionStats))
       }
     }
 

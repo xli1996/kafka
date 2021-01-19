@@ -381,6 +381,10 @@ public class ReplicationControlManager {
         // Check the topic names.
         validateNewTopicNames(topicErrors, request.topics());
 
+        // Identify topics that already exist and mark them with the appropriate error
+        request.topics().stream().filter(creatableTopic -> topicsByName.containsKey(creatableTopic.name()))
+                .forEach(t -> topicErrors.put(t.name(), new ApiError(Errors.TOPIC_ALREADY_EXISTS)));
+
         // Verify that the configurations for the new topics are OK, and figure out what
         // ConfigRecords should be created.
         Map<ConfigResource, Map<String, Entry<OpType, String>>> configChanges =

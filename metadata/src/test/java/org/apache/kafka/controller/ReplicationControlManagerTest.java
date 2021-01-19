@@ -17,7 +17,6 @@
 
 package org.apache.kafka.controller;
 
-import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCollection;
@@ -111,6 +110,13 @@ public class ReplicationControlManagerTest {
             new int[] {1, 2, 0}, null, null, 1, 0),
             replicationControl.getPartition(
                 ((TopicRecord) result2.records().get(0).message()).topicId(), 0));
+        ControllerResult<CreateTopicsResponseData> result3 =
+                replicationControl.createTopics(request);
+        CreateTopicsResponseData expectedResponse3 = new CreateTopicsResponseData();
+        expectedResponse3.topics().add(new CreatableTopicResult().setName("foo").
+                setErrorCode(Errors.TOPIC_ALREADY_EXISTS.code()).
+                setErrorMessage(Errors.TOPIC_ALREADY_EXISTS.exception().getMessage()));
+        assertEquals(expectedResponse3, result3.response());
     }
 
     @Test

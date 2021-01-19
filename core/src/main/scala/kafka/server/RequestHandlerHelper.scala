@@ -183,7 +183,7 @@ class RequestHandlerHelper(requestChannel: RequestChannel,
         new RequestChannel.SendResponse(
           request,
           request.buildResponseSend(response),
-          request.responseNode(response),
+          request.responseString(response),
           onComplete
         )
       case None =>

@@ -49,14 +49,16 @@ public class ReplicationControlManagerTest {
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
         LogContext logContext = new LogContext();
         MockTime time = new MockTime();
-        ClusterControlManager clusterControl =
-            new ClusterControlManager(logContext, time, snapshotRegistry, 1000, 100);
+        MockRandom random = new MockRandom();
+        ClusterControlManager clusterControl = new ClusterControlManager(
+            logContext, time, snapshotRegistry, 1000, 100,
+            new SimpleReplicaPlacementPolicy(random));
         ConfigurationControlManager configurationControl =
             new ConfigurationControlManager(snapshotRegistry, Collections.emptyMap());
         return new ReplicationControlManager(snapshotRegistry,
             new LogContext(),
-            new MockRandom(),
-            3,
+            random,
+            (short) 3,
             1,
             configurationControl,
             clusterControl);

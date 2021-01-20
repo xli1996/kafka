@@ -176,7 +176,7 @@ public class ReplicationControlManager {
      * The KIP-464 default replication factor that is used if a CreateTopics request does
      * not specify one.
      */
-    private final int defaultReplicationFactor;
+    private final short defaultReplicationFactor;
 
     /**
      * The KIP-464 default number of partitions that is used if a CreateTopics request does
@@ -213,7 +213,7 @@ public class ReplicationControlManager {
     ReplicationControlManager(SnapshotRegistry snapshotRegistry,
                               LogContext logContext,
                               Random random,
-                              int defaultReplicationFactor,
+                              short defaultReplicationFactor,
                               int defaultNumPartitions,
                               ConfigurationControlManager configurationControl,
                               ClusterControlManager clusterControl) {
@@ -490,19 +490,19 @@ public class ReplicationControlManager {
         } else {
             int numPartitions = topic.numPartitions() == -1 ?
                 defaultNumPartitions : topic.numPartitions();
-            int replicationFactor = topic.replicationFactor() == -1 ?
+            short replicationFactor = topic.replicationFactor() == -1 ?
                 defaultReplicationFactor : topic.replicationFactor();
-            for (int partitionId = 0; partitionId < numPartitions; partitionId++) {
-                List<Integer> replicas;
-                try {
-                    replicas = clusterControl.chooseRandomUsable(random, replicationFactor);
-                } catch (InvalidReplicationFactorException e) {
-                    return new ApiError(Errors.INVALID_REPLICATION_FACTOR,
-                        "Unable to replicate the partition " + replicationFactor +
-                            " times: " + e.getMessage());
+            try {
+                List<List<Integer>> replicas = clusterControl.
+                    placeReplicas(numPartitions, replicationFactor);
+                for (int partitionId = 0; partitionId < replicas.size(); partitionId++) {
+                    int[] r = toArray(replicas.get(partitionId));
+                    newParts.put(partitionId, new PartitionControlInfo(r, r, null, null, r[0], 0));
                 }
-                newParts.put(partitionId, new PartitionControlInfo(toArray(replicas),
-                    toArray(replicas), null, null, replicas.get(0), 0));
+            } catch (InvalidReplicationFactorException e) {
+                return new ApiError(Errors.INVALID_REPLICATION_FACTOR,
+                    "Unable to replicate the partition " + replicationFactor +
+                        " times: " + e.getMessage());
             }
         }
         Uuid topicId = new Uuid(random.nextLong(), random.nextLong());

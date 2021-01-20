@@ -43,8 +43,9 @@ public class ClusterControlManagerTest {
         MockTime time = new MockTime(0, 0, 0);
 
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
-        ClusterControlManager clusterControl =
-            new ClusterControlManager(new LogContext(), time, snapshotRegistry, 1000, 100);
+        ClusterControlManager clusterControl = new ClusterControlManager(
+            new LogContext(), time, snapshotRegistry, 1000, 100,
+                new SimpleReplicaPlacementPolicy(new Random()));
         assertFalse(clusterControl.isUsable(0));
 
         RegisterBrokerRecord brokerRecord = new RegisterBrokerRecord().setBrokerEpoch(100).setBrokerId(1);
@@ -69,8 +70,10 @@ public class ClusterControlManagerTest {
     public void testChooseRandomRegistered(int numUsableBrokers) {
         MockTime time = new MockTime(0, 0, 0);
         SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        MockRandom random = new MockRandom();
         ClusterControlManager clusterControl = new ClusterControlManager(
-            new LogContext(), time, snapshotRegistry, 1000, 100);
+            new LogContext(), time, snapshotRegistry, 1000, 100,
+            new SimpleReplicaPlacementPolicy(random));
         for (int i = 0; i < numUsableBrokers; i++) {
             RegisterBrokerRecord brokerRecord =
                 new RegisterBrokerRecord().setBrokerEpoch(100).setBrokerId(i);
@@ -88,10 +91,9 @@ public class ClusterControlManagerTest {
             assertTrue(clusterControl.isUsable(i));
         }
         for (int i = 0; i < 100; i++) {
-            Random random = new MockRandom();
-            List<Integer> results = clusterControl.chooseRandomUsable(random, 3);
+            List<List<Integer>> results = clusterControl.placeReplicas(1, (short) 3);
             HashSet<Integer> seen = new HashSet<>();
-            for (Integer result : results) {
+            for (Integer result : results.get(0)) {
                 assertTrue(result >= 0);
                 assertTrue(result < numUsableBrokers);
                 assertTrue(seen.add(result));

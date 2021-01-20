@@ -173,11 +173,17 @@ public class ClusterControlManager {
      */
     private final HashMap<Integer, BrokerSoftState> brokerSoftStates;
 
+    /**
+     * The replica placement policy to use.
+     */
+    private final ReplicaPlacementPolicy placementPolicy;
+
     ClusterControlManager(LogContext logContext,
                           Time time,
                           SnapshotRegistry snapshotRegistry,
                           long leaseDurationMs,
-                          long exclusiveLeaseDurationMs) {
+                          long exclusiveLeaseDurationMs,
+                          ReplicaPlacementPolicy placementPolicy) {
         this.log = logContext.logger(ClusterControlManager.class);
         this.time = time;
         this.leaseDurationNs = NANOSECONDS.convert(leaseDurationMs, MILLISECONDS);
@@ -186,6 +192,7 @@ public class ClusterControlManager {
         this.brokerRegistrations = new TimelineHashMap<>(snapshotRegistry, 0);
         this.usable = new TimelineHashSet<>(snapshotRegistry, 0);
         this.brokerSoftStates = new HashMap<>();
+        this.placementPolicy = placementPolicy;
     }
 
     /**
@@ -390,23 +397,18 @@ public class ClusterControlManager {
         return usable.contains(brokerId);
     }
 
-    public List<Integer> chooseRandomUsable(Random random, int numBrokers) {
-        if (numBrokers == 0) {
-            return Collections.emptyList();
-        } else if (usable.size() < numBrokers) {
-            throw new InvalidReplicationFactorException("there are only " + usable.size() +
-                " usable brokers");
-        }
-        // TODO: rack awareness?
-        List<Integer> results = new ArrayList<>();
-        Set<Integer> found = new HashSet<>();
-        do {
-            int brokerId = usable.pickRandomElement(random);
-            if (!found.contains(brokerId)) {
-                results.add(brokerId);
-                found.add(brokerId);
+    public List<List<Integer>> placeReplicas(int numPartitions, short numReplicas) {
+        List<Integer> allActive = new ArrayList<>();
+        Map<String, List<Integer>> activeByRack = new HashMap<>();
+        for (Integer brokerId : usable) {
+            allActive.add(brokerId);
+            BrokerRegistration registration = brokerRegistrations.get(brokerId);
+            if (registration.rack() != null) {
+                activeByRack.computeIfAbsent(registration.rack(),
+                    __ -> new ArrayList<>()).add(brokerId);
             }
-        } while (results.size() < numBrokers);
-        return results;
+        }
+        return placementPolicy.createPlacement(
+            numPartitions, numReplicas, allActive, activeByRack);
     }
 }

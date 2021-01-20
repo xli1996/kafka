@@ -85,8 +85,10 @@ public final class QuorumController implements Controller {
         private Map<ConfigResource.Type, ConfigDef> configDefs = Collections.emptyMap();
         private MetaLogManager logManager = null;
         private Map<String, VersionRange> supportedFeatures = Collections.emptyMap();
-        private int defaultReplicationFactor = 3;
+        private short defaultReplicationFactor = 3;
         private int defaultNumPartitions = 1;
+        private ReplicaPlacementPolicy replicaPlacementPolicy =
+            new SimpleReplicaPlacementPolicy(new Random());
 
         public Builder(int nodeId) {
             this.nodeId = nodeId;
@@ -122,13 +124,18 @@ public final class QuorumController implements Controller {
             return this;
         }
 
-        public Builder setDefaultReplicationFactor(int defaultReplicationFactor) {
+        public Builder setDefaultReplicationFactor(short defaultReplicationFactor) {
             this.defaultReplicationFactor = defaultReplicationFactor;
             return this;
         }
 
         public Builder setDefaultNumPartitions(int defaultNumPartitions) {
             this.defaultNumPartitions = defaultNumPartitions;
+            return this;
+        }
+
+        public Builder setReplicaPlacementPolicy(ReplicaPlacementPolicy replicaPlacementPolicy) {
+            this.replicaPlacementPolicy = replicaPlacementPolicy;
             return this;
         }
 
@@ -147,7 +154,7 @@ public final class QuorumController implements Controller {
                 queue = new KafkaEventQueue(time, logContext, threadNamePrefix);
                 return new QuorumController(logContext, nodeId, queue, time, configDefs,
                         logManager, supportedFeatures, defaultReplicationFactor,
-                        defaultNumPartitions);
+                        defaultNumPartitions, replicaPlacementPolicy);
             } catch (Exception e) {
                 Utils.closeQuietly(queue, "event queue");
                 throw e;
@@ -600,8 +607,9 @@ public final class QuorumController implements Controller {
                              Map<ConfigResource.Type, ConfigDef> configDefs,
                              MetaLogManager logManager,
                              Map<String, VersionRange> supportedFeatures,
-                             int defaultReplicationFactor,
-                             int defaultNumPartitions) throws Exception {
+                             short defaultReplicationFactor,
+                             int defaultNumPartitions,
+                             ReplicaPlacementPolicy replicaPlacementPolicy) throws Exception {
         this.log = logContext.logger(QuorumController.class);
         this.nodeId = nodeId;
         this.queue = queue;
@@ -612,10 +620,9 @@ public final class QuorumController implements Controller {
         this.configurationControl = new ConfigurationControlManager(snapshotRegistry,
             configDefs);
         this.clientQuotaControlManager = new ClientQuotaControlManager(snapshotRegistry);
-        this.clusterControl =
-            new ClusterControlManager(logContext, time, snapshotRegistry, 18000, 9000);
-        this.featureControl =
-            new FeatureControlManager(supportedFeatures, snapshotRegistry);
+        this.clusterControl = new ClusterControlManager(logContext, time,
+            snapshotRegistry, 18000, 9000, replicaPlacementPolicy);
+        this.featureControl = new FeatureControlManager(supportedFeatures, snapshotRegistry);
         this.replicationControl = new ReplicationControlManager(snapshotRegistry,
             logContext, new Random(), defaultReplicationFactor, defaultNumPartitions,
             configurationControl, clusterControl);

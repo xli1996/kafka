@@ -32,7 +32,7 @@ interface ReplicaPlacementPolicy {
      * @param numReplicas           The number of replicas to create for each partitions.
      *                              Must be positive.
      * @param allActive             A list of all the active brokers.
-     * @param active                A map from racks to the brokers in that rack.
+     * @param activeByRack          A map from racks to the brokers in that rack.
      *                              Brokers without a rack will not appear here.
      *
      * @throws InvalidReplicationFactorException    If too many replicas were requested.

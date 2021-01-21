@@ -381,7 +381,7 @@ class ControllerApis(val requestChannel: RequestChannel,
             setErrorCode(Errors.NONE.code()).
             setIsCaughtUp(reply.isCaughtUp()).
             setIsFenced(reply.isFenced()).
-            setShouldShutdown(reply.isFenced()))
+            setShouldShutdown(reply.shouldShutdown()))
         }
       }
       requestHelper.sendResponseMaybeThrottle(request,

@@ -50,8 +50,8 @@ import org.apache.kafka.common.utils.KafkaEventQueue;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
-import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
+import org.apache.kafka.metadata.BrokerHeartbeatReply;
+import org.apache.kafka.metadata.BrokerRegistrationReply;
 import org.apache.kafka.metadata.FeatureManager;
 import org.apache.kafka.metadata.VersionRange;
 import org.apache.kafka.metalog.MetaLogLeader;
@@ -708,14 +708,14 @@ public final class QuorumController implements Controller {
     }
 
     @Override
-    public CompletableFuture<HeartbeatReply>
+    public CompletableFuture<BrokerHeartbeatReply>
             processBrokerHeartbeat(BrokerHeartbeatRequestData request) {
         return appendWriteEvent("processBrokerHeartbeat", () ->
             clusterControl.processBrokerHeartbeat(request, lastCommittedOffset));
     }
 
     @Override
-    public CompletableFuture<RegistrationReply>
+    public CompletableFuture<BrokerRegistrationReply>
             registerBroker(BrokerRegistrationRequestData request) {
         return appendWriteEvent("registerBroker", () ->
             clusterControl.registerBroker(request, writeOffset + 1,

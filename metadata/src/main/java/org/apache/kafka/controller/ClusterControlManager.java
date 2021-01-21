@@ -33,6 +33,8 @@ import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.metadata.BrokerRegistration;
 import org.apache.kafka.metadata.FeatureManager;
+import org.apache.kafka.metadata.BrokerHeartbeatReply;
+import org.apache.kafka.metadata.BrokerRegistrationReply;
 import org.apache.kafka.metadata.VersionRange;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.apache.kafka.timeline.TimelineHashMap;
@@ -44,7 +46,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -60,80 +61,6 @@ public class ClusterControlManager {
 
         private boolean leaseExpired(long exclusiveLeaseDurationNs, long nowNs) {
             return (nowNs - lastContactNs) > exclusiveLeaseDurationNs;
-        }
-    }
-
-    public static class RegistrationReply {
-        private final long epoch;
-
-        RegistrationReply(long epoch) {
-            this.epoch = epoch;
-        }
-
-        public long epoch() {
-            return epoch;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(epoch);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (!(o instanceof RegistrationReply)) return false;
-            RegistrationReply other = (RegistrationReply) o;
-            return other.epoch == epoch;
-        }
-
-        @Override
-        public String toString() {
-            return "RegistrationReply(epoch=" + epoch + ")";
-        }
-    }
-
-    public static class HeartbeatReply {
-        private final boolean isCaughtUp;
-        private final boolean isFenced;
-        private final boolean shouldShutdown;
-
-        HeartbeatReply(boolean isCaughtUp, boolean isFenced, boolean shouldShutdown) {
-            this.isCaughtUp = isCaughtUp;
-            this.isFenced = isFenced;
-            this.shouldShutdown = shouldShutdown;
-        }
-
-        public boolean isCaughtUp() {
-            return isCaughtUp;
-        }
-
-        public boolean isFenced() {
-            return isFenced;
-        }
-
-        public boolean shouldShutdown() {
-            return shouldShutdown;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(isCaughtUp, isFenced, shouldShutdown);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (!(o instanceof HeartbeatReply)) return false;
-            HeartbeatReply other = (HeartbeatReply) o;
-            return other.isCaughtUp == isCaughtUp &&
-                other.isFenced == isFenced &&
-                other.shouldShutdown == shouldShutdown;
-        }
-
-        @Override
-        public String toString() {
-            return "HeartbeatReply(isCaughtUp=" + isCaughtUp +
-                ", isFenced=" + isFenced +
-                ", shouldShutdown = " + shouldShutdown + ")";
         }
     }
 
@@ -194,7 +121,7 @@ public class ClusterControlManager {
     /**
      * Process an incoming broker registration request.
      */
-    public ControllerResult<RegistrationReply> registerBroker(
+    public ControllerResult<BrokerRegistrationReply> registerBroker(
             BrokerRegistrationRequestData request, long brokerEpoch,
             FeatureManager.FinalizedFeaturesAndEpoch finalizedFeaturesAndEpoch) {
         int brokerId = request.brokerId();
@@ -237,7 +164,7 @@ public class ClusterControlManager {
 
         return new ControllerResult<>(
             Collections.singletonList(new ApiMessageAndVersion(record, (short) 0)),
-                new RegistrationReply(brokerEpoch));
+                new BrokerRegistrationReply(brokerEpoch));
     }
 
     public ControllerResult<Void> decommissionBroker(int brokerId) {
@@ -259,7 +186,7 @@ public class ClusterControlManager {
         return result;
     }
 
-    public ControllerResult<HeartbeatReply> processBrokerHeartbeat(BrokerHeartbeatRequestData request,
+    public ControllerResult<BrokerHeartbeatReply> processBrokerHeartbeat(BrokerHeartbeatRequestData request,
                                                                    long lastCommittedOffset) {
         int brokerId = request.brokerId();
         verifyHeartbeatAgainstRegistration(request, brokerRegistrations.get(brokerId));
@@ -278,7 +205,7 @@ public class ClusterControlManager {
                     setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
             }
         }
-        return new ControllerResult<>(records, new HeartbeatReply(isCaughtUp, isFenced, false));
+        return new ControllerResult<>(records, new BrokerHeartbeatReply(isCaughtUp, isFenced, false));
     }
 
     void touchBroker(int brokerId) {

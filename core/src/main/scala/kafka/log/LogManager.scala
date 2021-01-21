@@ -49,6 +49,7 @@ import scala.util.{Failure, Success, Try}
 @threadsafe
 class LogManager(logDirs: Seq[File],
                  initialOfflineDirs: Seq[File],
+                 // TODO: become aware of topic config changes as we catch up on the KIP-500 metadata log
                  val topicConfigs: Map[String, LogConfig], // note that this doesn't get updated after creation
                  val initialDefaultConfig: LogConfig,
                  val cleanerConfig: CleanerConfig,
@@ -61,7 +62,9 @@ class LogManager(logDirs: Seq[File],
                  scheduler: Scheduler,
                  brokerTopicStats: BrokerTopicStats,
                  logDirFailureChannel: LogDirFailureChannel,
-                 time: Time) extends Logging with KafkaMetricsGroup {
+                 time: Time,
+                 recoveryDoneFutureToComplete: CompletableFuture[Void])
+  extends Logging with KafkaMetricsGroup {
 
   import LogManager._
 
@@ -346,7 +349,7 @@ class LogManager(logDirs: Seq[File],
         val numLogsLoaded = new AtomicInteger(0)
         numTotalLogs += logsToLoad.length
 
-        val jobsForDir = logsToLoad.map { logDir =>
+        val jobsForDir = logsToLoad.filter(logDir => Log.parseTopicPartitionName(logDir).topic != "@metadata").map { logDir =>
           val runnable: Runnable = () => {
             try {
               debug(s"Loading log $logDir")
@@ -391,6 +394,7 @@ class LogManager(logDirs: Seq[File],
     }
 
     info(s"Loaded $numTotalLogs logs in ${time.hiResClockMs() - startMs}ms.")
+    recoveryDoneFutureToComplete.complete(null)
   }
 
   /**
@@ -1173,8 +1177,9 @@ object LogManager {
             kafkaScheduler: KafkaScheduler,
             time: Time,
             brokerTopicStats: BrokerTopicStats,
-            logDirFailureChannel: LogDirFailureChannel): LogManager = {
-    this(config, initialOfflineDirs, None, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel)
+            logDirFailureChannel: LogDirFailureChannel,
+            recoveryDoneFutureToComplete: CompletableFuture[Void]): LogManager = {
+    this(config, initialOfflineDirs, None, kafkaScheduler, time, brokerTopicStats, logDirFailureChannel, recoveryDoneFutureToComplete)
   }
 
   def apply(config: KafkaConfig,
@@ -1183,7 +1188,8 @@ object LogManager {
             kafkaScheduler: KafkaScheduler,
             time: Time,
             brokerTopicStats: BrokerTopicStats,
-            logDirFailureChannel: LogDirFailureChannel): LogManager = {
+            logDirFailureChannel: LogDirFailureChannel,
+            recoveryDoneFutureToComplete: CompletableFuture[Void]): LogManager = {
     val defaultProps = KafkaBroker.copyKafkaConfigToLog(config)
 
     LogConfig.validateValues(defaultProps)
@@ -1219,6 +1225,7 @@ object LogManager {
       scheduler = kafkaScheduler,
       brokerTopicStats = brokerTopicStats,
       logDirFailureChannel = logDirFailureChannel,
-      time = time)
+      time = time,
+      recoveryDoneFutureToComplete = recoveryDoneFutureToComplete)
   }
 }

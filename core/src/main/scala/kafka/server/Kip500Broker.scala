@@ -163,8 +163,10 @@ class Kip500Broker(
 
       // Create log manager, but don't start it because we need to delay any potential unclean shutdown log recovery
       // until we catch up on the metadata log and have up-to-date topic and broker configs.
+      val recoveryDoneFutureToComplete: CompletableFuture[Void] = new CompletableFuture[Void]()
+      recoveryDoneFutureToComplete.thenApply(_ => brokerMetadataListener.handleLogRecoveryDone())
       logManager = LogManager(config, initialOfflineDirs, kafkaScheduler, time,
-        brokerTopicStats, logDirFailureChannel)
+        brokerTopicStats, logDirFailureChannel, recoveryDoneFutureToComplete)
 
       metadataCache = new MetadataCache(config.brokerId)
       // Enable delegation token cache for all SCRAM mechanisms to simplify dynamic update.

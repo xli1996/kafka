@@ -58,6 +58,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @State(Scope.Benchmark)
@@ -95,7 +96,8 @@ public class UpdateFollowerFetchStateBenchmark {
                 scheduler,
                 brokerTopicStats,
                 logDirFailureChannel,
-                Time.SYSTEM);
+                Time.SYSTEM,
+                new CompletableFuture<>());
         OffsetCheckpoints offsetCheckpoints = Mockito.mock(OffsetCheckpoints.class);
         Mockito.when(offsetCheckpoints.fetch(logDir.getAbsolutePath(), topicPartition)).thenReturn(Option.apply(0L));
         DelayedOperations delayedOperations = new DelayedOperationsMock();

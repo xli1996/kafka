@@ -25,7 +25,7 @@ import java.security.cert.X509Certificate
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.{Arrays, Collections, Properties}
-import java.util.concurrent.{Callable, ExecutionException, Executors, TimeUnit}
+import java.util.concurrent.{Callable, CompletableFuture, ExecutionException, Executors, TimeUnit}
 
 import javax.net.ssl.X509TrustManager
 import kafka.api._
@@ -1072,7 +1072,8 @@ object TestUtils extends Logging {
                    scheduler = time.scheduler,
                    time = time,
                    brokerTopicStats = new BrokerTopicStats,
-                   logDirFailureChannel = new LogDirFailureChannel(logDirs.size))
+                   logDirFailureChannel = new LogDirFailureChannel(logDirs.size),
+                   recoveryDoneFutureToComplete = new CompletableFuture[Void]())
   }
 
   class MockAlterIsrManager extends AlterIsrManager {

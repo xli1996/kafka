@@ -14,7 +14,7 @@
 # limitations under the License.
 
 
-from ducktape.mark import matrix
+from ducktape.mark import parametrize
 from ducktape.mark.resource import cluster
 from ducktape.tests.test import Test
 from ducktape.utils.util import wait_until
@@ -43,25 +43,40 @@ class TestBounce(Test):
         if self.zk:
             self.zk.start()
 
+    @cluster(num_nodes=3)
+    @parametrize(metadata_quorum=quorum.colocated_raft)
     @cluster(num_nodes=4)
-    @matrix(metadata_quorum=quorum.all)
+    @parametrize(metadata_quorum=quorum.zk)
+    @cluster(num_nodes=5)
+    @parametrize(metadata_quorum=quorum.remote_raft)
     def test_simple_run(self, metadata_quorum):
         """
         Test that we can start VerifiableProducer on the current branch snapshot version, and
         verify that we can produce a small number of messages both before and after a subsequent roll.
+        For the remote Raft controller quorum case:
+            we produce, then we roll the controller and produce, and then we roll the broker and produce.
+        Otherwise we just produce, roll the broker, and produce again.
         """
         self.kafka.start()
-        for first_time in [True, False]:
-            self.create_producer()
-            self.producer.start()
-            wait_until(lambda: self.producer.num_acked > 5, timeout_sec=15,
-                       err_msg="Producer failed to start in a reasonable amount of time.")
-
-            self.producer.wait()
-            num_produced = self.producer.num_acked
-            assert num_produced == self.num_messages, "num_produced: %d, num_messages: %d" % (num_produced, self.num_messages)
-            if first_time:
+        for loop_num in range(0, 3):
+            if metadata_quorum == quorum.remote_raft:
+                restart_remote_controller_quorum =  loop_num == 0
+                restart_broker_service = loop_num == 1
+                produce = True
+            else:
+                restart_remote_controller_quorum =  False
+                restart_broker_service = loop_num == 0
+                produce = loop_num == 0 or loop_num == 1
+            if produce:
+                self.create_producer()
+                self.producer.start()
+                wait_until(lambda: self.producer.num_acked > 5, timeout_sec=15,
+                           err_msg="Producer failed to start in a reasonable amount of time.")
+                self.producer.wait()
+                num_produced = self.producer.num_acked
+                assert num_produced == self.num_messages, "num_produced: %d, num_messages: %d" % (num_produced, self.num_messages)
                 self.producer.stop()
-                if self.kafka.quorum_info.using_raft and self.kafka.remote_controller_quorum:
-                    self.kafka.remote_controller_quorum.restart_cluster()
+            if restart_remote_controller_quorum:
+                self.kafka.remote_controller_quorum.restart_cluster()
+            elif restart_broker_service:
                 self.kafka.restart_cluster()

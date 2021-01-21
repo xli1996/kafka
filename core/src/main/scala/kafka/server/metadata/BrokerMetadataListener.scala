@@ -31,6 +31,7 @@ import org.apache.kafka.common.protocol.ApiMessage
 import org.apache.kafka.common.utils.{EventQueue, KafkaEventQueue, LogContext, Time}
 import org.apache.kafka.metalog.{MetaLogLeader, MetaLogListener}
 
+import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
 object BrokerMetadataListener{
@@ -71,6 +72,30 @@ class BrokerMetadataListener(val brokerId: Int,
   val eventQueue = new KafkaEventQueue(time, logContext, threadNamePrefix.getOrElse(""))
 
   def highestMetadataOffset(): Long = _highestMetadataOffset
+
+  case class SavedPartitionEvent(lastOffset: Long,
+                                 localChanged: Set[MetadataPartition], localRemoved: Set[MetadataPartition],
+                                 changedPartitionsPreviouslyExisting: mutable.Set[MetadataPartition],
+                                 nextBrokers: MetadataBrokers) {}
+  var savedPartitionEvents = Option(mutable.Buffer[SavedPartitionEvent]())
+
+  def handleLogRecoveryDone(): Unit = {
+    eventQueue.append(new LogRecoveryDoneEvent())
+  }
+
+  class LogRecoveryDoneEvent()
+    extends EventQueue.FailureLoggingEvent(logger.underlying) {
+    override def run(): Unit = {
+      savedPartitionEvents.foreach(_.foreach(pe => replicaManager.handleMetadataRecords(
+        pe.lastOffset, pe.localChanged, pe.localRemoved, pe.changedPartitionsPreviouslyExisting, pe.nextBrokers,
+        RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))))
+      savedPartitionEvents = Option.empty // reclaims memory and indicates that log recovery is complete
+    }
+  }
+
+  private def logRecoveryComplete = {
+    savedPartitionEvents.isEmpty
+  }
 
   /**
    * Handle new metadata records.
@@ -119,8 +144,20 @@ class BrokerMetadataListener(val brokerId: Int,
         if (isDebugEnabled) {
           debug(s"Metadata batch ${lastOffset}: applying partition changes")
         }
-        replicaManager.handleMetadataRecords(imageBuilder, lastOffset,
-          RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))
+        val builder = imageBuilder.partitionsBuilder()
+        val prevPartitions = imageBuilder.prevImage.partitions
+        val changedPartitionsPreviouslyExisting = mutable.Set[MetadataPartition]()
+        builder.localChanged().foreach(metadataPartition =>
+          prevPartitions.get(metadataPartition.topicName, metadataPartition.partitionIndex).foreach(
+            changedPartitionsPreviouslyExisting.add(_)))
+        if (logRecoveryComplete) {
+          replicaManager.handleMetadataRecords(lastOffset, builder.localChanged(),
+            builder.localRemoved(), changedPartitionsPreviouslyExisting, imageBuilder.nextBrokers(),
+            RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))
+        } else {
+          savedPartitionEvents.get.addOne(SavedPartitionEvent(lastOffset, builder.localChanged(),
+            builder.localRemoved(), changedPartitionsPreviouslyExisting, imageBuilder.nextBrokers()))
+        }
       } else if (isDebugEnabled) {
         debug(s"Metadata batch ${lastOffset}: no partition changes found.")
       }

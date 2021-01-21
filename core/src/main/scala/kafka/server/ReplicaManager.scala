@@ -33,7 +33,7 @@ import kafka.server.{FetchMetadata => SFetchMetadata}
 import kafka.server.HostedPartition.Online
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
-import kafka.server.metadata.{ConfigRepository, MetadataBroker, MetadataImageBuilder, MetadataPartition, MetadataPartitions, ZkConfigRepository}
+import kafka.server.metadata.{ConfigRepository, MetadataBroker, MetadataBrokers, MetadataPartition, ZkConfigRepository}
 import kafka.utils._
 import kafka.utils.Implicits._
 import kafka.zk.{AdminZkClient, KafkaZkClient}
@@ -1517,35 +1517,37 @@ class ReplicaManager(val config: KafkaConfig,
     leaderTopicSet.diff(newFollowerTopics).foreach(brokerTopicStats.removeOldFollowerMetrics)
   }
 
-
   /**
    * Handle changes made by a batch of KIP-500 metadata records.
    *
-   * @param imageBuilder        The MetadataImage builder.
-   * @param metadataOffset      The last offset in the batch of records.
-   * @param onLeadershipChange  The callbacks to invoke when leadership changes.
+   * @param metadataOffset                The last offset in the batch of records.
+   * @param localChanged                  The changed partitions for the next metadata image.
+   * @param localRemoved                  The removed partitions for the next metadata image.
+   * @param prevPartitionsAlreadyExisting The changed partitions that existed in the previous metadata image.
+   * @param nextBrokers                   The brokers in the next metadata image.
+   * @param onLeadershipChange            The callbacks to invoke when leadership changes.
    */
-  def handleMetadataRecords(imageBuilder: MetadataImageBuilder,
-                            metadataOffset: Long,
+  def handleMetadataRecords(metadataOffset: Long,
+                            localChanged: Set[MetadataPartition], localRemoved: Set[MetadataPartition],
+                            prevPartitionsAlreadyExisting: Set[MetadataPartition], nextBrokers: MetadataBrokers,
                             onLeadershipChange: (Iterable[Partition], Iterable[Partition]) => Unit): Unit = {
-    val builder = imageBuilder.partitionsBuilder()
     val startMs = time.milliseconds()
     replicaStateChangeLock synchronized {
-      stateChangeLogger.info("Metadata batch %d: %d local partition(s) changed, %d " +
-        "local partition(s) removed.".format(metadataOffset, builder.localChanged().size,
-          builder.localRemoved().size))
+      stateChangeLogger.info(("Metadata batch %d: %d local partition(s) changed, %d " +
+        "local partition(s) removed.").format(metadataOffset, localChanged.size,
+        localRemoved.size))
       if (stateChangeLogger.isTraceEnabled) {
-        builder.localChanged().foreach { state =>
+        localChanged.foreach { state =>
           stateChangeLogger.trace(s"Metadata batch ${metadataOffset}: locally changed: ${state}")
         }
-        builder.localRemoved().foreach { state =>
+        localRemoved.foreach { state =>
           stateChangeLogger.trace(s"Metadata batch ${metadataOffset}: locally removed: ${state}")
         }
       }
       // First create the partition if it doesn't exist already
       val partitionsToBeLeader = mutable.HashMap[Partition, MetadataPartition]()
       val partitionsToBeFollower = mutable.HashMap[Partition, MetadataPartition]()
-      builder.localChanged().foreach { state =>
+      localChanged.foreach { state =>
         val topicPartition = new TopicPartition(state.topicName, state.partitionIndex)
         val partition = getPartition(topicPartition) match {
           case HostedPartition.Offline =>
@@ -1571,12 +1573,12 @@ class ReplicaManager(val config: KafkaConfig,
       }
       val highWatermarkCheckpoints = new LazyOffsetCheckpoints(this.highWatermarkCheckpoints)
       val partitionsBecomeLeader = if (partitionsToBeLeader.nonEmpty)
-        makeLeaders(imageBuilder.prevImage.partitions, partitionsToBeLeader,
+        makeLeaders(prevPartitionsAlreadyExisting, partitionsToBeLeader,
           highWatermarkCheckpoints, metadataOffset)
       else
         Set.empty[Partition]
       val partitionsBecomeFollower = if (partitionsToBeFollower.nonEmpty)
-        makeFollowers(imageBuilder, partitionsToBeFollower, highWatermarkCheckpoints,
+        makeFollowers(prevPartitionsAlreadyExisting, nextBrokers, partitionsToBeFollower, highWatermarkCheckpoints,
           metadataOffset)
       else {
         Set.empty[Partition]
@@ -1584,7 +1586,7 @@ class ReplicaManager(val config: KafkaConfig,
 
       updateLeaderAndFollowerMetrics(partitionsBecomeFollower.map(_.topic).toSet)
 
-      builder.localChanged().foreach { state =>
+      localChanged.foreach { state =>
         val topicPartition = new TopicPartition(state.topicName, state.partitionIndex)
         /*
          * If there is offline log directory, a Partition object may have been created by getOrCreatePartition()
@@ -1604,8 +1606,8 @@ class ReplicaManager(val config: KafkaConfig,
 
       // TODO: we should move aside log directories which have been deleted rather than
       // purging them from the disk immediately.
-      if (!builder.localRemoved().isEmpty) {
-        stopPartitions(builder.localRemoved().map(_.toTopicPartition() -> true).toMap).foreach {
+      if (!localRemoved.isEmpty) {
+        stopPartitions(localRemoved.map(_.toTopicPartition() -> true).toMap).foreach {
           case (topicPartition, e) => if (e.isInstanceOf[KafkaStorageException]) {
             stateChangeLogger.error(s"Metadata batch ${metadataOffset}: unable to delete " +
               s"${topicPartition} as the local replica for the partition is in an offline " +
@@ -1653,7 +1655,7 @@ class ReplicaManager(val config: KafkaConfig,
       replicaAlterLogDirsManager.addFetcherForPartitions(futureReplicasAndInitialOffset)
   }
 
-  private def makeLeaders(prevPartitions: MetadataPartitions,
+  private def makeLeaders(prevPartitionsAlreadyExisting: Set[MetadataPartition],
                           partitionStates: Map[Partition, MetadataPartition],
                           highWatermarkCheckpoints: OffsetCheckpoints,
                           metadataOffset: Long): Set[Partition] = {
@@ -1667,7 +1669,7 @@ class ReplicaManager(val config: KafkaConfig,
       partitionStates.forKeyValue { (partition, state) =>
         try {
           val isrState = state.toLeaderAndIsrPartitionState(
-            prevPartitions.get(state.topicName, state.partitionIndex).isDefined)
+            !prevPartitionsAlreadyExisting(state))
           if (partition.makeLeader(isrState, highWatermarkCheckpoints)) {
             partitionsToMakeLeaders += partition
           } else {
@@ -1779,7 +1781,7 @@ class ReplicaManager(val config: KafkaConfig,
     partitionsToMakeLeaders
   }
 
-  private def makeFollowers(builder: MetadataImageBuilder,
+  private def makeFollowers(prevPartitionsAlreadyExisting: Set[MetadataPartition], currentBrokers: MetadataBrokers,
                             partitionStates: Map[Partition, MetadataPartition],
                             highWatermarkCheckpoints: OffsetCheckpoints,
                             metadataOffset: Long): Set[Partition] = {
@@ -1792,13 +1794,12 @@ class ReplicaManager(val config: KafkaConfig,
     }
 
     val partitionsToMakeFollower: mutable.Set[Partition] = mutable.Set()
-    val prevPartitions = builder.prevImage.partitions
     try {
       partitionStates.forKeyValue { (partition, state) =>
         val tp = partition.topicPartition
         try {
-          val isNew = prevPartitions.get(state.topicName, state.partitionIndex).isDefined
-          builder.broker(state.leaderId) match {
+          val isNew = !prevPartitionsAlreadyExisting(state)
+          currentBrokers.get(state.leaderId) match {
             // Only change partition state when the leader is available
             case Some(_) =>
               val isrState = state.toLeaderAndIsrPartitionState(isNew)
@@ -1850,7 +1851,7 @@ class ReplicaManager(val config: KafkaConfig,
       } else {
         // we do not need to check if the leader exists again since this has been done at the beginning of this process
         val partitionsToMakeFollowerWithLeaderAndOffset = partitionsToMakeFollower.map { partition =>
-          val leader = builder.broker(partition.leaderReplicaIdOpt.get).get.
+          val leader = currentBrokers.get(partition.leaderReplicaIdOpt.get).get.
             brokerEndPoint(config.interBrokerListenerName)
           val log = partition.localLogOrException
           val fetchOffset = initialFetchOffset(log)

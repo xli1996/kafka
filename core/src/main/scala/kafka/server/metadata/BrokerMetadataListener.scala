@@ -73,11 +73,9 @@ class BrokerMetadataListener(val brokerId: Int,
 
   def highestMetadataOffset(): Long = _highestMetadataOffset
 
-  case class SavedPartitionEvent(lastOffset: Long,
-                                 localChanged: Set[MetadataPartition], localRemoved: Set[MetadataPartition],
-                                 changedPartitionsPreviouslyExisting: mutable.Set[MetadataPartition],
-                                 nextBrokers: MetadataBrokers) {}
-  var savedPartitionEvents = Option(mutable.Buffer[SavedPartitionEvent]())
+  var preRecoveryPartitionImageBuilder =
+    Option(MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage()))
+  var preRecoveryDeletedPartitions = Option(mutable.Buffer[MetadataPartition]())
 
   def handleLogRecoveryDone(): Unit = {
     eventQueue.append(new LogRecoveryDoneEvent())
@@ -86,15 +84,16 @@ class BrokerMetadataListener(val brokerId: Int,
   class LogRecoveryDoneEvent()
     extends EventQueue.FailureLoggingEvent(logger.underlying) {
     override def run(): Unit = {
-      savedPartitionEvents.foreach(_.foreach(pe => replicaManager.handleMetadataRecords(
-        pe.lastOffset, pe.localChanged, pe.localRemoved, pe.changedPartitionsPreviouslyExisting, pe.nextBrokers,
-        RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))))
-      savedPartitionEvents = Option.empty // reclaims memory and indicates that log recovery is complete
+      preRecoveryPartitionImageBuilder.foreach(imageBuilder => applyPartitionChanges(imageBuilder, _highestMetadataOffset))
+      preRecoveryPartitionImageBuilder = Option.empty
+      preRecoveryDeletedPartitions.foreach(removedPartitions =>
+        groupCoordinator.handleDeletedPartitions(removedPartitions.map(_.toTopicPartition()).toSeq))
+      preRecoveryDeletedPartitions = Option.empty
     }
   }
 
   private def logRecoveryComplete = {
-    savedPartitionEvents.isEmpty
+    preRecoveryPartitionImageBuilder.isEmpty
   }
 
   /**
@@ -111,8 +110,8 @@ class BrokerMetadataListener(val brokerId: Int,
       if (isDebugEnabled) {
         debug(s"Metadata batch ${lastOffset}: handling ${records.size()} record(s).")
       }
-      val imageBuilder =
-        MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage())
+      val imageBuilder = MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage())
+      val imageBuilders = Seq(Option(imageBuilder), preRecoveryPartitionImageBuilder)
       val startNs = time.nanoseconds()
       var index = 0
       metadataBatchSizeHist.update(records.size())
@@ -122,7 +121,7 @@ class BrokerMetadataListener(val brokerId: Int,
             trace("Metadata batch %d: processing [%d/%d]: %s.".format(lastOffset, index + 1,
               records.size(), record.toString()))
           }
-          handleMessage(imageBuilder, record, lastOffset)
+          handleMessage(imageBuilders, record, lastOffset)
         } catch {
           case e: Exception => error(s"Unable to handle record ${index} in batch " +
             s"ending at offset ${lastOffset}", e)
@@ -141,22 +140,10 @@ class BrokerMetadataListener(val brokerId: Int,
         debug(s"Metadata batch ${lastOffset}: no new metadata image required.")
       }
       if (imageBuilder.hasPartitionChanges()) {
-        if (isDebugEnabled) {
-          debug(s"Metadata batch ${lastOffset}: applying partition changes")
-        }
-        val builder = imageBuilder.partitionsBuilder()
-        val prevPartitions = imageBuilder.prevImage.partitions
-        val changedPartitionsPreviouslyExisting = mutable.Set[MetadataPartition]()
-        builder.localChanged().foreach(metadataPartition =>
-          prevPartitions.get(metadataPartition.topicName, metadataPartition.partitionIndex).foreach(
-            changedPartitionsPreviouslyExisting.add(_)))
         if (logRecoveryComplete) {
-          replicaManager.handleMetadataRecords(lastOffset, builder.localChanged(),
-            builder.localRemoved(), changedPartitionsPreviouslyExisting, imageBuilder.nextBrokers(),
-            RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))
+          applyPartitionChanges(imageBuilder, lastOffset)
         } else {
-          savedPartitionEvents.get.addOne(SavedPartitionEvent(lastOffset, builder.localChanged(),
-            builder.localRemoved(), changedPartitionsPreviouslyExisting, imageBuilder.nextBrokers()))
+          debug(s"Metadata batch ${lastOffset}: deferring partition changes until after log recovery")
         }
       } else if (isDebugEnabled) {
         debug(s"Metadata batch ${lastOffset}: no partition changes found.")
@@ -170,7 +157,22 @@ class BrokerMetadataListener(val brokerId: Int,
     }
   }
 
-  private def handleMessage(imageBuilder: MetadataImageBuilder,
+  private def applyPartitionChanges(imageBuilder: MetadataImageBuilder, lastOffset: Long) = {
+    if(isDebugEnabled) {
+      debug(s"Metadata batch ${lastOffset}: applying partition changes")
+    }
+    val builder = imageBuilder.partitionsBuilder()
+    val prevPartitions = imageBuilder.prevImage.partitions
+    val changedPartitionsPreviouslyExisting = mutable.Set[MetadataPartition]()
+    builder.localChanged().foreach(metadataPartition =>
+      prevPartitions.get(metadataPartition.topicName, metadataPartition.partitionIndex).foreach(
+        changedPartitionsPreviouslyExisting.add))
+    replicaManager.handleMetadataRecords(lastOffset, builder.localChanged(),
+      builder.localRemoved(), changedPartitionsPreviouslyExisting, imageBuilder.nextBrokers(),
+      RequestHandlerHelper.onLeadershipChange(groupCoordinator, txnCoordinator, _, _))
+  }
+
+  private def handleMessage(imageBuilders: Seq[Option[MetadataImageBuilder]],
                             record: ApiMessage,
                             lastOffset: Long): Unit = {
     val recordType = try {
@@ -180,52 +182,53 @@ class BrokerMetadataListener(val brokerId: Int,
       s"${record.apiKey()} in batch ending at offset ${lastOffset}.")
     }
     recordType match {
-      case REGISTER_BROKER_RECORD => handleRegisterBrokerRecord(imageBuilder,
+      case REGISTER_BROKER_RECORD => handleRegisterBrokerRecord(imageBuilders,
         record.asInstanceOf[RegisterBrokerRecord])
-      case UNREGISTER_BROKER_RECORD => handleUnregisterBrokerRecord(imageBuilder,
+      case UNREGISTER_BROKER_RECORD => handleUnregisterBrokerRecord(imageBuilders,
         record.asInstanceOf[UnregisterBrokerRecord])
-      case TOPIC_RECORD => handleTopicRecord(imageBuilder,
+      case TOPIC_RECORD => handleTopicRecord(imageBuilders,
         record.asInstanceOf[TopicRecord])
-      case PARTITION_RECORD => handlePartitionRecord(imageBuilder,
+      case PARTITION_RECORD => handlePartitionRecord(imageBuilders,
         record.asInstanceOf[PartitionRecord])
       case CONFIG_RECORD => handleConfigRecord(record.asInstanceOf[ConfigRecord])
-      case ISR_CHANGE_RECORD => handleIsrChangeRecord(imageBuilder,
+      case ISR_CHANGE_RECORD => handleIsrChangeRecord(imageBuilders,
         record.asInstanceOf[IsrChangeRecord])
-      case FENCE_BROKER_RECORD => handleFenceBrokerRecord(imageBuilder,
+      case FENCE_BROKER_RECORD => handleFenceBrokerRecord(imageBuilders,
         record.asInstanceOf[FenceBrokerRecord])
-      case UNFENCE_BROKER_RECORD => handleUnfenceBrokerRecord(imageBuilder,
+      case UNFENCE_BROKER_RECORD => handleUnfenceBrokerRecord(imageBuilders,
         record.asInstanceOf[UnfenceBrokerRecord])
-      case REMOVE_TOPIC_RECORD => handleRemoveTopicRecord(imageBuilder,
+      case REMOVE_TOPIC_RECORD => handleRemoveTopicRecord(imageBuilders,
         record.asInstanceOf[RemoveTopicRecord])
       // TODO: handle FEATURE_LEVEL_RECORD
       case _ => throw new RuntimeException(s"Unsupported record type ${recordType}")
     }
   }
 
-  def handleRegisterBrokerRecord(imageBuilder: MetadataImageBuilder,
+  def handleRegisterBrokerRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                                  record: RegisterBrokerRecord): Unit = {
     val broker = MetadataBroker(record)
-    imageBuilder.brokersBuilder().add(broker)
+    imageBuilders.foreach(_.foreach(_.brokersBuilder().add(broker)))
   }
 
-  def handleUnregisterBrokerRecord(imageBuilder: MetadataImageBuilder,
+  def handleUnregisterBrokerRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                                    record: UnregisterBrokerRecord): Unit = {
-    imageBuilder.brokersBuilder().remove(record.brokerId())
+    imageBuilders.foreach(_.foreach(_.brokersBuilder().remove(record.brokerId())))
   }
 
-  def handleTopicRecord(imageBuilder: MetadataImageBuilder,
+  def handleTopicRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                         record: TopicRecord): Unit = {
-    imageBuilder.partitionsBuilder().addUuidMapping(record.name(), record.topicId())
+    imageBuilders.foreach(_.foreach(_.partitionsBuilder().addUuidMapping(record.name(), record.topicId())))
   }
 
-  def handlePartitionRecord(imageBuilder: MetadataImageBuilder,
+  def handlePartitionRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                             record: PartitionRecord): Unit = {
-    imageBuilder.topicIdToName(record.topicId()) match {
+    imageBuilders.foreach(_.foreach(imageBuilder => {
+      imageBuilder.topicIdToName(record.topicId()) match {
       case None => throw new RuntimeException(s"Unable to locate topic with ID ${record.topicId}")
       case Some(name) =>
         val partition = MetadataPartition(name, record)
         imageBuilder.partitionsBuilder().set(partition)
-    }
+    }}))
   }
 
   def handleConfigRecord(record: ConfigRecord): Unit = {
@@ -238,28 +241,35 @@ class BrokerMetadataListener(val brokerId: Int,
     configRepository.setConfig(resource, record.name(), record.value())
   }
 
-  def handleIsrChangeRecord(imageBuilder: MetadataImageBuilder,
+  def handleIsrChangeRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                             record: IsrChangeRecord): Unit = {
-    imageBuilder.partitionsBuilder().handleIsrChange(record)
+    imageBuilders.foreach(_.foreach(_.partitionsBuilder().handleIsrChange(record)))
   }
 
-  def handleFenceBrokerRecord(imageBuilder: MetadataImageBuilder,
+  def handleFenceBrokerRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                               record: FenceBrokerRecord): Unit = {
     // TODO: add broker epoch to metadata cache, and check it here.
-    imageBuilder.brokersBuilder().changeFencing(record.id(), true)
+    imageBuilders.foreach(_.foreach(_.brokersBuilder().changeFencing(record.id(), true)))
   }
 
-  def handleUnfenceBrokerRecord(imageBuilder: MetadataImageBuilder,
+  def handleUnfenceBrokerRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                                 record: UnfenceBrokerRecord): Unit = {
     // TODO: add broker epoch to metadata cache, and check it here.
-    imageBuilder.brokersBuilder().changeFencing(record.id(), false)
+    imageBuilders.foreach(_.foreach(_.brokersBuilder().changeFencing(record.id(), false)))
   }
 
-  def handleRemoveTopicRecord(imageBuilder: MetadataImageBuilder,
+  def handleRemoveTopicRecord(imageBuilders: Seq[Option[MetadataImageBuilder]],
                               record: RemoveTopicRecord): Unit = {
-    val removedPartitions = imageBuilder.partitionsBuilder().
-      removeTopicById(record.topicId())
-    groupCoordinator.handleDeletedPartitions(removedPartitions.map(_.toTopicPartition()).toSeq)
+    var removedPartitions: Iterable[MetadataPartition] = List.empty
+    imageBuilders.foreach(_.foreach(imageBuilder => {
+      removedPartitions = imageBuilder.partitionsBuilder().
+        removeTopicById(record.topicId())
+    }))
+    if (preRecoveryDeletedPartitions.isDefined) {
+      preRecoveryDeletedPartitions.foreach(_.addAll(removedPartitions))
+    } else {
+      groupCoordinator.handleDeletedPartitions(removedPartitions.map(_.toTopicPartition()).toSeq)
+    }
   }
 
   class HandleNewLeaderEvent(leader: MetaLogLeader)
@@ -267,11 +277,12 @@ class BrokerMetadataListener(val brokerId: Int,
     override def run(): Unit = {
       val imageBuilder =
         MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage())
-      if (leader.nodeId() < 0) {
-        imageBuilder.setControllerId(None)
-      } else {
-        imageBuilder.setControllerId(Some(leader.nodeId()))
-      }
+      Seq(Option(imageBuilder), preRecoveryPartitionImageBuilder).foreach(_.foreach(imageBuilder =>
+        if (leader.nodeId() < 0) {
+          imageBuilder.setControllerId(None)
+        } else {
+          imageBuilder.setControllerId(Some(leader.nodeId()))
+        }))
       metadataCache.setImage(imageBuilder.build())
     }
   }

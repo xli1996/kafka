@@ -89,7 +89,7 @@ public class BrokerHeartbeatManager {
                 }
             } else if (list == null) {
                 unfenced.add(this);
-            } else if (list != null) {
+            } else {
                 throw new RuntimeException("Can't add broker " + id + " to the " +
                     "fenced list since it is already in list " + list.name);
             }

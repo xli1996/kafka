@@ -60,8 +60,12 @@ public class BrokerHeartbeatManager {
             this.list = null;
         }
 
-        boolean hasValidSession(long nowNs) {
-            return sessionTimeoutNs() >= nowNs;
+        int id() {
+            return id;
+        }
+
+        boolean hasValidSession() {
+            return sessionTimeoutNs() >= time.nanoseconds();
         }
 
         long sessionTimeoutNs() {
@@ -69,11 +73,11 @@ public class BrokerHeartbeatManager {
         }
 
         void setLastContactNs(long lastContactNs) {
-            if (list != null) {
+            if (list == null) {
+                this.lastContactNs = lastContactNs;
+            } else {
                 list.remove(this);
-            }
-            this.lastContactNs = lastContactNs;
-            if (list != null) {
+                this.lastContactNs = lastContactNs;
                 list.add(this);
             }
         }
@@ -81,12 +85,13 @@ public class BrokerHeartbeatManager {
         void setFenced(boolean fenced) {
             if (fenced) {
                 if (list == unfenced) {
-                    list.remove(this);
+                    unfenced.remove(this);
                 }
-            } else {
-                if (list != unfenced) {
-                    list.add(this);
-                }
+            } else if (list == null) {
+                unfenced.add(this);
+            } else if (list != null) {
+                throw new RuntimeException("Can't add broker " + id + " to the " +
+                    "fenced list since it is already in list " + list.name);
             }
         }
     }
@@ -130,6 +135,7 @@ public class BrokerHeartbeatManager {
                     cur.next.prev = broker;
                     broker.prev = cur;
                     cur.next = broker;
+                    broker.list = this;
                     break;
                 }
                 cur = cur.prev;
@@ -161,6 +167,7 @@ public class BrokerHeartbeatManager {
 
         BrokerHeartbeatStateIterator(BrokerHeartbeatState head) {
             this.head = head;
+            this.cur = head;
         }
 
         @Override
@@ -211,6 +218,16 @@ public class BrokerHeartbeatManager {
         this.unfenced = new BrokerHeartbeatStateList("unfenced");
     }
 
+    // VisibleForTesting
+    Time time() {
+        return time;
+    }
+
+    // VisibleForTesting
+    BrokerHeartbeatStateList unfenced() {
+        return unfenced;
+    }
+
     /**
      * Remove broker state.
      *
@@ -234,7 +251,7 @@ public class BrokerHeartbeatManager {
     boolean hasValidSession(int brokerId) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) return false;
-        return broker.hasValidSession(time.nanoseconds());
+        return broker.hasValidSession();
     }
 
     /**
@@ -271,13 +288,11 @@ public class BrokerHeartbeatManager {
      */
     int maybeFenceLeastRecentlyContacted() {
         BrokerHeartbeatState broker = unfenced.first();
-        if (broker == null) {
+        if (broker == null || broker.hasValidSession()) {
             return -1;
-        } else if (!broker.hasValidSession(time.nanoseconds())) {
-            broker.setFenced(true);
-            return broker.id;
         } else {
-            return -1;
+            broker.setFenced(true);
+            return broker.id();
         }
     }
 
@@ -299,7 +314,7 @@ public class BrokerHeartbeatManager {
         List<Integer> allActive = new ArrayList<>();
         Map<String, List<Integer>> activeByRack = new HashMap<>();
         for (Iterator<BrokerHeartbeatState> iter = unfenced.iterator(); iter.hasNext(); ) {
-            int brokerId = iter.next().id;
+            int brokerId = iter.next().id();
             allActive.add(brokerId);
             String rack = idToRack.apply(brokerId);
             if (rack != null) {

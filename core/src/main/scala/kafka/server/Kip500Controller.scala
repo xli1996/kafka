@@ -17,7 +17,7 @@
 
 package kafka.server
 
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.{CompletableFuture, TimeUnit}
 import java.util.concurrent.locks.ReentrantLock
 
 import kafka.log.LogConfig
@@ -146,6 +146,8 @@ class Kip500Controller(
         setLogManager(metaLogManager).
         setDefaultReplicationFactor(config.defaultReplicationFactor.toShort).
         setDefaultNumPartitions(config.numPartitions.intValue()).
+        setSessionTimeoutNs(TimeUnit.NANOSECONDS.convert(config.brokerSessionTimeoutMs.longValue(),
+          TimeUnit.MILLISECONDS)).
         build()
       quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
       val controllerNodes =

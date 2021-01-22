@@ -13,7 +13,7 @@ public interface ClusterInstance {
 
     Collection<SocketServer> controllers();
 
-    ClusterType type();
+    ClusterType clusterType();
 
     ClusterConfig config();
 

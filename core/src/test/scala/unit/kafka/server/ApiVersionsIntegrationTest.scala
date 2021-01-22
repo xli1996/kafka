@@ -1,7 +1,9 @@
 package unit.kafka.server
 
 import integration.kafka.server.IntegrationTestHelper
-import kafka.testkit.junit.{ClusterConfig, ClusterForEach, ClusterGenerator, ClusterInstance, ClusterTemplate}
+import kafka.testkit.junit.ClusterConfig.ClusterType
+import kafka.testkit.junit.annotations.{ClusterProperty, ClusterTemplate, ClusterTest, ClusterTests}
+import kafka.testkit.junit.{ClusterConfig, ClusterForEach, ClusterGenerator, ClusterInstance}
 import org.apache.kafka.common.message.ApiVersionsRequestData
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -12,15 +14,14 @@ import org.junit.jupiter.api.extension._
 
 import scala.jdk.CollectionConverters._
 
-
 object ApiVersionsIntegrationTest {
   def generateTwoIBPs(generator: ClusterGenerator): Unit = {
-    generator.accept(ClusterConfig.newBuilder()
+    generator.accept(ClusterConfig.defaultClusterBuilder()
       .name("Test 1")
       .ibp("2.6")
       .build())
 
-    generator.accept(ClusterConfig.newBuilder()
+    generator.accept(ClusterConfig.defaultClusterBuilder()
       .name("Test 2")
       .ibp("2.7-IV2")
       .build())
@@ -29,22 +30,24 @@ object ApiVersionsIntegrationTest {
 
 @ExtendWith(value = Array(classOf[ClusterForEach]))
 class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
-                                 harness: ClusterInstance) {
+                                 cluster: ClusterInstance) {
 
   @BeforeEach
-  def before(harness: ClusterInstance): Unit = {
-    harness.config().serverProperties().put("spam", "eggs")
+  def before(config: ClusterConfig): Unit = {
+    config.serverProperties().put("spam", "eggs")
   }
 
-  @ClusterTemplate(generateClusters = "generateTwoIBPs")
-  def testApiVersionsRequest(): Unit = {
-    System.err.println(harness.config().serverProperties())
+  @ClusterTemplate("generateTwoIBPs")
+  def testApiVersionsRequest(cluster: ClusterInstance): Unit = {
+    if (cluster.clusterType().equals(ClusterType.Quorum)) {
+      // Do something different
+    }
     val request = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendApiVersionsRequest(request)
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  @ClusterTemplate
+  @ClusterTest(clusterType = ClusterType.Quorum, brokers = 1, controllers = 1)
   def testApiVersionsRequestWithUnsupportedVersion(): Unit = {
     val apiVersionsRequest = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendUnsupportedApiVersionRequest(apiVersionsRequest)
@@ -56,14 +59,19 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     assertEquals(ApiKeys.API_VERSIONS.latestVersion(), apiVersion.maxVersion())
   }
 
-  @ClusterTemplate
+  @ClusterTests(Array(
+    new ClusterTest(name = "Regular Quorum", clusterType = ClusterType.Quorum, brokers = 1, controllers = 1),
+    new ClusterTest(name = "Legacy with foo", clusterType = ClusterType.Legacy, brokers = 1, controllers = 1,
+      properties = Array(new ClusterProperty(key = "foo", value = "bar"))
+    )
+  ))
   def testApiVersionsRequestValidationV0(): Unit = {
     val apiVersionsRequest = new ApiVersionsRequest.Builder().build(0.asInstanceOf[Short])
     val apiVersionsResponse = sendApiVersionsRequest(apiVersionsRequest)
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  @ClusterTemplate
+  //@ClusterTemplate
   def testApiVersionsRequestValidationV3(): Unit = {
     // Invalid request because Name and Version are empty by default
     val apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), 3.asInstanceOf[Short])
@@ -73,7 +81,7 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
 
   def sendUnsupportedApiVersionRequest(request: ApiVersionsRequest): ApiVersionsResponse = {
     val overrideHeader = helper.nextRequestHeader(ApiKeys.API_VERSIONS, Short.MaxValue)
-    val socket = helper.connect(harness.brokers().asScala.head, harness.listener())
+    val socket = helper.connect(cluster.brokers().asScala.head, cluster.listener())
     try {
       helper.sendWithHeader(request, overrideHeader, socket)
       helper.receive[ApiVersionsResponse](socket, ApiKeys.API_VERSIONS, 0.toShort)
@@ -93,8 +101,7 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     }
   }
 
-
   def sendApiVersionsRequest(request: ApiVersionsRequest): ApiVersionsResponse = {
-    helper.connectAndReceive[ApiVersionsResponse](request, harness.brokers().asScala.head, harness.listener())
+    helper.connectAndReceive[ApiVersionsResponse](request, cluster.brokers().asScala.head, cluster.listener())
   }
 }

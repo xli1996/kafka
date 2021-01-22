@@ -2,7 +2,8 @@ package unit.kafka.server
 
 import integration.kafka.server.IntegrationTestHelper
 import kafka.api.{KafkaSasl, SaslSetup}
-import kafka.testkit.junit.{ClusterForEach, ClusterInstance, ClusterTemplate}
+import kafka.testkit.junit.annotations.ClusterTest
+import kafka.testkit.junit.{ClusterConfig, ClusterForEach, ClusterInstance}
 import kafka.utils.JaasTestUtils
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.message.SaslHandshakeRequestData
@@ -28,14 +29,14 @@ class SaslApiVersionsIntegrationTest(helper: IntegrationTestHelper,
   private var sasl: SaslSetup = _
 
   @BeforeEach
-  def setupSasl(cluster: ClusterInstance): Unit = {
+  def setupSasl(config: ClusterConfig): Unit = {
     System.err.println("BeforeEach SASL setup")
     sasl = new SaslSetup() {}
     sasl.startSasl(sasl.jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), KafkaSasl, JaasTestUtils.KafkaServerContextName))
-    cluster.config().serverProperties().putAll(sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
+    config.serverProperties().putAll(sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   }
 
-  @ClusterTemplate(securityProtocol = "SASL_PLAINTEXT")
+  @ClusterTest
   def testApiVersionsRequestBeforeSaslHandshakeRequest(): Unit = {
     val socket = helper.connect(harness.brokers().asScala.head, harness.listener())
     try {

@@ -14,8 +14,7 @@ import scala.jdk.CollectionConverters._
 
 
 object ApiVersionsIntegrationTest {
-  def generateProperties(generator: ClusterGenerator): Unit = {
-
+  def generateTwoIBPs(generator: ClusterGenerator): Unit = {
     generator.accept(ClusterConfig.newBuilder()
       .name("Test 1")
       .ibp("2.6")
@@ -32,11 +31,11 @@ object ApiVersionsIntegrationTest {
 class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
                                  harness: ClusterHarness) {
 
-  def customizeProps(harness: ClusterHarness): Unit = {
+  def addSpamAndEggs(harness: ClusterHarness): Unit = {
     harness.config().serverProperties().put("spam", "eggs")
   }
 
-  @ClusterTemplate(generateProperties = "generateProperties", extendProperties = "customizeProps")
+  @ClusterTemplate(generateClusters = "generateTwoIBPs", extendProperties = "addSpamAndEggs")
   def testApiVersionsRequest(): Unit = {
     System.err.println(harness.config().serverProperties())
     val request = new ApiVersionsRequest.Builder().build()

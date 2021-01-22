@@ -87,8 +87,8 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         }
 
         List<ClusterConfig> generatedClusterConfigs = new ArrayList<>();
-        if (!annot.generateProperties().isEmpty()) {
-            generateClusterConfigurations(context, annot.generateProperties(), generatedClusterConfigs::add);
+        if (!annot.generateClusters().isEmpty()) {
+            generateClusterConfigurations(context, annot.generateClusters(), generatedClusterConfigs::add);
         } else {
             // Ensure we have at least one
             generatedClusterConfigs.add(defaultCluster());

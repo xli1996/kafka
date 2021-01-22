@@ -17,6 +17,6 @@ public @interface ClusterTemplate {
     int controllers() default 1;
     String securityProtocol() default "PLAINTEXT";
     String listener() default "";
-    String generateProperties() default "";
+    String generateClusters() default "";
     String extendProperties() default "";
 }

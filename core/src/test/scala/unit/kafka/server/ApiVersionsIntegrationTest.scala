@@ -2,7 +2,7 @@ package unit.kafka.server
 
 import integration.kafka.server.IntegrationTestHelper
 import kafka.testkit.ClusterHarness
-import kafka.testkit.junit.{ClusterForEach, ClusterTemplate}
+import kafka.testkit.junit.{ClusterForEach, ClusterGenerator, ClusterConfig, ClusterTemplate}
 import org.apache.kafka.common.message.ApiVersionsRequestData
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -13,12 +13,32 @@ import org.junit.jupiter.api.extension._
 import scala.jdk.CollectionConverters._
 
 
+object ApiVersionsIntegrationTest {
+  def generateProperties(generator: ClusterGenerator): Unit = {
+
+    generator.accept(ClusterConfig.newBuilder()
+      .name("Test 1")
+      .ibp("2.6")
+      .build())
+
+    generator.accept(ClusterConfig.newBuilder()
+      .name("Test 2")
+      .ibp("2.7-IV2")
+      .build())
+  }
+}
+
 @ExtendWith(value = Array(classOf[ClusterForEach]))
 class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
                                  harness: ClusterHarness) {
 
-  @ClusterTemplate
+  def customizeProps(harness: ClusterHarness): Unit = {
+    harness.config().serverProperties().put("spam", "eggs")
+  }
+
+  @ClusterTemplate(generateProperties = "generateProperties", extendProperties = "customizeProps")
   def testApiVersionsRequest(): Unit = {
+    System.err.println(harness.config().serverProperties())
     val request = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendApiVersionsRequest(request)
     validateApiVersionsResponse(apiVersionsResponse)

@@ -14,7 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.{AfterEach, BeforeEach}
 
 import java.net.Socket
-import java.util.{Collections, Properties}
+import java.util.Collections
 import scala.jdk.CollectionConverters._
 
 @ExtendWith(value = Array(classOf[ClusterForEach]))
@@ -28,8 +28,8 @@ class SaslApiVersionsIntegrationTest(helper: IntegrationTestHelper,
 
   private var sasl: SaslSetup = _
 
-  def serverSaslProperties(): Properties = {
-    sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism)
+  def serverSaslProperties(cluster: ClusterHarness): Unit = {
+    cluster.config().serverProperties().putAll(sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   }
 
   @BeforeEach
@@ -39,7 +39,7 @@ class SaslApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     sasl.startSasl(sasl.jaasSections(kafkaServerSaslMechanisms, Some(kafkaClientSaslMechanism), KafkaSasl, JaasTestUtils.KafkaServerContextName))
   }
 
-  @ClusterTemplate(securityProtocol = "SASL_PLAINTEXT", serverProperties = "serverSaslProperties")
+  @ClusterTemplate(securityProtocol = "SASL_PLAINTEXT", extendProperties = "serverSaslProperties")
   def testApiVersionsRequestBeforeSaslHandshakeRequest(): Unit = {
     val socket = helper.connect(harness.brokers().asScala.head, harness.listener())
     try {

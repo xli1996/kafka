@@ -17,11 +17,13 @@ import org.junit.jupiter.api.extension.Extension;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContextProvider;
+import org.junit.platform.commons.util.ExceptionUtils;
 import org.junit.platform.commons.util.ReflectionUtils;
 import scala.Option;
 import scala.jdk.javaapi.CollectionConverters;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -47,20 +49,26 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         return true;
     }
 
-    void loadClusterProperties(ExtensionContext context, String propertySupplierMethod, Properties clusterProperties) {
+    void extendPerTestProperties(ExtensionContext context,
+                                 String propertySupplierMethod,
+                                 ClusterHarness harness) {
         Object testInstance = context.getTestInstance().orElse(null);
-        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), propertySupplierMethod);
-        final Object result;
+        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), propertySupplierMethod, ClusterHarness.class);
         try {
-            result = ReflectionUtils.makeAccessible(method).invoke(testInstance);
-        } catch (Exception e) {
-            throw new RuntimeException("Could not execute method " + propertySupplierMethod, e);
+            ReflectionUtils.makeAccessible(method).invoke(testInstance, harness);
+        } catch (Throwable t) {
+            throw ExceptionUtils.throwAsUncheckedException(t);
         }
-        if (result instanceof Properties) {
-            clusterProperties.putAll((Properties) result);
-        } else {
-            throw new IllegalArgumentException("Expected method " + propertySupplierMethod + " to return java.util.Properties");
-        }
+    }
+
+    private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
+        Object testInstance = context.getTestInstance().orElse(null);
+        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), generateClustersMethods, ClusterGenerator.class);
+        ReflectionUtils.invokeMethod(method, testInstance, generator);
+    }
+
+    private ClusterConfig defaultCluster() {
+        return ClusterConfig.newBuilder().name("default").build();
     }
 
     @Override
@@ -78,18 +86,26 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             listenerName = ListenerName.normalised(annot.listener());
         }
 
-        // Return the two contexts
-        return Stream.of(
-            legacyContext(1, securityProtocol, listenerName, annot.serverProperties()),
-            kip500Context(1, 1, securityProtocol, listenerName, annot.serverProperties())
-        );
+        List<ClusterConfig> generatedClusterConfigs = new ArrayList<>();
+        if (!annot.generateProperties().isEmpty()) {
+            generateClusterConfigurations(context, annot.generateProperties(), generatedClusterConfigs::add);
+        } else {
+            // Ensure we have at least one
+            generatedClusterConfigs.add(defaultCluster());
+        }
+
+        return generatedClusterConfigs.stream().flatMap(clusterConfig -> Stream.of(
+                legacyContext(1, securityProtocol, listenerName, clusterConfig.copyOf(), annot.extendProperties()),
+                kip500Context(1, 1, securityProtocol, listenerName, clusterConfig.copyOf(), annot.extendProperties())
+        ));
     }
 
     private TestTemplateInvocationContext legacyContext(
             int brokers,
             SecurityProtocol securityProtocol,
             ListenerName listenerName,
-            String legacyPropertiesMethod) {
+            ClusterConfig clusterConfig,
+            String extendPropertiesMethod) {
 
         final AtomicReference<IntegrationTestHarness> clusterReference = new AtomicReference<>();
 
@@ -113,21 +129,30 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                     .map(LegacyBroker::socketServer)
                     .collect(Collectors.toList());
             }
+
+            @Override
+            public ClusterType type() {
+                return ClusterType.Legacy;
+            }
+
+            @Override
+            public ClusterConfig config() {
+                return clusterConfig;
+            }
         };
 
         return new TestTemplateInvocationContext() {
             @Override
             public String getDisplayName(int invocationIndex) {
-                return "legacy";
+                return "Legacy, " + clusterConfig.ibp().map(ibp -> String.format("IBP=%s, ", ibp)).orElse("") + "Name=" + clusterConfig.name();
             }
 
             @Override
             public List<Extension> getAdditionalExtensions() {
                 return Arrays.asList(
                     (BeforeTestExecutionCallback) context -> {
-                        Properties legacyProperties = new Properties();
-                        if (legacyPropertiesMethod != null && !legacyPropertiesMethod.isEmpty()) {
-                            loadClusterProperties(context, legacyPropertiesMethod, legacyProperties);
+                        if (extendPropertiesMethod != null && !extendPropertiesMethod.isEmpty()) {
+                            extendPerTestProperties(context, extendPropertiesMethod, harness);
                         }
 
                         IntegrationTestHarness cluster = new IntegrationTestHarness() { // extends KafkaServerTestHarness
@@ -143,7 +168,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
 
                             @Override
                             public Option<Properties> serverSaslProperties() {
-                                return Option.apply(legacyProperties);
+                                return Option.apply(clusterConfig.serverProperties());
                             }
 
                             @Override
@@ -179,7 +204,8 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             int brokers, int controllers,
             SecurityProtocol securityProtocol,
             ListenerName listenerName,
-            String quorumPropertiesMethod) {
+            ClusterConfig clusterConfig,
+            String extendPropertiesMethod) {
         final AtomicReference<KafkaClusterTestKit> clusterReference = new AtomicReference<>();
 
         ClusterHarness harness = new ClusterHarness() {
@@ -201,12 +227,22 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                     .map(Kip500Controller::socketServer)
                     .collect(Collectors.toList());
             }
+
+            @Override
+            public ClusterType type() {
+                return ClusterType.Quorum;
+            }
+
+            @Override
+            public ClusterConfig config() {
+                return clusterConfig;
+            }
         };
 
         return new TestTemplateInvocationContext() {
             @Override
             public String getDisplayName(int invocationIndex) {
-                return "kip-500";
+                return "Quorum, " + clusterConfig.ibp().map(ibp -> String.format("IBP=%s, ", ibp)).orElse("") + "Name=" + clusterConfig.name();
             }
 
             @Override
@@ -218,11 +254,10 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                                     setNumKip500BrokerNodes(brokers).
                                     setNumControllerNodes(controllers).build());
 
-                        if (quorumPropertiesMethod != null && !quorumPropertiesMethod.isEmpty()) {
-                            Properties quorumProperties = new Properties();
-                            loadClusterProperties(context, quorumPropertiesMethod, quorumProperties);
-                            quorumProperties.forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
+                        if (extendPropertiesMethod != null && !extendPropertiesMethod.isEmpty()) {
+                            extendPerTestProperties(context, extendPropertiesMethod, harness);
                         }
+                        clusterConfig.serverProperties().forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
 
                         KafkaClusterTestKit cluster = builder.build();
                         clusterReference.set(cluster);

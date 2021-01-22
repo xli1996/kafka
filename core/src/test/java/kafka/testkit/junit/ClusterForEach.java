@@ -5,7 +5,6 @@ import kafka.network.SocketServer;
 import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.server.LegacyBroker;
-import kafka.testkit.ClusterHarness;
 import kafka.testkit.KafkaClusterTestKit;
 import kafka.testkit.TestKitNodes;
 import org.apache.kafka.common.network.ListenerName;
@@ -17,7 +16,6 @@ import org.junit.jupiter.api.extension.Extension;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContextProvider;
-import org.junit.platform.commons.util.ExceptionUtils;
 import org.junit.platform.commons.util.ReflectionUtils;
 import scala.Option;
 import scala.jdk.javaapi.CollectionConverters;
@@ -47,18 +45,6 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
     @Override
     public boolean supportsTestTemplate(ExtensionContext context) {
         return true;
-    }
-
-    void extendPerTestProperties(ExtensionContext context,
-                                 String propertySupplierMethod,
-                                 ClusterHarness harness) {
-        Object testInstance = context.getTestInstance().orElse(null);
-        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), propertySupplierMethod, ClusterHarness.class);
-        try {
-            ReflectionUtils.makeAccessible(method).invoke(testInstance, harness);
-        } catch (Throwable t) {
-            throw ExceptionUtils.throwAsUncheckedException(t);
-        }
     }
 
     private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
@@ -95,8 +81,8 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         }
 
         return generatedClusterConfigs.stream().flatMap(clusterConfig -> Stream.of(
-                legacyContext(1, securityProtocol, listenerName, clusterConfig.copyOf(), annot.extendProperties()),
-                kip500Context(1, 1, securityProtocol, listenerName, clusterConfig.copyOf(), annot.extendProperties())
+                legacyContext(1, securityProtocol, listenerName, clusterConfig.copyOf()),
+                kip500Context(1, 1, securityProtocol, listenerName, clusterConfig.copyOf())
         ));
     }
 
@@ -104,12 +90,11 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             int brokers,
             SecurityProtocol securityProtocol,
             ListenerName listenerName,
-            ClusterConfig clusterConfig,
-            String extendPropertiesMethod) {
+            ClusterConfig clusterConfig) {
 
         final AtomicReference<IntegrationTestHarness> clusterReference = new AtomicReference<>();
 
-        ClusterHarness harness = new ClusterHarness() {
+        ClusterInstance harness = new ClusterInstance() {
             @Override
             public Collection<SocketServer> brokers() {
                 return CollectionConverters.asJava(clusterReference.get().servers()).stream()
@@ -151,10 +136,6 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             public List<Extension> getAdditionalExtensions() {
                 return Arrays.asList(
                     (BeforeTestExecutionCallback) context -> {
-                        if (extendPropertiesMethod != null && !extendPropertiesMethod.isEmpty()) {
-                            extendPerTestProperties(context, extendPropertiesMethod, harness);
-                        }
-
                         IntegrationTestHarness cluster = new IntegrationTestHarness() { // extends KafkaServerTestHarness
                             @Override
                             public SecurityProtocol securityProtocol() {
@@ -193,7 +174,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                     (AfterTestExecutionCallback) context -> {
                         clusterReference.get().tearDown();
                     },
-                    new ClusterHarnessParameterResolver(harness),
+                    new ClusterInstanceParameterResolver(harness),
                     new IntegrationTestHelperParameterResolver()
                 );
             }
@@ -204,11 +185,10 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             int brokers, int controllers,
             SecurityProtocol securityProtocol,
             ListenerName listenerName,
-            ClusterConfig clusterConfig,
-            String extendPropertiesMethod) {
+            ClusterConfig clusterConfig) {
         final AtomicReference<KafkaClusterTestKit> clusterReference = new AtomicReference<>();
 
-        ClusterHarness harness = new ClusterHarness() {
+        ClusterInstance harness = new ClusterInstance() {
             @Override
             public Collection<SocketServer> brokers() {
                 return clusterReference.get().kip500Brokers().values().stream()
@@ -254,9 +234,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                                     setNumKip500BrokerNodes(brokers).
                                     setNumControllerNodes(controllers).build());
 
-                        if (extendPropertiesMethod != null && !extendPropertiesMethod.isEmpty()) {
-                            extendPerTestProperties(context, extendPropertiesMethod, harness);
-                        }
+                        // Copy properties into the TestKit builder
                         clusterConfig.serverProperties().forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
 
                         KafkaClusterTestKit cluster = builder.build();
@@ -272,7 +250,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                     (AfterTestExecutionCallback) context -> {
                         clusterReference.get().close();
                     },
-                    new ClusterHarnessParameterResolver(harness),
+                    new ClusterInstanceParameterResolver(harness),
                     new IntegrationTestHelperParameterResolver()
                 );
             }

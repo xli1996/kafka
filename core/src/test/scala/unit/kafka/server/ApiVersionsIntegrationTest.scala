@@ -1,13 +1,13 @@
 package unit.kafka.server
 
 import integration.kafka.server.IntegrationTestHelper
-import kafka.testkit.ClusterHarness
-import kafka.testkit.junit.{ClusterForEach, ClusterGenerator, ClusterConfig, ClusterTemplate}
+import kafka.testkit.junit.{ClusterConfig, ClusterForEach, ClusterGenerator, ClusterInstance, ClusterTemplate}
 import org.apache.kafka.common.message.ApiVersionsRequestData
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests._
 import org.junit.Assert.{assertEquals, assertFalse, assertNotNull}
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension._
 
 import scala.jdk.CollectionConverters._
@@ -29,13 +29,14 @@ object ApiVersionsIntegrationTest {
 
 @ExtendWith(value = Array(classOf[ClusterForEach]))
 class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
-                                 harness: ClusterHarness) {
+                                 harness: ClusterInstance) {
 
-  def addSpamAndEggs(harness: ClusterHarness): Unit = {
+  @BeforeEach
+  def before(harness: ClusterInstance): Unit = {
     harness.config().serverProperties().put("spam", "eggs")
   }
 
-  @ClusterTemplate(generateClusters = "generateTwoIBPs", extendProperties = "addSpamAndEggs")
+  @ClusterTemplate(generateClusters = "generateTwoIBPs")
   def testApiVersionsRequest(): Unit = {
     System.err.println(harness.config().serverProperties())
     val request = new ApiVersionsRequest.Builder().build()

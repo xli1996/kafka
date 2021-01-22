@@ -1,12 +1,11 @@
-package kafka.testkit;
+package kafka.testkit.junit;
 
 import kafka.network.SocketServer;
-import kafka.testkit.junit.ClusterConfig;
 import org.apache.kafka.common.network.ListenerName;
 
 import java.util.Collection;
 
-public interface ClusterHarness {
+public interface ClusterInstance {
 
     Collection<SocketServer> brokers();
 

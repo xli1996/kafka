@@ -109,19 +109,19 @@ class ReplicaFetcherThread(name: String,
   val fetchSessionHandler = new FetchSessionHandler(logContext, sourceBroker.id)
 
   override protected def latestEpoch(topicPartition: TopicPartition): Option[Int] = {
-    replicaMgr.localLogOrException(topicPartition).latestEpoch
+    replicaMgr.localOnlineLogOrException(topicPartition).latestEpoch
   }
 
   override protected def logStartOffset(topicPartition: TopicPartition): Long = {
-    replicaMgr.localLogOrException(topicPartition).logStartOffset
+    replicaMgr.localOnlineLogOrException(topicPartition).logStartOffset
   }
 
   override protected def logEndOffset(topicPartition: TopicPartition): Long = {
-    replicaMgr.localLogOrException(topicPartition).logEndOffset
+    replicaMgr.localOnlineLogOrException(topicPartition).logEndOffset
   }
 
   override protected def endOffsetForEpoch(topicPartition: TopicPartition, epoch: Int): Option[OffsetAndEpoch] = {
-    replicaMgr.localLogOrException(topicPartition).endOffsetForEpoch(epoch)
+    replicaMgr.localOnlineLogOrException(topicPartition).endOffsetForEpoch(epoch)
   }
 
   override def initiateShutdown(): Boolean = {

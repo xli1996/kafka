@@ -318,7 +318,7 @@ class ReplicaFetcherThreadTest {
     expect(log.endOffsetForEpoch(leaderEpoch)).andReturn(
       Some(OffsetAndEpoch(initialLEO, leaderEpoch))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -372,7 +372,7 @@ class ReplicaFetcherThreadTest {
     expect(log.latestEpoch).andReturn(Some(leaderEpochAtFollower)).anyTimes()
     expect(log.endOffsetForEpoch(leaderEpochAtLeader)).andReturn(None).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -429,7 +429,7 @@ class ReplicaFetcherThreadTest {
     expect(log.endOffsetForEpoch(3)).andReturn(
       Some(OffsetAndEpoch(120, 3))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -506,7 +506,7 @@ class ReplicaFetcherThreadTest {
     expect(log.endOffsetForEpoch(3)).andReturn(Some(OffsetAndEpoch(129, 2))).anyTimes()
     expect(log.endOffsetForEpoch(2)).andReturn(Some(OffsetAndEpoch(119, 1))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -609,7 +609,7 @@ class ReplicaFetcherThreadTest {
     expect(log.endOffsetForEpoch(3)).andReturn(
       Some(OffsetAndEpoch(120, 3))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -720,7 +720,7 @@ class ReplicaFetcherThreadTest {
     expect(log.endOffsetForEpoch(leaderEpoch)).andReturn(
       Some(OffsetAndEpoch(initialLeo, leaderEpoch))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLeo).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     expect(replicaManager.brokerTopicStats).andReturn(mock(classOf[BrokerTopicStats]))
@@ -828,7 +828,7 @@ class ReplicaFetcherThreadTest {
     expect(log.latestEpoch).andReturn(Some(5)).anyTimes()
     expect(log.endOffsetForEpoch(5)).andReturn(Some(OffsetAndEpoch(initialLEO, 5))).anyTimes()
     expect(log.logEndOffset).andReturn(initialLEO).anyTimes()
-    expect(replicaManager.localLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(anyObject(classOf[TopicPartition]))).andReturn(log).anyTimes()
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
     expect(replicaManager.replicaAlterLogDirsManager).andReturn(replicaAlterLogDirsManager).anyTimes()
     stub(partition, replicaManager, log)
@@ -976,11 +976,11 @@ class ReplicaFetcherThreadTest {
   }
 
   def stub(partition: Partition, replicaManager: ReplicaManager, log: Log): Unit = {
-    expect(replicaManager.localLogOrException(t1p0)).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(t1p0)).andReturn(log).anyTimes()
     expect(replicaManager.nonOfflinePartition(t1p0)).andReturn(Some(partition)).anyTimes()
-    expect(replicaManager.localLogOrException(t1p1)).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(t1p1)).andReturn(log).anyTimes()
     expect(replicaManager.nonOfflinePartition(t1p1)).andReturn(Some(partition)).anyTimes()
-    expect(replicaManager.localLogOrException(t2p1)).andReturn(log).anyTimes()
+    expect(replicaManager.localOnlineLogOrException(t2p1)).andReturn(log).anyTimes()
     expect(replicaManager.nonOfflinePartition(t2p1)).andReturn(Some(partition)).anyTimes()
   }
 

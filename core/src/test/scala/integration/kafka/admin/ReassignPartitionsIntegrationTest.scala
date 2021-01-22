@@ -196,7 +196,7 @@ class ReassignPartitionsIntegrationTest extends ZooKeeperTestHarness {
       }, "broker 3 should be the new leader", pause = 10L)
     assertEquals(s"Expected broker 3 to have the correct high water mark for the " +
       "partition.", 123L, cluster.servers(3).replicaManager.
-      localLogOrException(part).highWatermark)
+      localOnlineLogOrException(part).highWatermark)
   }
 
   @Test

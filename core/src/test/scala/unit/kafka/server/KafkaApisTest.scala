@@ -2825,7 +2825,7 @@ class KafkaApisTest {
     expect(replicaManager.getLogConfig(EasyMock.eq(tp0))).andReturn(None)
 
     val partition: Partition = createNiceMock(classOf[Partition])
-    expect(replicaManager.isAddingReplica(anyObject(), anyInt())).andReturn(isReassigning)
+    expect(replicaManager.isAddingReplica(anyObject(), anyInt(), anyBoolean())).andReturn(isReassigning)
 
     replay(replicaManager, fetchManager, clientQuotaManager, requestChannel, replicaQuotaManager, partition)
 

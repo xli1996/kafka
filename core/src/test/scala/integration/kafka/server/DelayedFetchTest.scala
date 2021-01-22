@@ -64,13 +64,13 @@ class DelayedFetchTest extends EasyMockSupport {
 
     val partition: Partition = mock(classOf[Partition])
 
-    EasyMock.expect(replicaManager.getPartitionOrException(topicPartition))
+    EasyMock.expect(replicaManager.getOnlinePartitionOrException(topicPartition))
         .andReturn(partition)
     EasyMock.expect(partition.fetchOffsetSnapshot(
         currentLeaderEpoch,
         fetchOnlyFromLeader = true))
         .andThrow(new FencedLeaderEpochException("Requested epoch has been fenced"))
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
 
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.FENCED_LEADER_EPOCH)
 
@@ -110,10 +110,10 @@ class DelayedFetchTest extends EasyMockSupport {
       clientMetadata = None,
       responseCallback = callback)
 
-    EasyMock.expect(replicaManager.getPartitionOrException(topicPartition))
+    EasyMock.expect(replicaManager.getOnlinePartitionOrException(topicPartition))
       .andThrow(new NotLeaderOrFollowerException(s"Replica for $topicPartition not available"))
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.NOT_LEADER_OR_FOLLOWER)
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
 
     replayAll()
 
@@ -150,7 +150,7 @@ class DelayedFetchTest extends EasyMockSupport {
       responseCallback = callback)
 
     val partition: Partition = mock(classOf[Partition])
-    EasyMock.expect(replicaManager.getPartitionOrException(topicPartition)).andReturn(partition)
+    EasyMock.expect(replicaManager.getOnlinePartitionOrException(topicPartition)).andReturn(partition)
     val endOffsetMetadata = LogOffsetMetadata(messageOffset = 500L, segmentBaseOffset = 0L, relativePositionInSegment = 500)
     EasyMock.expect(partition.fetchOffsetSnapshot(
       currentLeaderEpoch,
@@ -162,7 +162,7 @@ class DelayedFetchTest extends EasyMockSupport {
         .setErrorCode(Errors.NONE.code)
         .setLeaderEpoch(lastFetchedEpoch.get)
         .setEndOffset(fetchOffset - 1))
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.NONE)
     replayAll()
 

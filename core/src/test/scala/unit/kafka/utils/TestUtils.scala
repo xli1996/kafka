@@ -1198,7 +1198,7 @@ object TestUtils extends Logging {
 
   def causeLogDirFailure(failureType: LogDirFailureType, leaderServer: LegacyBroker, partition: TopicPartition): Unit = {
     // Make log directory of the partition on the leader broker inaccessible by replacing it with a file
-    val localLog = leaderServer.replicaManager.localLogOrException(partition)
+    val localLog = leaderServer.replicaManager.localNonOfflineLogOrException(partition)
     val logDir = localLog.dir.getParentFile
     CoreUtils.swallow(Utils.delete(logDir), this)
     logDir.createNewFile()
@@ -1217,7 +1217,7 @@ object TestUtils extends Logging {
 
     // Wait for ReplicaHighWatermarkCheckpoint to happen so that the log directory of the topic will be offline
     TestUtils.waitUntilTrue(() => !leaderServer.logManager.isLogDirOnline(logDir.getAbsolutePath), "Expected log directory offline", 3000L)
-    assertTrue(leaderServer.replicaManager.localLog(partition).isEmpty)
+    assertTrue(leaderServer.replicaManager.localNonOfflineLog(partition).isEmpty)
   }
 
   /**

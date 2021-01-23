@@ -1685,15 +1685,8 @@ class ReplicaManager(val config: KafkaConfig,
       else {
         Set.empty[Partition]
       }
-      val partitionsBecomeFenced = if (partitionsToBeFenced.nonEmpty)
-        makeFenced(imageBuilder, partitionsToBeFollower, highWatermarkCheckpoints,
-          metadataOffset)
-      else {
-        Set.empty[Partition]
-      }
-      if (partitionsBecomeFenced.nonEmpty) {
-        stateChangeLogger.info("Metadata batch %d: %d local partition(s) fenced".format(
-          metadataOffset, partitionsBecomeFenced.size))
+      if (partitionsToBeFenced.nonEmpty) {
+        makeFenced(partitionsToBeFollower, metadataOffset)
       }
 
       updateLeaderAndFollowerMetrics(partitionsBecomeFollower.map(_.topic).toSet)
@@ -1911,7 +1904,7 @@ class ReplicaManager(val config: KafkaConfig,
       partitionStates.forKeyValue { (partition, state) =>
         val tp = partition.topicPartition
         try {
-          val isNew = prevPartitions.get(state.topicName, state.partitionIndex).isDefined
+          val isNew = prevPartitions.get(state.topicName, state.partitionIndex).isEmpty
           builder.broker(state.leaderId) match {
             // Only change partition state when the leader is available
             case Some(_) =>
@@ -1990,14 +1983,29 @@ class ReplicaManager(val config: KafkaConfig,
     partitionsToMakeFollower
   }
 
-  def makeFenced(imageBuilder: MetadataImageBuilder,
-                 partitionsToBeFollower: mutable.HashMap[Partition, MetadataPartition],
-                 highWatermarkCheckpoints: LazyOffsetCheckpoints,
-                 metadataOffset: Long) : Set[Partition] = {
-    // TODO: implement
-    Set.empty
-  }
+  def makeFenced(partitionStates: Map[Partition, MetadataPartition], metadataOffset: Long) : Unit = {
+    val traceLoggingEnabled = stateChangeLogger.isTraceEnabled
+    if (traceLoggingEnabled)
+      partitionStates.forKeyValue { (partition, state) =>
+        stateChangeLogger.trace(s"Metadata batch ${metadataOffset}: starting the " +
+          s"become-fenced transition for partition ${partition.topicPartition} with leader " +
+          s"${state.leaderId}")
+      }
 
+    // Stop fetchers for all the partitions
+    replicaFetcherManager.removeFetcherForPartitions(partitionStates.keySet.map(_.topicPartition))
+    stateChangeLogger.info(s"Metadata batch ${metadataOffset}: as part of become-fenced request, " +
+      s"stopped any fetchers for ${partitionStates.size} partitions")
+    partitionStates.keySet.foreach(partition =>
+      allPartitions.put(partition.topicPartition, HostedPartition.Fenced(partition)))
+
+    if (traceLoggingEnabled)
+      partitionStates.keys.foreach { partition =>
+        stateChangeLogger.trace(s"Completed batch ${metadataOffset} become-fenced " +
+          s"transition for partition ${partition.topicPartition} with new leader " +
+          s"${partitionStates(partition).leaderId}")
+      }
+  }
 
   /*
    * Make the current broker to become follower for a given set of partitions by:

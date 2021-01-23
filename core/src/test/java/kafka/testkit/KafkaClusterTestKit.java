@@ -38,6 +38,8 @@ import org.apache.kafka.common.utils.Utils;
 import org.apache.kafka.metalog.LocalLogManager;
 import org.apache.kafka.raft.RaftConfig;
 import org.apache.kafka.test.TestUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import scala.collection.JavaConverters;
 import scala.compat.java8.OptionConverters;
 
@@ -47,6 +49,8 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.AbstractMap;
+import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -67,6 +71,8 @@ import java.util.stream.Collectors;
 
 @SuppressWarnings("deprecation") // Needed for Scala 2.12 compatibility
 public class KafkaClusterTestKit implements AutoCloseable {
+    private final static Logger log = LoggerFactory.getLogger(KafkaClusterTestKit.class);
+
     /**
      * This class manages a future which is completed with the proper value for
      * controller.quorum.voters once the randomly assigned ports for all the controllers are
@@ -434,26 +440,35 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        List<Future<?>> futures = new ArrayList<>();
+        List<Entry<String, Future<?>>> futureEntries = new ArrayList<>();
         try {
             controllerQuorumVotersFutureManager.close();
-            for (Kip500Controller controller : controllers.values()) {
-                futures.add(executorService.submit(() -> {
-                    controller.shutdown();
-                }));
+            for (Entry<Integer, Kip500Broker> entry : kip500Brokers.entrySet()) {
+                int brokerId = entry.getKey();
+                Kip500Broker broker = entry.getValue();
+                futureEntries.add(new SimpleImmutableEntry<>("broker" + brokerId,
+                    executorService.submit(() -> broker.shutdown())));
             }
-            for (Kip500Broker kip500Broker : kip500Brokers.values()) {
-                futures.add(executorService.submit(() -> {
-                    kip500Broker.shutdown();
-                }));
+            for (Entry<String, Future<?>> entry : futureEntries) {
+                log.info("waiting for {} to shut down.", entry.getKey());
+                entry.getValue().get();
             }
-            for (Future<?> future: futures) {
-                future.get();
+            futureEntries.clear();
+            for (Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
+                int controllerId = entry.getKey();
+                Kip500Controller controller = entry.getValue();
+                futureEntries.add(new SimpleImmutableEntry<>("controller" + controllerId,
+                    executorService.submit(() -> controller.shutdown())));
             }
+            for (Entry<String, Future<?>> entry : futureEntries) {
+                log.info("waiting for {} to shut down.", entry.getKey());
+                entry.getValue().get();
+            }
+            futureEntries.clear();
             Utils.delete(baseDirectory);
         } catch (Exception e) {
-            for (Future<?> future: futures) {
-                future.cancel(true);
+            for (Entry<String, Future<?>> entry : futureEntries) {
+                entry.getValue().cancel(true);
             }
             throw e;
         } finally {

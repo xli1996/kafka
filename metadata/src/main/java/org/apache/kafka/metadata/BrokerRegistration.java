@@ -57,6 +57,7 @@ public class BrokerRegistration {
         this.listeners = Collections.unmodifiableMap(listenersMap);
         Objects.requireNonNull(supportedFeatures);
         this.supportedFeatures = supportedFeatures;
+        Objects.requireNonNull(rack);
         this.rack = rack;
         this.fenced = fenced;
     }

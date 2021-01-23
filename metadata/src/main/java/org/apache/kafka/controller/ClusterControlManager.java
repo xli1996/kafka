@@ -45,6 +45,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 
 public class ClusterControlManager {
@@ -266,7 +267,7 @@ public class ClusterControlManager {
         // Update broker registrations.
         brokerRegistrations.put(brokerId, new BrokerRegistration(brokerId,
             record.brokerEpoch(), record.incarnationId(), listeners, features,
-            record.rack(), fenced));
+            Optional.ofNullable(record.rack()), fenced));
 
         if (prevRegistration == null) {
             log.info("Registered new broker: {}", record);

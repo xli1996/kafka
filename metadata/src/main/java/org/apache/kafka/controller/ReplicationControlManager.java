@@ -23,6 +23,8 @@ import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.InvalidReplicationFactorException;
 import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.internals.Topic;
+import org.apache.kafka.common.message.AlterIsrRequestData;
+import org.apache.kafka.common.message.AlterIsrResponseData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableReplicaAssignment;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
@@ -589,4 +591,7 @@ public class ReplicationControlManager {
         return topic.parts.get(partitionId);
     }
 
+    public ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
+        throw new RuntimeException("unimplemented");
+    }
 }

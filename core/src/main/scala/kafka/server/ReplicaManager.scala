@@ -706,7 +706,7 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   def localOnlineLog(topicPartition: TopicPartition): Option[Log] = {
-    nonOfflinePartition(topicPartition).flatMap(_.log)
+    onlinePartition(topicPartition).flatMap(_.log)
   }
 
   def localNonOfflineLog(topicPartition: TopicPartition): Option[Log] = {
@@ -1657,11 +1657,12 @@ class ReplicaManager(val config: KafkaConfig,
 
           case HostedPartition.None =>
             val partition = Partition(topicPartition, time, this)
-            val localAndFenced = localLeader &&
-              (imageBuilder.broker(localBrokerId).isEmpty || imageBuilder.broker(localBrokerId).get.fenced)
-            allPartitions.putIfNotExists(topicPartition,
-              if (localAndFenced) HostedPartition.Fenced(partition) else HostedPartition.Online(partition))
-            (Some(partition), localAndFenced)
+            val localBrokerOpt = imageBuilder.broker(localBrokerId)
+            val fenced = localBrokerOpt.isEmpty || localBrokerOpt.get.fenced
+            if (!fenced) {
+              allPartitions.putIfNotExists(topicPartition, HostedPartition.Online(partition))
+            }
+            (Some(partition), fenced)
         }
         partition.foreach { partition =>
           if (fenced) {

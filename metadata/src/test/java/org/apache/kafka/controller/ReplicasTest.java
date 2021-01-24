@@ -79,4 +79,12 @@ public class ReplicasTest {
         assertFalse(Replicas.contains(new int[] {}, 0));
         assertTrue(Replicas.contains(new int[] {1}, 1));
     }
+
+    @Test
+    public void testCopyWithout() {
+        assertArrayEquals(new int[] {}, Replicas.copyWithout(new int[] {}, 0));
+        assertArrayEquals(new int[] {}, Replicas.copyWithout(new int[] {1}, 1));
+        assertArrayEquals(new int[] {1, 3}, Replicas.copyWithout(new int[] {1, 2, 3}, 2));
+        assertArrayEquals(new int[] {4, 1}, Replicas.copyWithout(new int[] {4, 2, 2, 1}, 2));
+    }
 }

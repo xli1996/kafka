@@ -81,10 +81,10 @@ public class ReplicationControlManager {
         private final int leaderEpoch;
 
         PartitionControlInfo(PartitionRecord record) {
-            this(toArray(record.replicas()),
-                toArray(record.isr()),
-                toArray(record.removingReplicas()),
-                toArray(record.addingReplicas()),
+            this(Replicas.toArray(record.replicas()),
+                Replicas.toArray(record.isr()),
+                Replicas.toArray(record.removingReplicas()),
+                Replicas.toArray(record.addingReplicas()),
                 record.leader(),
                 record.leaderEpoch());
         }
@@ -101,7 +101,7 @@ public class ReplicationControlManager {
 
         PartitionControlInfo merge(IsrChangeRecord record) {
             return new PartitionControlInfo(replicas,
-                toArray(record.isr()),
+                Replicas.toArray(record.isr()),
                 removingReplicas,
                 addingReplicas,
                 record.leader(),
@@ -471,11 +471,11 @@ public class ReplicationControlManager {
                 }
                 int[] replicas = new int[assignment.brokerIds().size()];
                 for (int i = 0; i < replicas.length; i++) {
-                    replicas[i] = assignment.brokerIds().get(0);
+                    replicas[i] = assignment.brokerIds().get(i);
                 }
                 int[] isr = new int[assignment.brokerIds().size()];
                 for (int i = 0; i < replicas.length; i++) {
-                    isr[i] = assignment.brokerIds().get(0);
+                    isr[i] = assignment.brokerIds().get(i);
                 }
                 newParts.put(assignment.partitionIndex(),
                     new PartitionControlInfo(replicas, isr, null, null, isr[0], 0));
@@ -499,7 +499,7 @@ public class ReplicationControlManager {
                 List<List<Integer>> replicas = clusterControl.
                     placeReplicas(numPartitions, replicationFactor);
                 for (int partitionId = 0; partitionId < replicas.size(); partitionId++) {
-                    int[] r = toArray(replicas.get(partitionId));
+                    int[] r = Replicas.toArray(replicas.get(partitionId));
                     newParts.put(partitionId, new PartitionControlInfo(r, r, null, null, r[0], 0));
                 }
             } catch (InvalidReplicationFactorException e) {
@@ -524,32 +524,14 @@ public class ReplicationControlManager {
             records.add(new ApiMessageAndVersion(new PartitionRecord().
                 setPartitionId(partitionIndex).
                 setTopicId(topicId).
-                setReplicas(toList(info.replicas)).
-                setIsr(toList(info.isr)).
+                setReplicas(Replicas.toList(info.replicas)).
+                setIsr(Replicas.toList(info.isr)).
                 setRemovingReplicas(null).
                 setAddingReplicas(null).
                 setLeader(info.leader).
                 setLeaderEpoch(info.leaderEpoch), (short) 0));
         }
         return ApiError.NONE;
-    }
-
-    private static List<Integer> toList(int[] array) {
-        if (array == null) return null;
-        ArrayList<Integer> list = new ArrayList<>(array.length);
-        for (int i = 0; i < array.length; i++) {
-            list.add(array[i]);
-        }
-        return list;
-    }
-
-    private static int[] toArray(List<Integer> list) {
-        if (list == null) return null;
-        int[] array = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            array[i] = list.get(i);
-        }
-        return array;
     }
 
     static void validateNewTopicNames(Map<String, ApiError> topicErrors,

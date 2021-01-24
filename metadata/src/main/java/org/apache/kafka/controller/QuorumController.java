@@ -489,11 +489,17 @@ public final class QuorumController implements Controller {
         cancelMaybeFenceReplicas();
     }
 
-    private <T> void scheduleDeferredWriteEvent(String name,
-                                                long deadlineNs,
+    private <T> void scheduleDeferredWriteEvent(String name, long deadlineNs,
                                                 Supplier<ControllerResult<T>> handler) {
         ControllerWriteEvent<T> event = new ControllerWriteEvent<>(name, handler);
         queue.scheduleDeferred(name, new EarliestDeadlineFunction(deadlineNs), event);
+        event.future.exceptionally(e -> {
+            log.error("Unexpected exception while executing deferred write event {}. " +
+                "Rescheduling for a minute from now.", name, e);
+            scheduleDeferredWriteEvent(name,
+                deadlineNs + TimeUnit.NANOSECONDS.convert(1, TimeUnit.MINUTES), handler);
+            return null;
+        });
     }
 
     static final String MAYBE_FENCE_REPLICAS = "maybeFenceReplicas";
@@ -501,10 +507,12 @@ public final class QuorumController implements Controller {
     class MaybeFenceReplicas implements Supplier<ControllerResult<Void>> {
         @Override
         public ControllerResult<Void> get() {
-            List<ApiMessageAndVersion> records =
+            ControllerResult<Set<Integer>> result =
                 clusterControl.maybeFenceLeastRecentlyContacted();
+            result.records().addAll(
+                replicationControl.handleNewlyFenced(result.response()));
             rescheduleMaybeFenceReplicas();
-            return new ControllerResult<>(records, null);
+            return new ControllerResult<>(result.records(), null);
         }
     }
 

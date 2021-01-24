@@ -136,4 +136,30 @@ public class Replicas {
         }
         return false;
     }
+
+    /**
+     * Copy a replica array without any occurrences of the given value.
+     *
+     * @param replicas      The replica array.
+     * @param value         The value to filter out.
+     *
+     * @return              A new array without the given value.
+     */
+    public static int[] copyWithout(int[] replicas, Integer value) {
+        int size = 0;
+        for (int i = 0; i < replicas.length; i++) {
+            if (replicas[i] != value) {
+                size++;
+            }
+        }
+        int[] result = new int[size];
+        int j = 0;
+        for (int i = 0; i < replicas.length; i++) {
+            int replica = replicas[i];
+            if (replica != value) {
+                result[j++] = replica;
+            }
+        }
+        return result;
+    }
 }

@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Set;
 
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.SET;
 import static org.apache.kafka.common.config.ConfigResource.Type.TOPIC;
@@ -656,5 +657,46 @@ public class ReplicationControlManager {
             }
         }
         return new ControllerResult<>(records, response);
+    }
+
+    public List<ApiMessageAndVersion> handleNewlyFenced(Set<Integer> newlyFenced) {
+        List<ApiMessageAndVersion> records = new ArrayList<>();
+        for (Integer brokerId : newlyFenced) {
+            TimelineHashMap<Uuid, int[]> topicMap = isrMembers.get(brokerId);
+            for (Entry<Uuid, int[]> entry : topicMap.entrySet()) {
+               Uuid topicId = entry.getKey();
+               int[] partitionIds = entry.getValue();
+               TopicControlInfo topic = topics.get(topicId);
+               if (topic == null) {
+                   throw new RuntimeException("Topic ID " + topicId + " existed in " +
+                       "isrMembers, but not in the topics map.");
+               }
+               for (int partitionId : partitionIds) {
+                   PartitionControlInfo partition = topic.parts.get(partitionId);
+                   if (partition == null) {
+                       throw new RuntimeException("Partition " +
+                           topicId + ":" + partitionId + " existed in " +
+                           "isrMembers, but not in the partitions map.");
+                   }
+                   int[] newIsr = Replicas.copyWithout(partition.isr, brokerId);
+                   int newLeader, newLeaderEpoch;
+                   if (partition.leader == brokerId) {
+                       newLeader = partition.chooseNewLeader(newIsr);
+                       newLeaderEpoch = partition.leaderEpoch + 1;
+                   } else {
+                       newLeader = partition.leader;
+                       newLeaderEpoch = partition.leaderEpoch;
+                   }
+                   records.add(new ApiMessageAndVersion(new IsrChangeRecord().
+                       setPartitionId(partitionId).
+                       setTopicId(topic.id).
+                       setIsr(Replicas.toList(newIsr)).
+                       setLeader(newLeader).
+                       setLeaderEpoch(newLeaderEpoch).
+                       setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
+               }
+            }
+        }
+        return records;
     }
 }

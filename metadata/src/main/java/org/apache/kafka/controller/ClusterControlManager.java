@@ -363,4 +363,16 @@ public class ClusterControlManager {
         }
         return heartbeatManager.nextCheckTimeNs();
     }
+
+    public void checkBrokerEpoch(int brokerId, long brokerEpoch) {
+        BrokerRegistration registration = brokerRegistrations.get(brokerId);
+        if (registration == null) {
+            throw new StaleBrokerEpochException("No broker registration found for " +
+                "broker id " + brokerId);
+        }
+        if (registration.epoch() != brokerEpoch) {
+            throw new StaleBrokerEpochException("Expected broker epoch " +
+                registration.epoch() + ", but got broker epoch " + brokerEpoch);
+        }
+    }
 }

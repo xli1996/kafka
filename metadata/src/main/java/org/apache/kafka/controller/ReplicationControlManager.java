@@ -549,7 +549,8 @@ public class ReplicationControlManager {
                 setRemovingReplicas(null).
                 setAddingReplicas(null).
                 setLeader(info.leader).
-                setLeaderEpoch(info.leaderEpoch), (short) 0));
+                setLeaderEpoch(info.leaderEpoch).
+                setPartitionEpoch(0), (short) 0));
         }
         return ApiError.NONE;
     }
@@ -601,8 +602,8 @@ public class ReplicationControlManager {
             AlterIsrResponseData.TopicData responseTopicData =
                 new AlterIsrResponseData.TopicData().setName(topicData.name());
             response.topics().add(responseTopicData);
-            TopicControlInfo topic = topics.get(topicData.name());
-            if (topic == null) {
+            Uuid topicId = topicsByName.get(topicData.name());
+            if (topicId == null || !topics.containsKey(topicId)) {
                 for (AlterIsrRequestData.PartitionData partitionData : topicData.partitions()) {
                     responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
                         setPartitionIndex(partitionData.partitionIndex()).
@@ -610,6 +611,7 @@ public class ReplicationControlManager {
                 }
                 continue;
             }
+            TopicControlInfo topic = topics.get(topicId);
             for (AlterIsrRequestData.PartitionData partitionData : topicData.partitions()) {
                 PartitionControlInfo partition = topic.parts.get(partitionData.partitionIndex());
                 if (partition == null) {
@@ -650,7 +652,7 @@ public class ReplicationControlManager {
                     setIsr(partitionData.newIsr()).
                     setLeader(newLeader).
                     setLeaderEpoch(newLeaderEpoch).
-                    setPartitionEpoch(partition.partitionEpoch + 1), (short) 0);
+                    setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
             }
         }
         return new ControllerResult<>(records, response);

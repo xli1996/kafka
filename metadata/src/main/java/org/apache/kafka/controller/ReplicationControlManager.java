@@ -79,6 +79,7 @@ public class ReplicationControlManager {
         private final int[] addingReplicas;
         private final int leader;
         private final int leaderEpoch;
+        private final int partitionEpoch;
 
         PartitionControlInfo(PartitionRecord record) {
             this(Replicas.toArray(record.replicas()),
@@ -86,17 +87,20 @@ public class ReplicationControlManager {
                 Replicas.toArray(record.removingReplicas()),
                 Replicas.toArray(record.addingReplicas()),
                 record.leader(),
-                record.leaderEpoch());
+                record.leaderEpoch(),
+                record.partitionEpoch());
         }
 
         PartitionControlInfo(int[] replicas, int[] isr, int[] removingReplicas,
-                             int[] addingReplicas, int leader, int leaderEpoch) {
+                             int[] addingReplicas, int leader, int leaderEpoch,
+                             int partitionEpoch) {
             this.replicas = replicas;
             this.isr = isr;
             this.removingReplicas = removingReplicas;
             this.addingReplicas = addingReplicas;
             this.leader = leader;
             this.leaderEpoch = leaderEpoch;
+            this.partitionEpoch = partitionEpoch;
         }
 
         PartitionControlInfo merge(IsrChangeRecord record) {
@@ -105,7 +109,8 @@ public class ReplicationControlManager {
                 removingReplicas,
                 addingReplicas,
                 record.leader(),
-                record.leaderEpoch());
+                record.leaderEpoch(),
+                record.partitionEpoch());
         }
 
         String diff(PartitionControlInfo prev) {
@@ -136,13 +141,16 @@ public class ReplicationControlManager {
             if (leaderEpoch != prev.leaderEpoch) {
                 builder.append(prefix).append("leaderEpoch=").append(leaderEpoch);
             }
+            if (partitionEpoch != prev.partitionEpoch) {
+                builder.append(prefix).append("partitionEpoch=").append(partitionEpoch);
+            }
             return builder.toString();
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(replicas, isr, removingReplicas, addingReplicas, leader,
-                leaderEpoch);
+                leaderEpoch, partitionEpoch);
         }
 
         @Override
@@ -161,8 +169,19 @@ public class ReplicationControlManager {
             builder.append(", addingReplicas=").append(Arrays.toString(addingReplicas));
             builder.append(", leader=").append(leader);
             builder.append(", leaderEpoch=").append(leaderEpoch);
+            builder.append(", partitionEpoch=").append(partitionEpoch);
             builder.append(")");
             return builder.toString();
+        }
+
+        public int chooseNewLeader(int[] newIsr) {
+            for (int i = 0; i < replicas.length; i++) {
+                int replica = replicas[i];
+                if (Replicas.contains(newIsr, replica)) {
+                    return replica;
+                }
+            }
+            return -1;
         }
     }
 
@@ -478,7 +497,7 @@ public class ReplicationControlManager {
                     isr[i] = assignment.brokerIds().get(i);
                 }
                 newParts.put(assignment.partitionIndex(),
-                    new PartitionControlInfo(replicas, isr, null, null, isr[0], 0));
+                    new PartitionControlInfo(replicas, isr, null, null, isr[0], 0, 0));
             }
         } else if (topic.replicationFactor() < -1 || topic.replicationFactor() == 0) {
             return new ApiError(Errors.INVALID_REPLICATION_FACTOR,
@@ -500,7 +519,8 @@ public class ReplicationControlManager {
                     placeReplicas(numPartitions, replicationFactor);
                 for (int partitionId = 0; partitionId < replicas.size(); partitionId++) {
                     int[] r = Replicas.toArray(replicas.get(partitionId));
-                    newParts.put(partitionId, new PartitionControlInfo(r, r, null, null, r[0], 0));
+                    newParts.put(partitionId,
+                        new PartitionControlInfo(r, r, null, null, r[0], 0, 0));
                 }
             } catch (InvalidReplicationFactorException e) {
                 return new ApiError(Errors.INVALID_REPLICATION_FACTOR,
@@ -574,6 +594,65 @@ public class ReplicationControlManager {
     }
 
     public ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
-        throw new RuntimeException("unimplemented");
+        clusterControl.checkBrokerEpoch(request.brokerId(), request.brokerEpoch());
+        AlterIsrResponseData response = new AlterIsrResponseData();
+        List<ApiMessageAndVersion> records = new ArrayList<>();
+        for (AlterIsrRequestData.TopicData topicData : request.topics()) {
+            AlterIsrResponseData.TopicData responseTopicData =
+                new AlterIsrResponseData.TopicData().setName(topicData.name());
+            response.topics().add(responseTopicData);
+            TopicControlInfo topic = topics.get(topicData.name());
+            if (topic == null) {
+                for (AlterIsrRequestData.PartitionData partitionData : topicData.partitions()) {
+                    responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
+                        setPartitionIndex(partitionData.partitionIndex()).
+                        setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code()));
+                }
+                continue;
+            }
+            for (AlterIsrRequestData.PartitionData partitionData : topicData.partitions()) {
+                PartitionControlInfo partition = topic.parts.get(partitionData.partitionIndex());
+                if (partition == null) {
+                    responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
+                        setPartitionIndex(partitionData.partitionIndex()).
+                        setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code()));
+                    continue;
+                }
+                if (partitionData.leaderEpoch() != partition.leaderEpoch) {
+                    responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
+                        setPartitionIndex(partitionData.partitionIndex()).
+                        setErrorCode(Errors.FENCED_LEADER_EPOCH.code()));
+                    continue;
+                }
+                if (partitionData.currentIsrVersion() != partition.partitionEpoch) {
+                    responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
+                        setPartitionIndex(partitionData.partitionIndex()).
+                        setErrorCode(Errors.INVALID_UPDATE_VERSION.code()));
+                    continue;
+                }
+                int[] newIsr = Replicas.toArray(partitionData.newIsr());
+                if (!Replicas.validateIsr(partition.replicas, newIsr)) {
+                    responseTopicData.partitions().add(new AlterIsrResponseData.PartitionData().
+                        setPartitionIndex(partitionData.partitionIndex()).
+                        setErrorCode(Errors.INVALID_REQUEST.code()));
+                }
+                int newLeader, newLeaderEpoch;
+                if (Replicas.contains(newIsr, partition.leader)) {
+                    newLeader = partition.leader;
+                    newLeaderEpoch = partition.leaderEpoch;
+                } else {
+                    newLeader = partition.chooseNewLeader(newIsr);
+                    newLeaderEpoch = partition.leaderEpoch + 1;
+                }
+                records.add(new ApiMessageAndVersion(new IsrChangeRecord().
+                    setPartitionId(partitionData.partitionIndex()).
+                    setTopicId(topic.id).
+                    setIsr(partitionData.newIsr()).
+                    setLeader(newLeader).
+                    setLeaderEpoch(newLeaderEpoch).
+                    setPartitionEpoch(partition.partitionEpoch + 1), (short) 0);
+            }
+        }
+        return new ControllerResult<>(records, response);
     }
 }

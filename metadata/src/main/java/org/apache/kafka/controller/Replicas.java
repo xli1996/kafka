@@ -121,4 +121,19 @@ public class Replicas {
         }
         return true;
     }
+
+    /**
+     * Returns true if an array of replicas contains a specific value.
+     *
+     * @param replicas      The replica array.
+     * @param value         The value to look for.
+     *
+     * @return              True only if the value is found in the array.
+     */
+    public static boolean contains(int[] replicas, int value) {
+        for (int i = 0; i < replicas.length; i++) {
+            if (replicas[i] == value) return true;
+        }
+        return false;
+    }
 }

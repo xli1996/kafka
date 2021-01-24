@@ -72,4 +72,11 @@ public class ReplicasTest {
         assertFalse(Replicas.validateIsr(new int[] {3, 1, 2}, new int[] {4, 1}));
         assertFalse(Replicas.validateIsr(new int[] {1, 2, 4}, new int[] {4, 4}));
     }
+
+    @Test
+    public void testContains() {
+        assertTrue(Replicas.contains(new int[] {3, 0, 1}, 0));
+        assertFalse(Replicas.contains(new int[] {}, 0));
+        assertTrue(Replicas.contains(new int[] {1}, 1));
+    }
 }

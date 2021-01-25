@@ -36,6 +36,7 @@ import org.apache.kafka.raft.{FileBasedStateStore, KafkaRaftClient, RaftConfig, 
 
 import java.io.File
 import java.nio.file.Files
+import java.util
 import java.util.concurrent.CompletableFuture
 import scala.jdk.CollectionConverters._
 
@@ -88,9 +89,11 @@ class KafkaRaftManager(
   metadataPartition: TopicPartition,
   config: KafkaConfig,
   time: Time,
-  metrics: Metrics
+  metrics: Metrics,
+  val controllerQuorumVotersFuture: CompletableFuture[util.List[String]]
 ) extends RaftManager with Logging {
 
+  private val raftConfig: RaftConfig = new RaftConfig(config)
   private val nodeId = if (config.processRoles.contains(ControllerRole)) {
     config.controllerId
   } else {
@@ -111,15 +114,12 @@ class KafkaRaftManager(
   private val raftIoThread = new RaftIoThread(raftClient)
   private val metaLogShim = new MetaLogRaftShim(raftClient, nodeId)
 
-  private var raftConfig: RaftConfig = _
-
-  def voterNodes: Seq[Node] = raftConfig.quorumVoterNodes().asScala.toSeq
-
   def currentLeader: Option[Node] = {
     val leaderAndEpoch = raftClient.leaderAndEpoch()
     if (leaderAndEpoch.leaderId.isPresent) {
       val leaderId = leaderAndEpoch.leaderId.getAsInt
-      voterNodes.find(_.id == leaderId)
+      val leaderAddress = raftConfig.quorumVoterConnections().get(leaderId)
+      Some(new Node(leaderId, leaderAddress.getHostName, leaderAddress.getPort))
     } else {
       None
     }
@@ -128,9 +128,14 @@ class KafkaRaftManager(
   def metaLogManager: MetaLogManager = metaLogShim
 
   def startup(): Unit = {
+    // Wait for the controller quorum voters string to be set
+    val voterAddresses = RaftConfig.parseVoterConnections(controllerQuorumVotersFuture.get())
+
+    // Update RaftClient voter channel endpoints
+    for (voterAddressEntry <- voterAddresses.entrySet.asScala) {
+      netChannel.updateEndpoint(voterAddressEntry.getKey, voterAddressEntry.getValue)
+    }
     netChannel.start()
-    raftConfig = new RaftConfig(config)
-    raftClient.initialize(raftConfig)
     raftIoThread.start()
   }
 
@@ -173,7 +178,7 @@ class KafkaRaftManager(
     val expirationTimer = new SystemTimer("raft-expiration-executor")
     val expirationService = new TimingWheelExpirationService(expirationTimer)
 
-    new KafkaRaftClient(
+    val client = new KafkaRaftClient(
       new MetadataRecordSerde,
       netChannel,
       metadataLog,
@@ -182,8 +187,11 @@ class KafkaRaftManager(
       metrics,
       expirationService,
       logContext,
-      nodeId
+      nodeId,
+      raftConfig
     )
+    client.initialize()
+    client
   }
 
   private def buildNetworkChannel(): KafkaNetworkChannel = {

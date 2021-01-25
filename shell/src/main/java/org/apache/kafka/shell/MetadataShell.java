@@ -47,6 +47,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The Kafka metadata tool.
@@ -131,7 +132,8 @@ public final class MetadataShell {
                     metadataPartition,
                     config,
                     Time.SYSTEM,
-                    new Metrics());
+                    new Metrics(),
+                    CompletableFuture.completedFuture(config.quorumVoters()));
                 nodeManager = new MetadataNodeManager();
             } catch (Throwable e) {
                 log.error("Initialization error", e);

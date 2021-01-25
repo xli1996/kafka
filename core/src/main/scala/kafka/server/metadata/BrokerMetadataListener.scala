@@ -23,7 +23,6 @@ import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.LogManager
 import kafka.metrics.KafkaMetricsGroup
 import kafka.server.{MetadataCache, QuotaFactory, ReplicaManager, RequestHandlerHelper}
-import kafka.utils.Logging
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.metadata.MetadataRecordType._
 import org.apache.kafka.common.metadata._
@@ -48,10 +47,10 @@ class BrokerMetadataListener(val brokerId: Int,
                              val txnCoordinator: TransactionCoordinator,
                              val logManager: LogManager,
                              val threadNamePrefix: Option[String]
-                            ) extends MetaLogListener with KafkaMetricsGroup with Logging {
+                            ) extends MetaLogListener with KafkaMetricsGroup {
   val logContext = new LogContext(s"[BrokerMetadataListener id=${brokerId}] ")
-
-  this.logIdent = logContext.logPrefix()
+  val log = logContext.logger(classOf[BrokerMetadataListener])
+  logIdent = logContext.logPrefix()
 
   /**
    * A histogram tracking the time in microseconds it took to process batches of events.
@@ -81,13 +80,13 @@ class BrokerMetadataListener(val brokerId: Int,
 
   class HandleCommitsEvent(lastOffset: Long,
                            records: util.List[ApiMessage])
-      extends EventQueue.FailureLoggingEvent(logger.underlying) {
+      extends EventQueue.FailureLoggingEvent(log) {
     override def run(): Unit = {
       if (isDebugEnabled) {
         debug(s"Metadata batch ${lastOffset}: handling ${records.size()} record(s).")
       }
       val imageBuilder =
-        MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage())
+        MetadataImageBuilder(brokerId, log, metadataCache.currentImage())
       val startNs = time.nanoseconds()
       var index = 0
       metadataBatchSizeHist.update(records.size())
@@ -226,10 +225,10 @@ class BrokerMetadataListener(val brokerId: Int,
   }
 
   class HandleNewLeaderEvent(leader: MetaLogLeader)
-      extends EventQueue.FailureLoggingEvent(logger.underlying) {
+      extends EventQueue.FailureLoggingEvent(log) {
     override def run(): Unit = {
       val imageBuilder =
-        MetadataImageBuilder(brokerId, logger.underlying, metadataCache.currentImage())
+        MetadataImageBuilder(brokerId, log, metadataCache.currentImage())
       if (leader.nodeId() < 0) {
         imageBuilder.setControllerId(None)
       } else {
@@ -243,7 +242,7 @@ class BrokerMetadataListener(val brokerId: Int,
     eventQueue.append(new HandleNewLeaderEvent(leader))
   }
 
-  class ShutdownEvent() extends EventQueue.FailureLoggingEvent(logger.underlying) {
+  class ShutdownEvent() extends EventQueue.FailureLoggingEvent(log) {
     override def run(): Unit = {
       removeMetric(BrokerMetadataListener.MetadataBatchProcessingTimeUs)
       removeMetric(BrokerMetadataListener.MetadataBatchSizes)

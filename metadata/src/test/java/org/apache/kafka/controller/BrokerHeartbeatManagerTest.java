@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Iterator;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -117,5 +118,37 @@ public class BrokerHeartbeatManagerTest {
         assertEquals(11_000_000, manager.nextCheckTimeNs());
         assertEquals(1, manager.maybeFenceLeastRecentlyContacted());
         assertEquals(12_000_000, manager.nextCheckTimeNs());
+    }
+
+    @Test
+    public void testMetadataOffsetComparator() {
+        TreeSet<BrokerHeartbeatState> set =
+            new TreeSet<>(BrokerHeartbeatManager.MetadataOffsetComparator.INSTANCE);
+        BrokerHeartbeatState broker1 = new BrokerHeartbeatState(1);
+        BrokerHeartbeatState broker2 = new BrokerHeartbeatState(2);
+        BrokerHeartbeatState broker3 = new BrokerHeartbeatState(3);
+        set.add(broker1);
+        set.add(broker2);
+        set.add(broker3);
+        Iterator<BrokerHeartbeatState> iterator = set.iterator();
+        assertEquals(broker1, iterator.next());
+        assertEquals(broker2, iterator.next());
+        assertEquals(broker3, iterator.next());
+        assertFalse(iterator.hasNext());
+        assertTrue(set.remove(broker1));
+        assertTrue(set.remove(broker2));
+        assertTrue(set.remove(broker3));
+        assertTrue(set.isEmpty());
+        broker1.metadataOffset = 800;
+        broker2.metadataOffset = 400;
+        broker3.metadataOffset = 100;
+        set.add(broker1);
+        set.add(broker2);
+        set.add(broker3);
+        iterator = set.iterator();
+        assertEquals(broker3, iterator.next());
+        assertEquals(broker2, iterator.next());
+        assertEquals(broker1, iterator.next());
+        assertFalse(iterator.hasNext());
     }
 }

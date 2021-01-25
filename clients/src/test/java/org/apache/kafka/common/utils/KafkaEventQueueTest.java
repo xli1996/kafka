@@ -18,6 +18,7 @@
 package org.apache.kafka.common.utils;
 
 import org.apache.kafka.common.errors.TimeoutException;
+import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
@@ -215,5 +216,26 @@ public class KafkaEventQueueTest {
         assertThrows(ExecutionException.class, () -> future.get());
         assertEquals(0, count.get());
         queue.close();
+    }
+
+    @Test
+    public void testEventQueueClosedException() throws Exception {
+        KafkaEventQueue queue = new KafkaEventQueue(Time.SYSTEM, new LogContext(),
+            "testEventQueueClosedException");
+        queue.close();
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        queue.append(new EventQueue.Event() {
+                @Override
+                public void run() throws Exception {
+                    future.complete(null);
+                }
+
+                @Override
+                public void handleException(Throwable e) {
+                    future.completeExceptionally(e);
+                }
+            });
+        assertEquals(EventQueueClosedException.class, assertThrows(
+            ExecutionException.class, () -> future.get()).getCause().getClass());
     }
 }

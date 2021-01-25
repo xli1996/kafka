@@ -24,12 +24,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
-import java.util.function.Supplier;
+
 
 public final class KafkaEventQueue implements EventQueue {
     /**
@@ -321,7 +320,6 @@ public final class KafkaEventQueue implements EventQueue {
     private final Time time;
     private final ReentrantLock lock;
     private final Logger log;
-    private final Supplier<Throwable> closedExceptionSupplier;
     private final EventHandler eventHandler;
     private final Thread eventHandlerThread;
 
@@ -336,17 +334,9 @@ public final class KafkaEventQueue implements EventQueue {
     public KafkaEventQueue(Time time,
                            LogContext logContext,
                            String threadNamePrefix) {
-        this(time, logContext, threadNamePrefix, TimeoutException::new);
-    }
-
-    public KafkaEventQueue(Time time,
-                           LogContext logContext,
-                           String threadNamePrefix,
-                           Supplier<Throwable> closedExceptionSupplier) {
         this.time = time;
         this.lock = new ReentrantLock();
         this.log = logContext.logger(KafkaEventQueue.class);
-        this.closedExceptionSupplier = closedExceptionSupplier;
         this.eventHandler = new EventHandler();
         this.eventHandlerThread = new KafkaThread(threadNamePrefix + "EventHandler",
             this.eventHandler, false);
@@ -364,7 +354,7 @@ public final class KafkaEventQueue implements EventQueue {
         try {
             EventContext eventContext = new EventContext(event, insertionType, tag);
             if (closingTimeNs != Long.MAX_VALUE) {
-                eventContext.completeWithException(closedExceptionSupplier.get());
+                eventContext.completeWithException(new EventQueueClosedException());
             } else {
                 eventHandler.enqueue(eventContext,
                     deadlineNsCalculator == null ? __ -> null : deadlineNsCalculator);

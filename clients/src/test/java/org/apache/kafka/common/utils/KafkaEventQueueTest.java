@@ -34,6 +34,7 @@ import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public class KafkaEventQueueTest {
     @Rule
@@ -174,7 +175,7 @@ public class KafkaEventQueueTest {
         CompletableFuture<Integer> future2 = new CompletableFuture<>();
         queue.scheduleDeferred("foo", prev -> prev - ONE_HOUR_NS,
                 new FutureEvent<>(future2, () -> ai.addAndGet(1)));
-        assertThrows(CancellationException.class, () -> future1.get());
+        assertFalse(future1.isDone());
         assertEquals(Integer.valueOf(1), future2.get());
         assertEquals(1, ai.get());
         queue.close();

@@ -131,13 +131,6 @@ public final class KafkaEventQueue implements EventQueue {
         }
 
         /**
-         * Complete the event associated with this EventContext with a cancellation exception.
-         */
-        void cancel() {
-            event.handleException(new CancellationException());
-        }
-
-        /**
          * Complete the event associated with this EventContext with the specified
          * exception.
          */
@@ -269,7 +262,6 @@ public final class KafkaEventQueue implements EventQueue {
                     if (toRemove != null) {
                         existingDeadlineNs = toRemove.deadlineNs;
                         remove(toRemove);
-                        toRemove.cancel();
                     }
                 }
                 Long deadlineNs = deadlineNsCalculator.apply(existingDeadlineNs);

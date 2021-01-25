@@ -45,10 +45,10 @@ public class BrokerHeartbeatManagerTest {
         BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
         MockTime time = (MockTime)  manager.time();
         assertFalse(manager.hasValidSession(0));
-        manager.touch(0, false);
+        manager.touch(0, false, 0);
         time.sleep(5);
-        manager.touch(1, false);
-        manager.touch(2, false);
+        manager.touch(1, false, 0);
+        manager.touch(2, false, 0);
         assertTrue(manager.hasValidSession(0));
         assertTrue(manager.hasValidSession(1));
         assertTrue(manager.hasValidSession(2));
@@ -69,11 +69,11 @@ public class BrokerHeartbeatManagerTest {
         BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
         MockTime time = (MockTime)  manager.time();
         assertFalse(manager.hasValidSession(0));
-        manager.touch(0, false);
+        manager.touch(0, false, 0);
         time.sleep(5);
-        manager.touch(1, false);
+        manager.touch(1, false, 0);
         time.sleep(1);
-        manager.touch(2, false);
+        manager.touch(2, false, 0);
 
         Iterator<BrokerHeartbeatState> iter = manager.unfenced().iterator();
         assertEquals(0, iter.next().id());
@@ -103,13 +103,13 @@ public class BrokerHeartbeatManagerTest {
         BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
         MockTime time = (MockTime)  manager.time();
         assertEquals(Long.MAX_VALUE, manager.nextCheckTimeNs());
-        manager.touch(0, false);
+        manager.touch(0, false, 0);
         time.sleep(1);
-        manager.touch(1, false);
+        manager.touch(1, false, 0);
         time.sleep(1);
-        manager.touch(2, false);
+        manager.touch(2, false, 0);
         time.sleep(1);
-        manager.touch(3, false);
+        manager.touch(3, false, 0);
         assertEquals(10_000_000, manager.nextCheckTimeNs());
         time.sleep(20);
         assertEquals(10_000_000, manager.nextCheckTimeNs());

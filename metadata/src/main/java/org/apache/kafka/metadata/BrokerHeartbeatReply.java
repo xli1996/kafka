@@ -21,11 +21,23 @@ import java.util.Objects;
 
 
 public class BrokerHeartbeatReply {
+    /**
+     * True if the heartbeat reply should tell the broker that it has caught up.
+     */
     private final boolean isCaughtUp;
+
+    /**
+     * True if the heartbeat reply should tell the broker that it is fenced.
+     */
     private final boolean isFenced;
+
+    /**
+     * True if the heartbeat reply should tell the broker that it should shut down.
+     */
     private final boolean shouldShutdown;
 
-    public BrokerHeartbeatReply(boolean isCaughtUp, boolean isFenced,
+    public BrokerHeartbeatReply(boolean isCaughtUp,
+                                boolean isFenced,
                                 boolean shouldShutdown) {
         this.isCaughtUp = isCaughtUp;
         this.isFenced = isFenced;
@@ -62,6 +74,7 @@ public class BrokerHeartbeatReply {
     public String toString() {
         return "BrokerHeartbeatReply(isCaughtUp=" + isCaughtUp +
             ", isFenced=" + isFenced +
-            ", shouldShutdown = " + shouldShutdown + ")";
+            ", shouldShutdown = " + shouldShutdown +
+            ")";
     }
 }

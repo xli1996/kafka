@@ -106,7 +106,7 @@ public class ClusterControlManager {
     public void activate() {
         heartbeatManager = new BrokerHeartbeatManager(logContext, time, sessionTimeoutNs);
         for (BrokerRegistration registration : brokerRegistrations.values()) {
-            heartbeatManager.touch(registration.id(), registration.fenced());
+            heartbeatManager.touch(registration.id(), registration.fenced(), -1);
         }
     }
 
@@ -168,9 +168,9 @@ public class ClusterControlManager {
         }
 
         if (existing == null) {
-            heartbeatManager.touch(brokerId, true);
+            heartbeatManager.touch(brokerId, true, -1);
         } else {
-            heartbeatManager.touch(brokerId, existing.fenced());
+            heartbeatManager.touch(brokerId, existing.fenced(), -1);
         }
 
         return new ControllerResult<>(
@@ -218,28 +218,36 @@ public class ClusterControlManager {
         if (isFenced) {
             if (request.shouldShutdown()) {
                 // If the broker is fenced, and requests a shutdown, do it immediately.
+                isFenced = true;
                 shouldShutdown = true;
             } else if (isCaughtUp && !request.shouldFence()) {
                 records.add(new ApiMessageAndVersion(new UnfenceBrokerRecord().
                     setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
                 isFenced = false;
+                shouldShutdown = false;
             }
         } else {
-            if (request.shouldShutdown()) {
-                // If the broker is fenced, and requests a shutdown, enter controlled
-                // shutdown.
-                // TODO: implement this.  This is just a stub.
+            if (request.shouldFence()) {
                 records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
                     setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
                 isFenced = true;
-                shouldShutdown = true;
-            } else if (request.shouldFence()) {
-                records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
-                    setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
-                isFenced = true;
+                shouldShutdown = request.shouldShutdown();
+            } else {
+                if (request.shouldShutdown()) {
+                    heartbeatManager.beginBrokerShutDown(request.brokerId());
+                }
+                if (heartbeatManager.shouldShutDown(request.brokerId())) {
+                    isFenced = true;
+                    shouldShutdown = true;
+                    records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
+                        setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
+                } else {
+                    isFenced = false;
+                    shouldShutdown = false;
+                }
             }
         }
-        heartbeatManager.touch(brokerId, isFenced);
+        heartbeatManager.touch(brokerId, isFenced, request.currentMetadataOffset());
         return new ControllerResult<>(records, new BrokerHeartbeatReply(
             isCaughtUp, isFenced, shouldShutdown));
     }
@@ -378,5 +386,12 @@ public class ClusterControlManager {
             throw new StaleBrokerEpochException("Expected broker epoch " +
                 registration.epoch() + ", but got broker epoch " + brokerEpoch);
         }
+    }
+
+    public void updateShutdownOffset(int brokerId, long offset) {
+        if (heartbeatManager == null) {
+            throw new RuntimeException("ClusterControlManager is not active.");
+        }
+        heartbeatManager.updateShutdownOffset(brokerId, offset);
     }
 }

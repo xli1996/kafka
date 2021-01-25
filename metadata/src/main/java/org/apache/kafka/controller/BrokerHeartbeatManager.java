@@ -23,11 +23,13 @@ import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.metadata.UsableBroker;
 import org.slf4j.Logger;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.function.Function;
 
 
@@ -45,72 +47,100 @@ import java.util.function.Function;
  * active controller does not know when the last heartbeats were received from each.
  */
 public class BrokerHeartbeatManager {
-    class BrokerHeartbeatState {
+    static class BrokerHeartbeatState {
+        /**
+         * The broker ID.
+         */
         private final int id;
+
+        /**
+         * The last time we received a heartbeat from this broker, in monotonic nanoseconds.
+         * When this field is updated, we also may have to update the broker's position in
+         * the unfenced list.
+         */
         private long lastContactNs;
+
+        /**
+         * The last metadata offset which this broker reported.  When this field is updated,
+         * we may also have to update the broker's position in the active set.
+         */
+        private long metadataOffset;
+
+        /**
+         * The offset at which the broker should complete its controlled shutdown, or -1
+         * if the broker is not performing a controlled shutdown.  When this field is
+         * updated, we also have to update the broker's position in the shuttingDown set.
+         */
+        private long shutdownOffset;
+
+        /**
+         * The previous entry in the unfenced list, or null if the broker is not in that list.
+         */
         private BrokerHeartbeatState prev;
+
+        /**
+         * The next entry in the unfenced list, or null if the broker is not in that list.
+         */
         private BrokerHeartbeatState next;
-        private BrokerHeartbeatStateList list;
 
         BrokerHeartbeatState(int id) {
             this.id = id;
             this.lastContactNs = 0;
             this.prev = null;
             this.next = null;
-            this.list = null;
+            this.metadataOffset = -1;
+            this.shutdownOffset = -1;
         }
 
+        /**
+         * Returns the broker ID.
+         */
         int id() {
             return id;
         }
 
-        boolean hasValidSession() {
-            return sessionTimeoutNs() >= time.nanoseconds();
+        /**
+         * Returns true only if the broker is fenced.
+         */
+        boolean fenced() {
+            return prev == null;
         }
 
-        long sessionTimeoutNs() {
-            return lastContactNs + sessionTimeoutNs;
+        /**
+         * Returns true only if the broker is in controlled shutdown state.
+         */
+        boolean shuttingDown() {
+            return shutdownOffset >= 0;
         }
+    }
 
-        void setLastContactNs(long lastContactNs) {
-            if (list == null) {
-                this.lastContactNs = lastContactNs;
+    static class MetadataOffsetComparator implements Comparator<BrokerHeartbeatState> {
+        static final MetadataOffsetComparator INSTANCE = new MetadataOffsetComparator();
+
+        @Override
+        public int compare(BrokerHeartbeatState a, BrokerHeartbeatState b) {
+            if (a.metadataOffset < b.metadataOffset) {
+                return -1;
+            } else if (a.metadataOffset > b.metadataOffset) {
+                return 1;
+            } else if (a.id < b.id) {
+                return -1;
+            } else if (a.id > b.id) {
+                return 1;
             } else {
-                BrokerHeartbeatStateList curList = list;
-                curList.remove(this);
-                this.lastContactNs = lastContactNs;
-                curList.add(this);
-            }
-        }
-
-        void setFenced(boolean fenced) {
-            if (fenced) {
-                if (list == unfenced) {
-                    unfenced.remove(this);
-                }
-            } else if (list == null) {
-                unfenced.add(this);
-            } else {
-                throw new RuntimeException("Can't add broker " + id + " to the " +
-                    "fenced list since it is already in list " + list.name);
+                return 0;
             }
         }
     }
 
-    class BrokerHeartbeatStateList {
-        /**
-         * The name of the list.
-         */
-        private final String name;
-
+    static class BrokerHeartbeatStateList {
         /**
          * The head of the list of unfenced brokers.  The list is sorted in ascending order
          * of last contact time.
          */
         private final BrokerHeartbeatState head;
 
-        BrokerHeartbeatStateList(String name) {
-            this.name = name;
+        BrokerHeartbeatStateList() {
             this.head = new BrokerHeartbeatState(-1);
             head.prev = head;
             head.next = head;
@@ -136,7 +166,6 @@ public class BrokerHeartbeatManager {
                     cur.next.prev = broker;
                     broker.prev = cur;
                     cur.next = broker;
-                    broker.list = this;
                     break;
                 }
                 cur = cur.prev;
@@ -147,10 +176,9 @@ public class BrokerHeartbeatManager {
          * Remove a broker from the list.
          */
         void remove(BrokerHeartbeatState broker) {
-            if (broker.list != this) {
-                throw new RuntimeException(broker + " is not in the " + name + " list.");
+            if (broker.next == null) {
+                throw new RuntimeException(broker + " is not in the  list.");
             }
-            broker.list = null;
             broker.prev.next = broker.next;
             broker.next.prev = broker.prev;
             broker.prev = null;
@@ -209,6 +237,12 @@ public class BrokerHeartbeatManager {
      */
     private final BrokerHeartbeatStateList unfenced;
 
+    /**
+     * The set of active brokers.  A broker is active if it is unfenced, and not shutting
+     * down.
+     */
+    private final TreeSet<BrokerHeartbeatState> active;
+
     BrokerHeartbeatManager(LogContext logContext,
                            Time time,
                            long sessionTimeoutNs) {
@@ -216,7 +250,8 @@ public class BrokerHeartbeatManager {
         this.time = time;
         this.sessionTimeoutNs = sessionTimeoutNs;
         this.brokers = new HashMap<>();
-        this.unfenced = new BrokerHeartbeatStateList("unfenced");
+        this.unfenced = new BrokerHeartbeatStateList();
+        this.active = new TreeSet<>(MetadataOffsetComparator.INSTANCE);
     }
 
     // VisibleForTesting
@@ -236,8 +271,13 @@ public class BrokerHeartbeatManager {
      */
     void remove(int brokerId) {
         BrokerHeartbeatState broker = brokers.remove(brokerId);
-        if (broker != null && broker.list != null) {
-            broker.list.remove(broker);
+        if (broker != null) {
+            if (!broker.fenced()) {
+                unfenced.remove(broker);
+            }
+            if (!broker.shuttingDown()) {
+                active.remove(broker);
+            }
         }
     }
 
@@ -246,26 +286,100 @@ public class BrokerHeartbeatManager {
      *
      * @param brokerId      The broker ID to check.
      *
-     * @return              True if the given broker heartbeated recently enough
-     *                      that its session is still current.
+     * @return              True if the given broker has a valid session.
      */
     boolean hasValidSession(int brokerId) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) return false;
-        return broker.hasValidSession();
+        return hasValidSession(broker);
+    }
+
+    /**
+     * Check if the given broker has a valid session.
+     *
+     * @param broker        The broker to check.
+     *
+     * @return              True if the given broker has a valid session.
+     */
+    private boolean hasValidSession(BrokerHeartbeatState broker) {
+        if (broker.fenced()) {
+            return false;
+        } else {
+            return broker.lastContactNs + sessionTimeoutNs >= time.nanoseconds();
+        }
     }
 
     /**
      * Update broker state, including lastContactNs.
      *
-     * @param brokerId      The broker ID.
-     * @param fenced        True only if the broker is currently fenced.
+     * @param brokerId          The broker ID.
+     * @param fenced            True only if the broker is currently fenced.
+     * @param metadataOffset    The latest metadata offset of the broker.
      */
-    void touch(int brokerId, boolean fenced) {
-        BrokerHeartbeatState broker = brokers.computeIfAbsent(brokerId,
-                    __ -> new BrokerHeartbeatState(brokerId));
-        broker.setLastContactNs(time.nanoseconds());
-        broker.setFenced(fenced);
+    void touch(int brokerId, boolean fenced, long metadataOffset) {
+        BrokerHeartbeatState broker = brokers.get(brokerId);
+        if (broker == null) {
+            broker = new BrokerHeartbeatState(brokerId);
+            brokers.put(brokerId, broker);
+        } else {
+            if (!broker.fenced()) {
+                unfenced.remove(broker);
+                if (!broker.shuttingDown()) {
+                    active.remove(broker);
+                }
+            }
+        }
+        broker.lastContactNs = time.nanoseconds();
+        broker.metadataOffset = metadataOffset;
+        if (fenced) {
+            broker.shutdownOffset = -1;
+        } else {
+            unfenced.add(broker);
+            if (!broker.shuttingDown()) {
+                active.add(broker);
+            }
+        }
+    }
+
+    public void beginBrokerShutDown(int brokerId) {
+        BrokerHeartbeatState broker = brokers.get(brokerId);
+        if (broker == null) {
+            throw new RuntimeException("Unable to locate broker " + brokerId);
+        }
+        if (!broker.shuttingDown()) {
+            active.remove(broker);
+            broker.shutdownOffset = Long.MAX_VALUE;
+        }
+    }
+
+    public boolean shouldShutDown(int brokerId) {
+        BrokerHeartbeatState broker = brokers.get(brokerId);
+        if (broker == null) {
+            throw new RuntimeException("Unable to locate broker " + brokerId);
+        }
+        if (!broker.shuttingDown()) {
+            return false;
+        }
+        long curOffset = lowestActiveOffset();
+        return curOffset >= broker.shutdownOffset;
+    }
+
+    public long lowestActiveOffset() {
+        Iterator<BrokerHeartbeatState> iterator = active.iterator();
+        if (!iterator.hasNext()) {
+            return Long.MAX_VALUE;
+        }
+        BrokerHeartbeatState first = iterator.next();
+        return first.metadataOffset;
+    }
+
+    public void updateShutdownOffset(int brokerId, long offset) {
+        BrokerHeartbeatState broker = brokers.get(brokerId);
+        if (broker == null) {
+            throw new RuntimeException("Unable to locate broker " + brokerId);
+        }
+        active.remove(broker);
+        broker.shutdownOffset = offset;
     }
 
     /**
@@ -277,7 +391,7 @@ public class BrokerHeartbeatManager {
         if (broker == null) {
             return Long.MAX_VALUE;
         } else {
-            return broker.sessionTimeoutNs();
+            return broker.lastContactNs + sessionTimeoutNs;
         }
     }
 
@@ -289,10 +403,10 @@ public class BrokerHeartbeatManager {
      */
     int maybeFenceLeastRecentlyContacted() {
         BrokerHeartbeatState broker = unfenced.first();
-        if (broker == null || broker.hasValidSession()) {
+        if (broker == null || hasValidSession(broker)) {
             return -1;
         } else {
-            broker.setFenced(true);
+            unfenced.remove(broker);
             return broker.id();
         }
     }
@@ -334,10 +448,13 @@ public class BrokerHeartbeatManager {
             if (next != null) {
                 return true;
             }
-            if (!iterator.hasNext()) {
-                return false;
-            }
-            BrokerHeartbeatState result = iterator.next();
+            BrokerHeartbeatState result;
+            do {
+                if (!iterator.hasNext()) {
+                    return false;
+                }
+                result = iterator.next();
+            } while (result.shuttingDown());
             Optional<String> rack = idToRack.apply(result.id());
             next = new UsableBroker(result.id(), rack);
             return true;

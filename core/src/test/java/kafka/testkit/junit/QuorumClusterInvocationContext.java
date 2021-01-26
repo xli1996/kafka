@@ -5,6 +5,8 @@ import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.testkit.KafkaClusterTestKit;
 import kafka.testkit.TestKitNodes;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.metadata.BrokerState;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
@@ -15,6 +17,8 @@ import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -88,6 +92,11 @@ public class QuorumClusterInvocationContext implements TestTemplateInvocationCon
         }
 
         @Override
+        public String brokerList() {
+            return clusterReference.get().clientProperties().getProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
+        }
+
+        @Override
         public Collection<SocketServer> brokers() {
             return clusterReference.get().kip500Brokers().values().stream()
                     .map(Kip500Broker::socketServer)
@@ -107,13 +116,37 @@ public class QuorumClusterInvocationContext implements TestTemplateInvocationCon
         }
 
         @Override
+        public Optional<SocketServer> anyBroker() {
+            return clusterReference.get().kip500Brokers().values().stream()
+                .map(Kip500Broker::socketServer)
+                .findFirst();
+        }
+
+        @Override
+        public Optional<SocketServer> anyController() {
+            return clusterReference.get().controllers().values().stream()
+                .map(Kip500Controller::socketServer)
+                .findFirst();
+        }
+
+        @Override
         public ClusterType clusterType() {
-            return ClusterType.Quorum;
+            return ClusterType.Raft;
         }
 
         @Override
         public ClusterConfig config() {
             return clusterConfig;
+        }
+
+        @Override
+        public Object getUnderlying() {
+            return clusterReference.get();
+        }
+
+        @Override
+        public Admin createAdminClient(Properties configOverrides) {
+            return Admin.create(clusterReference.get().clientProperties());
         }
     }
 }

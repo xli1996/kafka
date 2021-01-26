@@ -1,8 +1,8 @@
 package integration.kafka.server
 
 import kafka.network.SocketServer
-import kafka.utils.NotNothing
-import org.apache.kafka.common.network.ListenerName
+import kafka.utils.{NotNothing, TestUtils}
+import org.apache.kafka.common.network.{ListenerName, Mode}
 import org.apache.kafka.common.protocol.ApiKeys
 import org.apache.kafka.common.requests.{AbstractRequest, AbstractResponse, RequestHeader, RequestTestUtils, ResponseHeader}
 import org.apache.kafka.common.security.auth.SecurityProtocol
@@ -11,6 +11,7 @@ import org.apache.kafka.common.utils.Utils
 import java.io.{DataInputStream, DataOutputStream}
 import java.net.Socket
 import java.nio.ByteBuffer
+import java.util.Properties
 import scala.annotation.nowarn
 import scala.reflect.ClassTag
 
@@ -89,5 +90,9 @@ class IntegrationTestHelper {
   def connect(socketServer: SocketServer,
               listenerName: ListenerName): Socket = {
     new Socket("localhost", socketServer.boundPort(listenerName))
+  }
+
+  def clientSecurityProps(certAlias: String): Properties = {
+    TestUtils.securityConfigs(Mode.CLIENT, securityProtocol, None, certAlias, TestUtils.SslCertificateCn, None) // TODO use real trust store and client SASL properties
   }
 }

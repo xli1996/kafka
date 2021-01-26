@@ -51,7 +51,7 @@ class SaslApiVersionsRequestTest(helper: IntegrationTestHelper,
     config.serverProperties().putAll(sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   }
 
-  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Legacy)
+  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Zk)
   def testApiVersionsRequestBeforeSaslHandshakeRequest(): Unit = {
     val socket = helper.connect(cluster.brokers().asScala.head, cluster.listener())
     try {
@@ -64,7 +64,7 @@ class SaslApiVersionsRequestTest(helper: IntegrationTestHelper,
     }
   }
 
-  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Legacy)
+  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Zk)
   def testApiVersionsRequestAfterSaslHandshakeRequest(): Unit = {
     val socket = helper.connect(cluster.brokers().asScala.head, cluster.listener())
     try {
@@ -77,7 +77,7 @@ class SaslApiVersionsRequestTest(helper: IntegrationTestHelper,
     }
   }
 
-  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Legacy)
+  @ClusterTest(securityProtocol = "SASL_PLAINTEXT", clusterType = Type.Zk)
   def testApiVersionsRequestWithUnsupportedVersion(): Unit = {
     val socket = helper.connect(cluster.brokers().asScala.head, cluster.listener())
     try {

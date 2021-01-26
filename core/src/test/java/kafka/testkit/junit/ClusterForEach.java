@@ -1,5 +1,6 @@
 package kafka.testkit.junit;
 
+import kafka.testkit.junit.annotations.ClusterTestDefaults;
 import kafka.testkit.junit.annotations.ClusterProperty;
 import kafka.testkit.junit.annotations.ClusterTemplate;
 import kafka.testkit.junit.annotations.ClusterTest;
@@ -12,6 +13,7 @@ import org.junit.platform.commons.util.ReflectionUtils;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -59,14 +61,10 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         return true;
     }
 
-    private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
-        Object testInstance = context.getTestInstance().orElse(null);
-        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), generateClustersMethods, ClusterGenerator.class);
-        ReflectionUtils.invokeMethod(method, testInstance, generator);
-    }
-
     @Override
     public Stream<TestTemplateInvocationContext> provideTestTemplateInvocationContexts(ExtensionContext context) {
+        Optional<ClusterTestDefaults> defaults = Optional.ofNullable(context.getRequiredTestClass().getDeclaredAnnotation(ClusterTestDefaults.class));
+
         List<TestTemplateInvocationContext> generatedContexts = new ArrayList<>();
 
         // Process the @ClusterTemplate annotation
@@ -81,14 +79,14 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         // Process single @ClusterTest annotation
         ClusterTest clusterTestAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTest.class);
         if (clusterTestAnnot != null) {
-            processClusterTest(context, clusterTestAnnot, generatedContexts::add);
+            processClusterTest(context, clusterTestAnnot, defaults, generatedContexts::add);
         }
 
         // Process multiple @ClusterTest annotation within @ClusterTests
         ClusterTests clusterTestsAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTests.class);
         if (clusterTestsAnnot != null) {
             for (ClusterTest annot : clusterTestsAnnot.value()) {
-                processClusterTest(context, annot, generatedContexts::add);
+                processClusterTest(context, annot, defaults, generatedContexts::add);
             }
         }
 
@@ -111,22 +109,34 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
 
         generatedClusterConfigs.forEach(config -> {
             switch (config.clusterType()) {
-                case Quorum:
+                case Raft:
                     testInvocations.accept(new QuorumClusterInvocationContext(config.copyOf()));
                     break;
-                case Legacy:
+                case Zk:
                     testInvocations.accept(new LegacyClusterInvocationContext(config.copyOf()));
                     break;
                 default:
                     throw new IllegalStateException("Unknown cluster type " + config.clusterType());
             }
         });
-
     }
 
-    private void processClusterTest(ExtensionContext context, ClusterTest annot, Consumer<TestTemplateInvocationContext> testInvocations) {
-        ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(
-            annot.clusterType(), annot.brokers(), annot.controllers(), annot.securityProtocol());
+    private void generateClusterConfigurations(ExtensionContext context, String generateClustersMethods, ClusterGenerator generator) {
+        Object testInstance = context.getTestInstance().orElse(null);
+        Method method = ReflectionUtils.getRequiredMethod(context.getRequiredTestClass(), generateClustersMethods, ClusterGenerator.class);
+        ReflectionUtils.invokeMethod(method, testInstance, generator);
+    }
+
+    private void processClusterTest(
+            ExtensionContext context,
+            ClusterTest annot,
+            Optional<ClusterTestDefaults> defaults,
+            Consumer<TestTemplateInvocationContext> testInvocations) {
+        int brokers = defaults.map(ClusterTestDefaults::brokers).orElse(annot.brokers());
+        int controllers = defaults.map(ClusterTestDefaults::controllers).orElse(annot.controllers());
+        ClusterConfig.Type type = defaults.map(ClusterTestDefaults::clusterType).orElse(annot.clusterType());
+
+        ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(type, brokers, controllers, annot.securityProtocol());
         if (!annot.name().isEmpty()) {
             builder.name(annot.name());
         }
@@ -138,13 +148,17 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             properties.put(property.key(), property.value());
         }
         builder.serverProperties(properties);
-        if (annot.clusterType().equals(ClusterConfig.Type.Legacy)) {
-            testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));
-        } else if (annot.clusterType().equals(ClusterConfig.Type.Quorum)) {
-            testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
-        } else {
-            testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));
-            testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
+        switch (type) {
+            case Zk:
+                testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));
+                break;
+            case Raft:
+                testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
+                break;
+            case Both:
+                testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));
+                testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
+                break;
         }
     }
 }

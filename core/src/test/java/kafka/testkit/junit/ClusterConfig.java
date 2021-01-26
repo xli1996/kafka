@@ -13,8 +13,8 @@ import java.util.Properties;
  */
 public class ClusterConfig {
     public enum Type {
-        Quorum,
-        Legacy,
+        Raft,
+        Zk,
         Both
     }
 
@@ -26,6 +26,8 @@ public class ClusterConfig {
     private final String ibp;
     private final String securityProtocol;
     private final String listenerName;
+
+    private final Properties adminClientProperties = new Properties();
 
     ClusterConfig(Type type, int brokers, int controllers, String name, Properties serverProperties, String ibp,
                   String securityProtocol, String listenerName) {
@@ -59,6 +61,10 @@ public class ClusterConfig {
         return serverProperties;
     }
 
+    public Properties adminClientProperties() {
+        return adminClientProperties;
+    }
+
     public Optional<String> ibp() {
         return Optional.ofNullable(ibp);
     }
@@ -87,7 +93,7 @@ public class ClusterConfig {
     }
 
     public static Builder defaultClusterBuilder() {
-        return new Builder(Type.Quorum, 1, 1, SecurityProtocol.PLAINTEXT.name);
+        return new Builder(Type.Raft, 1, 1, SecurityProtocol.PLAINTEXT.name);
     }
 
     public static Builder clusterBuilder(Type type, int brokers, int controllers, String securityProtocol) {

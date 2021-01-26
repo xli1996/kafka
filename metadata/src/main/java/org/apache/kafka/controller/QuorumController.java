@@ -538,7 +538,9 @@ public final class QuorumController implements Controller {
         public ControllerResult<Void> generateRecordsAndResult() {
             ControllerResult<Set<Integer>> result =
                 clusterControl.maybeFenceLeastRecentlyContacted();
-            replicationControl.handleNewlyFenced(result.response(), result.records());
+            for (int brokerId : result.response()) {
+                replicationControl.removeFromIsr(brokerId, result.records());
+            }
             rescheduleMaybeFenceReplicas();
             return new ControllerResult<>(result.records(), null);
         }
@@ -809,8 +811,7 @@ public final class QuorumController implements Controller {
                 if (wantShutDown && !shouldShutDown) {
                     // TODO: optimize this a bit better so we don't have to iterate
                     // over all the partitions where this broker is an ISR member.
-                    replicationControl.removeLeaderships(
-                        request.brokerId(), false, result.records());
+                    replicationControl.removeLeaderships(request.brokerId(), result.records());
                 }
                 rescheduleMaybeFenceReplicas();
                 return result;

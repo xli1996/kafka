@@ -20,10 +20,16 @@ package org.apache.kafka.controller;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.controller.BrokerHeartbeatManager.BrokerHeartbeatState;
+import org.apache.kafka.controller.BrokerHeartbeatManager.UsableBrokerIterator;
+import org.apache.kafka.metadata.UsableBroker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 
@@ -150,5 +156,39 @@ public class BrokerHeartbeatManagerTest {
         assertEquals(broker2, iterator.next());
         assertEquals(broker1, iterator.next());
         assertFalse(iterator.hasNext());
+    }
+
+    private static Set<UsableBroker> usableBrokersToSet(BrokerHeartbeatManager manager) {
+        Set<UsableBroker> brokers = new HashSet<>();
+        for (Iterator<UsableBroker> iterator = new UsableBrokerIterator(
+            manager.unfenced().iterator(),
+            id -> id % 2 == 0 ? Optional.of("rack1") : Optional.of("rack2"));
+             iterator.hasNext(); ) {
+            brokers.add(iterator.next());
+        }
+        return brokers;
+    }
+
+    @Test
+    public void testUsableBrokerIterator() {
+        BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
+        assertEquals(Collections.emptySet(), usableBrokersToSet(manager));
+        manager.touch(0, false, 100);
+        manager.touch(1, false, 98);
+        manager.touch(2, false, 100);
+        manager.touch(3, false, 0);
+        manager.touch(4, true, 0);
+        assertEquals(98L, manager.lowestActiveOffset());
+        Set<UsableBroker> expected = new HashSet<>();
+        expected.add(new UsableBroker(0, Optional.of("rack1")));
+        expected.add(new UsableBroker(1, Optional.of("rack2")));
+        expected.add(new UsableBroker(2, Optional.of("rack1")));
+        expected.add(new UsableBroker(3, Optional.of("rack2")));
+        assertEquals(expected, usableBrokersToSet(manager));
+        manager.beginBrokerShutDown(2);
+        assertEquals(100L, manager.lowestActiveOffset());
+        manager.beginBrokerShutDown(4);
+        expected.remove(new UsableBroker(2, Optional.of("rack1")));
+        assertEquals(expected, usableBrokersToSet(manager));
     }
 }

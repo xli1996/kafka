@@ -18,6 +18,18 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+/**
+ * Wraps a {@link KafkaClusterTestKit} inside lifecycle methods for a test invocation. Each instance of this
+ * class is provided with a configuration for the cluster.
+ *
+ * This context also provides parameter resolvers for:
+ *
+ * <ul>
+ *     <li>ClusterConfig (the same instance passed to the constructor)</li>
+ *     <li>ClusterInstance (includes methods to expose underlying SocketServer-s)</li>
+ *     <li>IntegrationTestHelper (helper methods)</li>
+ * </ul>
+ */
 public class QuorumClusterInvocationContext implements TestTemplateInvocationContext {
 
     private final ClusterConfig clusterConfig;
@@ -47,7 +59,7 @@ public class QuorumClusterInvocationContext implements TestTemplateInvocationCon
 
                     // Copy properties into the TestKit builder
                     clusterConfig.serverProperties().forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
-
+                    // TODO how to pass down security protocol and listener name?
                     KafkaClusterTestKit cluster = builder.build();
                     clusterReference.set(cluster);
                     cluster.format();
@@ -58,9 +70,7 @@ public class QuorumClusterInvocationContext implements TestTemplateInvocationCon
                             org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
                             100L);
                 },
-                (AfterTestExecutionCallback) context -> {
-                    clusterReference.get().close();
-                },
+                (AfterTestExecutionCallback) context -> clusterReference.get().close(),
                 new ClusterInstanceParameterResolver(new QuorumClusterInstance(clusterReference, clusterConfig)),
                 new ClusterConfigParameterResolver(clusterConfig),
                 new IntegrationTestHelperParameterResolver()

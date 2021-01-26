@@ -23,6 +23,14 @@ import java.util.stream.Collectors;
 /**
  * Wraps a {@link IntegrationTestHarness} inside lifecycle methods for a test invocation. Each instance of this
  * class is provided with a configuration for the cluster.
+ *
+ * This context also provides parameter resolvers for:
+ *
+ * <ul>
+ *     <li>ClusterConfig (the same instance passed to the constructor)</li>
+ *     <li>ClusterInstance (includes methods to expose underlying SocketServer-s)</li>
+ *     <li>IntegrationTestHelper (helper methods)</li>
+ * </ul>
  */
 public class LegacyClusterInvocationContext implements TestTemplateInvocationContext {
 
@@ -39,7 +47,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
         String clusterDesc = clusterConfig.nameTags().entrySet().stream()
                 .map(Object::toString)
                 .collect(Collectors.joining(", "));
-        return String.format("[Legacy  %d] %s", invocationIndex, clusterDesc);
+        return String.format("[Legacy %d] %s", invocationIndex, clusterDesc);
     }
 
     @Override
@@ -53,12 +61,13 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
                     IntegrationTestHarness cluster = new IntegrationTestHarness() { // extends KafkaServerTestHarness
                         @Override
                         public SecurityProtocol securityProtocol() {
-                            return SecurityProtocol.PLAINTEXT; // TODO
+                            return SecurityProtocol.forName(clusterConfig.securityProtocol());
                         }
 
                         @Override
                         public ListenerName listenerName() {
-                            return ListenerName.forSecurityProtocol(SecurityProtocol.PLAINTEXT); // TODO
+                            return clusterConfig.listenerName().map(ListenerName::normalised)
+                                .orElseGet(() -> ListenerName.forSecurityProtocol(securityProtocol()));
                         }
 
                         @Override
@@ -68,13 +77,14 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
 
                         @Override
                         public Option<Properties> clientSaslProperties() {
-                            // TODO
+                            // TODO add this to ClusterConfig
                             return super.clientSaslProperties();
                         }
 
                         @Override
                         public int brokerCount() {
-                            return clusterConfig.brokers();
+                            // Brokers and controllers are the same in legacy mode, so just use the max
+                            return Math.max(clusterConfig.brokers(), clusterConfig.controllers());
                         }
                     };
                     clusterReference.set(cluster);
@@ -85,9 +95,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
                             org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
                             100L);
                 },
-                (AfterTestExecutionCallback) context -> {
-                    clusterReference.get().tearDown();
-                },
+                (AfterTestExecutionCallback) context -> clusterReference.get().tearDown(),
                 new ClusterInstanceParameterResolver(new LegacyClusterInstance(clusterConfig, clusterReference)),
                 new ClusterConfigParameterResolver(clusterConfig),
                 new IntegrationTestHelperParameterResolver()

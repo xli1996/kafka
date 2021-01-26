@@ -8,8 +8,8 @@ import org.apache.kafka.common.message.ApiVersionsRequestData
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
 import org.apache.kafka.common.requests._
-import org.junit.Assert.{assertEquals, assertFalse, assertNotNull}
-import org.junit.jupiter.api.BeforeEach
+import org.junit.Assert.{assertEquals, assertFalse, assertNotNull, fail}
+import org.junit.jupiter.api.{BeforeEach, Test}
 import org.junit.jupiter.api.extension._
 
 import scala.jdk.CollectionConverters._
@@ -59,6 +59,11 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     assertEquals(ApiKeys.API_VERSIONS.latestVersion(), apiVersion.maxVersion())
   }
 
+  @Test
+  def testFoo(): Unit = {
+    fail("oops")
+  }
+
   @ClusterTests(Array(
     new ClusterTest(name = "Regular Quorum", clusterType = ClusterType.Quorum, brokers = 1, controllers = 1),
     new ClusterTest(name = "Legacy with foo", clusterType = ClusterType.Legacy, brokers = 1, controllers = 1,
@@ -71,7 +76,7 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  //@ClusterTemplate
+  @ClusterTest
   def testApiVersionsRequestValidationV3(): Unit = {
     // Invalid request because Name and Version are empty by default
     val apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), 3.asInstanceOf[Short])

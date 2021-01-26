@@ -1,6 +1,7 @@
 package kafka.testkit.junit;
 
 import kafka.server.KafkaConfig;
+import org.apache.kafka.common.security.auth.SecurityProtocol;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -23,14 +24,19 @@ public class ClusterConfig {
     private final String name;
     private final Properties serverProperties;
     private final String ibp;
+    private final String securityProtocol;
+    private final String listenerName;
 
-    ClusterConfig(ClusterType type, int brokers, int controllers, String name, Properties serverProperties, String ibp) {
+    ClusterConfig(ClusterType type, int brokers, int controllers, String name, Properties serverProperties, String ibp,
+                  String securityProtocol, String listenerName) {
         this.type = type;
         this.brokers = brokers;
         this.controllers = controllers;
         this.name = name;
         this.serverProperties = serverProperties;
         this.ibp = ibp;
+        this.securityProtocol = securityProtocol;
+        this.listenerName = listenerName;
     }
 
     public ClusterType clusterType() {
@@ -57,25 +63,35 @@ public class ClusterConfig {
         return Optional.ofNullable(ibp);
     }
 
+    public String securityProtocol() {
+        return securityProtocol;
+    }
+
+    public Optional<String> listenerName() {
+        return Optional.ofNullable(listenerName);
+    }
+
     public Map<String, String> nameTags() {
         Map<String, String> tags = new LinkedHashMap<>(3);
         name().ifPresent(name -> tags.put("Name", name));
         ibp().ifPresent(ibp -> tags.put("IBP", ibp));
+        tags.put("security", securityProtocol);
+        listenerName().ifPresent(listener -> tags.put("listener", listener));
         return tags;
     }
 
     public ClusterConfig copyOf() {
         Properties props = new Properties();
         props.putAll(serverProperties);
-        return new ClusterConfig(type, brokers, controllers, name, props, ibp);
+        return new ClusterConfig(type, brokers, controllers, name, props, ibp, securityProtocol, listenerName);
     }
 
     public static Builder defaultClusterBuilder() {
-        return new Builder(ClusterType.Quorum, 1, 1);
+        return new Builder(ClusterType.Quorum, 1, 1, SecurityProtocol.PLAINTEXT.name);
     }
 
-    public static Builder clusterBuilder(ClusterType type, int brokers, int controllers) {
-        return new Builder(type, brokers, controllers);
+    public static Builder clusterBuilder(ClusterType type, int brokers, int controllers, String securityProtocol) {
+        return new Builder(type, brokers, controllers, securityProtocol);
     }
 
     public static class Builder {
@@ -85,11 +101,14 @@ public class ClusterConfig {
         private String name;
         private Properties serverProperties;
         private String ibp;
+        private String securityProtocol;
+        private String listenerName;
 
-        Builder(ClusterConfig.ClusterType type, int brokers, int controllers) {
+        Builder(ClusterConfig.ClusterType type, int brokers, int controllers, String securityProtocol) {
             this.type = type;
             this.brokers = brokers;
             this.controllers = controllers;
+            this.securityProtocol = securityProtocol;
         }
 
         public Builder type(ClusterConfig.ClusterType type) {
@@ -122,6 +141,16 @@ public class ClusterConfig {
             return this;
         }
 
+        public Builder securityProtocol(String securityProtocol) {
+            this.securityProtocol = securityProtocol;
+            return this;
+        }
+
+        public Builder listenerName(String listenerName) {
+            this.listenerName = listenerName;
+            return this;
+        }
+
         public ClusterConfig build() {
             Properties props = new Properties();
             if (serverProperties != null) {
@@ -130,7 +159,7 @@ public class ClusterConfig {
             if (ibp != null) {
                 props.put(KafkaConfig.InterBrokerProtocolVersionProp(), ibp);
             }
-            return new ClusterConfig(type, brokers, controllers, name, props, ibp);
+            return new ClusterConfig(type, brokers, controllers, name, props, ibp, securityProtocol, listenerName);
         }
     }
 }

@@ -36,7 +36,7 @@ class SaslApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     config.serverProperties().putAll(sasl.kafkaServerSaslProperties(kafkaServerSaslMechanisms, kafkaClientSaslMechanism))
   }
 
-  @ClusterTest
+  @ClusterTest(securityProtocol = "SASL_PLAINTEXT")
   def testApiVersionsRequestBeforeSaslHandshakeRequest(): Unit = {
     val socket = helper.connect(harness.brokers().asScala.head, harness.listener())
     try {

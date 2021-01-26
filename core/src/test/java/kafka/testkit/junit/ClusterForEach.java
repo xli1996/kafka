@@ -4,8 +4,6 @@ import kafka.testkit.junit.annotations.ClusterProperty;
 import kafka.testkit.junit.annotations.ClusterTemplate;
 import kafka.testkit.junit.annotations.ClusterTest;
 import kafka.testkit.junit.annotations.ClusterTests;
-import org.apache.kafka.common.network.ListenerName;
-import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContextProvider;
@@ -19,20 +17,42 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
- * Template that creates two test invocations: one for legacy cluster and one for quorum clusters.
+ * ClusterForEach is a custom JUnit extension that will generate some number of test invocations depending on a few
+ * custom annotations. These annotations are placed on so-called test template methods. Template methods look like
+ * normal JUnit test methods, but instead of being invoked directly, they are used as templates for generating
+ * multiple test invocations.
  *
- * In addition to providing the BeforeEach and AfterEach extensions for these generated invocations, this provider
- * also binds two parameters which can be injected into test methods or class constructors:
+ * Test class that use this extension should use one of the following annotations on each template method:
  *
  * <ul>
- *     <li>IntegrationTestHelper: Utility class of common network functions needed by integration tests</li>
- *     <li>ClusterHarness: Interface that exposes aspects of the underlying cluster</li>
+ *     <li>{@link ClusterTest}, define a single cluster configuration</li>
+ *     <li>{@link ClusterTests}, provide multiple instances of @ClusterTest</li>
+ *     <li>{@link ClusterTemplate}, define a static method that generates cluster configurations</li>
  * </ul>
  *
- * Test templates must be annotated with {@link ClusterTemplate} in order to be discovered. The fields from the annonation
- * will determine the number of invocations that are generated as well as the configuration for the clusters used by
- * each invocation.
- */
+ * Any combination of these annotations may be used on a given test template method. If no test invocations are
+ * generated after processing the annotations, an error is thrown.
+ *
+ * Depending on which annotations are used, and what values are given, different {@link ClusterConfig} will be
+ * generated. Each ClusterConfig is used to create an underlying Kafka cluster that is used for the actual test
+ * invocation.
+ *
+ * For example:
+ *
+ * <pre>
+ * &#64;ExtendWith(value = Array(classOf[ClusterForEach]))
+ * class SomeIntegrationTest {
+ *   &#64;ClusterTest(brokers = 1, controllers = 1, clusterType = ClusterType.Both)
+ *   def someTest(): Unit = {
+ *     assertTrue(condition)
+ *   }
+ * }
+ * </pre>
+ *
+ * will generate two invocations of "someTest" (since ClusterType.Both was given). For each invocation, the test class
+ * SomeIntegrationTest will be instantiated, lifecycle methods (before/after) will be run, and "someTest" will be invoked.
+ *
+ **/
 public class ClusterForEach implements TestTemplateInvocationContextProvider {
     @Override
     public boolean supportsTestTemplate(ExtensionContext context) {
@@ -61,14 +81,14 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         // Process single @ClusterTest annotation
         ClusterTest clusterTestAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTest.class);
         if (clusterTestAnnot != null) {
-            processClusterConfig(context, clusterTestAnnot, generatedContexts::add);
+            processClusterTest(context, clusterTestAnnot, generatedContexts::add);
         }
 
         // Process multiple @ClusterTest annotation within @ClusterTests
         ClusterTests clusterTestsAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTests.class);
         if (clusterTestsAnnot != null) {
             for (ClusterTest annot : clusterTestsAnnot.value()) {
-                processClusterConfig(context, annot, generatedContexts::add);
+                processClusterTest(context, annot, generatedContexts::add);
             }
         }
 
@@ -104,19 +124,14 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
 
     }
 
-    private void processClusterConfig(ExtensionContext context, ClusterTest annot, Consumer<TestTemplateInvocationContext> testInvocations) {
-        // TODO these
-        SecurityProtocol securityProtocol = SecurityProtocol.forName(annot.securityProtocol());
-        ListenerName listenerName;
-        if (annot.listener().isEmpty()) {
-            listenerName = ListenerName.forSecurityProtocol(securityProtocol);
-        } else {
-            listenerName = ListenerName.normalised(annot.listener());
-        }
-
-        ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(annot.clusterType(), annot.brokers(), annot.controllers());
+    private void processClusterTest(ExtensionContext context, ClusterTest annot, Consumer<TestTemplateInvocationContext> testInvocations) {
+        ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(
+            annot.clusterType(), annot.brokers(), annot.controllers(), annot.securityProtocol());
         if (!annot.name().isEmpty()) {
             builder.name(annot.name());
+        }
+        if (!annot.listener().isEmpty()) {
+            builder.listenerName(annot.listener());
         }
         Properties properties = new Properties();
         for (ClusterProperty property : annot.properties()) {

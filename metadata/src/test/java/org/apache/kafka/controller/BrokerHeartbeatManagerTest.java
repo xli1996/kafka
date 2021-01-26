@@ -20,6 +20,8 @@ package org.apache.kafka.controller;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.controller.BrokerHeartbeatManager.BrokerHeartbeatState;
+import org.apache.kafka.controller.BrokerHeartbeatManager.BrokerHeartbeatStateIterator;
+import org.apache.kafka.controller.BrokerHeartbeatManager.BrokerHeartbeatStateList;
 import org.apache.kafka.controller.BrokerHeartbeatManager.UsableBrokerIterator;
 import org.apache.kafka.metadata.UsableBroker;
 import org.junit.jupiter.api.Test;
@@ -174,10 +176,10 @@ public class BrokerHeartbeatManagerTest {
         BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
         assertEquals(Collections.emptySet(), usableBrokersToSet(manager));
         manager.touch(0, false, 100);
-        manager.touch(1, false, 98);
-        manager.touch(2, false, 100);
-        manager.touch(3, false, 0);
-        manager.touch(4, true, 0);
+        manager.touch(1, false, 100);
+        manager.touch(2, false, 98);
+        manager.touch(3, false, 100);
+        manager.touch(4, true, 100);
         assertEquals(98L, manager.lowestActiveOffset());
         Set<UsableBroker> expected = new HashSet<>();
         expected.add(new UsableBroker(0, Optional.of("rack1")));
@@ -190,5 +192,38 @@ public class BrokerHeartbeatManagerTest {
         manager.beginBrokerShutDown(4);
         expected.remove(new UsableBroker(2, Optional.of("rack1")));
         assertEquals(expected, usableBrokersToSet(manager));
+    }
+
+    @Test
+    public void testBrokerHeartbeatStateList() {
+        BrokerHeartbeatStateList list = new BrokerHeartbeatStateList();
+        assertEquals(null, list.first());
+        BrokerHeartbeatStateIterator iterator = list.iterator();
+        assertFalse(iterator.hasNext());
+        BrokerHeartbeatState broker0 = new BrokerHeartbeatState(0);
+        broker0.lastContactNs = 200;
+        BrokerHeartbeatState broker1 = new BrokerHeartbeatState(1);
+        broker1.lastContactNs = 100;
+        BrokerHeartbeatState broker2 = new BrokerHeartbeatState(2);
+        broker2.lastContactNs = 50;
+        BrokerHeartbeatState broker3 = new BrokerHeartbeatState(3);
+        broker3.lastContactNs = 150;
+        list.add(broker0);
+        list.add(broker1);
+        list.add(broker2);
+        list.add(broker3);
+        assertEquals(broker2, list.first());
+        iterator = list.iterator();
+        assertEquals(broker2, iterator.next());
+        assertEquals(broker1, iterator.next());
+        assertEquals(broker3, iterator.next());
+        assertEquals(broker0, iterator.next());
+        assertFalse(iterator.hasNext());
+        list.remove(broker1);
+        iterator = list.iterator();
+        assertEquals(broker2, iterator.next());
+        assertEquals(broker3, iterator.next());
+        assertEquals(broker0, iterator.next());
+        assertFalse(iterator.hasNext());
     }
 }

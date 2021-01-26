@@ -58,7 +58,7 @@ public class BrokerHeartbeatManager {
          * When this field is updated, we also may have to update the broker's position in
          * the unfenced list.
          */
-        private long lastContactNs;
+        long lastContactNs;
 
         /**
          * The last metadata offset which this broker reported.  When this field is updated,

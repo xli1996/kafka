@@ -138,9 +138,9 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
             properties.put(property.key(), property.value());
         }
         builder.serverProperties(properties);
-        if (annot.clusterType().equals(ClusterConfig.ClusterType.Legacy)) {
+        if (annot.clusterType().equals(ClusterConfig.Type.Legacy)) {
             testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));
-        } else if (annot.clusterType().equals(ClusterConfig.ClusterType.Quorum)) {
+        } else if (annot.clusterType().equals(ClusterConfig.Type.Quorum)) {
             testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
         } else {
             testInvocations.accept(new LegacyClusterInvocationContext(builder.build()));

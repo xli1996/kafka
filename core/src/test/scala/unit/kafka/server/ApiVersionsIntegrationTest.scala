@@ -1,7 +1,7 @@
 package unit.kafka.server
 
 import integration.kafka.server.IntegrationTestHelper
-import kafka.testkit.junit.ClusterConfig.ClusterType
+import kafka.testkit.junit.ClusterConfig.Type
 import kafka.testkit.junit.annotations.{ClusterProperty, ClusterTemplate, ClusterTest, ClusterTests}
 import kafka.testkit.junit.{ClusterConfig, ClusterForEach, ClusterGenerator, ClusterInstance}
 import org.apache.kafka.common.message.ApiVersionsRequestData
@@ -39,7 +39,7 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
 
   @ClusterTemplate("generateTwoIBPs")
   def testApiVersionsRequest(cluster: ClusterInstance): Unit = {
-    if (cluster.clusterType().equals(ClusterType.Quorum)) {
+    if (cluster.clusterType().equals(Type.Quorum)) {
       // Do something different
     }
     val request = new ApiVersionsRequest.Builder().build()
@@ -47,7 +47,7 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  @ClusterTest(clusterType = ClusterType.Quorum, brokers = 1, controllers = 1)
+  @ClusterTest(clusterType = Type.Quorum, brokers = 1, controllers = 1)
   def testApiVersionsRequestWithUnsupportedVersion(): Unit = {
     val apiVersionsRequest = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendUnsupportedApiVersionRequest(apiVersionsRequest)
@@ -65,8 +65,8 @@ class ApiVersionsIntegrationTest(helper: IntegrationTestHelper,
   }
 
   @ClusterTests(Array(
-    new ClusterTest(name = "Regular Quorum", clusterType = ClusterType.Quorum, brokers = 1, controllers = 1),
-    new ClusterTest(name = "Legacy with foo", clusterType = ClusterType.Legacy, brokers = 1, controllers = 1,
+    new ClusterTest(name = "Regular Quorum", clusterType = Type.Quorum, brokers = 1, controllers = 1),
+    new ClusterTest(name = "Legacy with foo", clusterType = Type.Legacy, brokers = 1, controllers = 1,
       properties = Array(new ClusterProperty(key = "foo", value = "bar"))
     )
   ))

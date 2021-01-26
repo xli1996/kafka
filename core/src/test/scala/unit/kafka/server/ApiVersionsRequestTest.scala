@@ -17,24 +17,28 @@
 
 package kafka.server
 
+import integration.kafka.server.IntegrationTestHelper
+import kafka.testkit.junit.{ClusterForEach, ClusterInstance}
+import kafka.testkit.junit.annotations.ClusterTest
 import org.apache.kafka.common.message.ApiVersionsRequestData
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
-import org.apache.kafka.common.requests.{ApiVersionsRequest, ApiVersionsResponse}
+import org.apache.kafka.common.requests.ApiVersionsRequest
 import org.junit.Assert._
-import org.junit.Test
+import org.junit.jupiter.api.extension.ExtendWith
 
-class ApiVersionsRequestTest extends AbstractApiVersionsRequestTest {
 
-  override def brokerCount: Int = 1
+@ExtendWith(value = Array(classOf[ClusterForEach]))
+class ApiVersionsRequestTest(helper: IntegrationTestHelper,
+                             cluster: ClusterInstance) extends AbstractApiVersionsRequestTest(helper, cluster) {
 
-  @Test
+  @ClusterTest
   def testApiVersionsRequest(): Unit = {
     val request = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendApiVersionsRequest(request)
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  @Test
+  @ClusterTest
   def testApiVersionsRequestWithUnsupportedVersion(): Unit = {
     val apiVersionsRequest = new ApiVersionsRequest.Builder().build()
     val apiVersionsResponse = sendUnsupportedApiVersionRequest(apiVersionsRequest)
@@ -46,23 +50,18 @@ class ApiVersionsRequestTest extends AbstractApiVersionsRequestTest {
     assertEquals(ApiKeys.API_VERSIONS.latestVersion(), apiVersion.maxVersion())
   }
 
-  @Test
+  @ClusterTest
   def testApiVersionsRequestValidationV0(): Unit = {
     val apiVersionsRequest = new ApiVersionsRequest.Builder().build(0.asInstanceOf[Short])
     val apiVersionsResponse = sendApiVersionsRequest(apiVersionsRequest)
     validateApiVersionsResponse(apiVersionsResponse)
   }
 
-  @Test
+  @ClusterTest
   def testApiVersionsRequestValidationV3(): Unit = {
     // Invalid request because Name and Version are empty by default
     val apiVersionsRequest = new ApiVersionsRequest(new ApiVersionsRequestData(), 3.asInstanceOf[Short])
     val apiVersionsResponse = sendApiVersionsRequest(apiVersionsRequest)
     assertEquals(Errors.INVALID_REQUEST.code(), apiVersionsResponse.data.errorCode())
   }
-
-  private def sendApiVersionsRequest(request: ApiVersionsRequest): ApiVersionsResponse = {
-    connectAndReceive[ApiVersionsResponse](request)
-  }
-
 }

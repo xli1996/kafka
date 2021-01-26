@@ -14,7 +14,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 @Retention(RUNTIME)
 @TestTemplate
 public @interface ClusterTest {
-    ClusterConfig.ClusterType clusterType() default ClusterConfig.ClusterType.Both;
+    ClusterConfig.Type clusterType() default ClusterConfig.Type.Both;
     String name() default "";
     int brokers() default 1;
     int controllers() default 1;

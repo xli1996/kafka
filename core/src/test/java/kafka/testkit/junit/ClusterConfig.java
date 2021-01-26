@@ -12,13 +12,13 @@ import java.util.Properties;
  * Represents a requested configuration of a Kafka cluster for integration testing
  */
 public class ClusterConfig {
-    public enum ClusterType {
+    public enum Type {
         Quorum,
         Legacy,
         Both
     }
 
-    private final ClusterType type;
+    private final Type type;
     private final int brokers;
     private final int controllers;
     private final String name;
@@ -27,7 +27,7 @@ public class ClusterConfig {
     private final String securityProtocol;
     private final String listenerName;
 
-    ClusterConfig(ClusterType type, int brokers, int controllers, String name, Properties serverProperties, String ibp,
+    ClusterConfig(Type type, int brokers, int controllers, String name, Properties serverProperties, String ibp,
                   String securityProtocol, String listenerName) {
         this.type = type;
         this.brokers = brokers;
@@ -39,7 +39,7 @@ public class ClusterConfig {
         this.listenerName = listenerName;
     }
 
-    public ClusterType clusterType() {
+    public Type clusterType() {
         return type;
     }
 
@@ -87,15 +87,15 @@ public class ClusterConfig {
     }
 
     public static Builder defaultClusterBuilder() {
-        return new Builder(ClusterType.Quorum, 1, 1, SecurityProtocol.PLAINTEXT.name);
+        return new Builder(Type.Quorum, 1, 1, SecurityProtocol.PLAINTEXT.name);
     }
 
-    public static Builder clusterBuilder(ClusterType type, int brokers, int controllers, String securityProtocol) {
+    public static Builder clusterBuilder(Type type, int brokers, int controllers, String securityProtocol) {
         return new Builder(type, brokers, controllers, securityProtocol);
     }
 
     public static class Builder {
-        private ClusterConfig.ClusterType type;
+        private Type type;
         private int brokers;
         private int controllers;
         private String name;
@@ -104,14 +104,14 @@ public class ClusterConfig {
         private String securityProtocol;
         private String listenerName;
 
-        Builder(ClusterConfig.ClusterType type, int brokers, int controllers, String securityProtocol) {
+        Builder(Type type, int brokers, int controllers, String securityProtocol) {
             this.type = type;
             this.brokers = brokers;
             this.controllers = controllers;
             this.securityProtocol = securityProtocol;
         }
 
-        public Builder type(ClusterConfig.ClusterType type) {
+        public Builder type(Type type) {
             this.type = type;
             return this;
         }

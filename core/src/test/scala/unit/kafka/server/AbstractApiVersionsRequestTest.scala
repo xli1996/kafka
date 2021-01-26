@@ -16,6 +16,8 @@
  */
 package kafka.server
 
+import integration.kafka.server.IntegrationTestHelper
+import kafka.testkit.junit.ClusterInstance
 import org.apache.kafka.common.message.ApiVersionsResponseData.ApiVersionsResponseKey
 import org.apache.kafka.common.protocol.ApiKeys
 import org.apache.kafka.common.requests.{ApiVersionsRequest, ApiVersionsResponse}
@@ -23,14 +25,19 @@ import org.junit.Assert._
 
 import scala.jdk.CollectionConverters._
 
-abstract class AbstractApiVersionsRequestTest extends BaseRequestTest {
+abstract class AbstractApiVersionsRequestTest(helper: IntegrationTestHelper,
+                                              cluster: ClusterInstance) {
+
+  def sendApiVersionsRequest(request: ApiVersionsRequest): ApiVersionsResponse = {
+    helper.connectAndReceive[ApiVersionsResponse](request, cluster.brokers().asScala.head, cluster.listener())
+  }
 
   def sendUnsupportedApiVersionRequest(request: ApiVersionsRequest): ApiVersionsResponse = {
-    val overrideHeader = nextRequestHeader(ApiKeys.API_VERSIONS, Short.MaxValue)
-    val socket = connect(anySocketServer)
+    val overrideHeader = helper.nextRequestHeader(ApiKeys.API_VERSIONS, Short.MaxValue)
+    val socket = helper.connect(cluster.brokers().asScala.head, cluster.listener())
     try {
-      sendWithHeader(request, overrideHeader, socket)
-      receive[ApiVersionsResponse](socket, ApiKeys.API_VERSIONS, 0.toShort)
+      helper.sendWithHeader(request, overrideHeader, socket)
+      helper.receive[ApiVersionsResponse](socket, ApiKeys.API_VERSIONS, 0.toShort)
     } finally socket.close()
   }
 

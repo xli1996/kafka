@@ -172,7 +172,7 @@ public class ReplicationControlManager {
             return builder.toString();
         }
 
-        public int chooseNewLeader(int[] newIsr) {
+        int chooseNewLeader(int[] newIsr) {
             for (int i = 0; i < replicas.length; i++) {
                 int replica = replicas[i];
                 if (Replicas.contains(newIsr, replica)) {
@@ -299,7 +299,7 @@ public class ReplicationControlManager {
         log.debug("Applied ISR change record: {}", record.toString());
     }
 
-    public ControllerResult<CreateTopicsResponseData>
+    ControllerResult<CreateTopicsResponseData>
             createTopics(CreateTopicsRequestData request) {
         Map<String, ApiError> topicErrors = new HashMap<>();
         List<ApiMessageAndVersion> records = new ArrayList<>();
@@ -499,7 +499,12 @@ public class ReplicationControlManager {
         return topic.parts.get(partitionId);
     }
 
-    public ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
+    // VisibleForTesting
+    BrokersToIsrs brokersToIsrs() {
+        return brokersToIsrs;
+    }
+
+    ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
         clusterControl.checkBrokerEpoch(request.brokerId(), request.brokerEpoch());
         AlterIsrResponseData response = new AlterIsrResponseData();
         List<ApiMessageAndVersion> records = new ArrayList<>();
@@ -563,7 +568,7 @@ public class ReplicationControlManager {
         return new ControllerResult<>(records, response);
     }
 
-    public void removeFromIsr(int brokerId, List<ApiMessageAndVersion> records) {
+    void removeFromIsr(int brokerId, List<ApiMessageAndVersion> records) {
         Iterator<TopicPartition> iterator = brokersToIsrs.iterator(brokerId, false);
         while (iterator.hasNext()) {
             TopicPartition topicPartition = iterator.next();
@@ -597,7 +602,7 @@ public class ReplicationControlManager {
     }
 
 
-    public void removeLeaderships(int brokerId, List<ApiMessageAndVersion> records) {
+    void removeLeaderships(int brokerId, List<ApiMessageAndVersion> records) {
         Iterator<TopicPartition> iterator = brokersToIsrs.iterator(brokerId, true);
         while (iterator.hasNext()) {
             TopicPartition topicPartition = iterator.next();

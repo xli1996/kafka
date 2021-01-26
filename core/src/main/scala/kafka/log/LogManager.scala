@@ -346,7 +346,9 @@ class LogManager(logDirs: Seq[File],
         val numLogsLoaded = new AtomicInteger(0)
         numTotalLogs += logsToLoad.length
 
-        val jobsForDir = logsToLoad.map { logDir =>
+        val jobsForDir = logsToLoad
+          .filter(logDir => Log.parseTopicPartitionName(logDir).topic != "@metadata")
+          .map { logDir =>
           val runnable: Runnable = () => {
             try {
               debug(s"Loading log $logDir")

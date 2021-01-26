@@ -154,7 +154,7 @@ public class CheckpointBench {
         Mockito.when(partitionStateStore.fetchTopicConfig()).thenReturn(new Properties());
         OffsetCheckpoints checkpoints = (logDir, topicPartition) -> Option.apply(0L);
         for (TopicPartition topicPartition : topicPartitions) {
-            final Partition partition = this.replicaManager.createPartition(topicPartition, false);
+            final Partition partition = this.replicaManager.createPartition(topicPartition, false, null, null, null);
             partition.createLogIfNotExists(true, false, checkpoints);
         }
 

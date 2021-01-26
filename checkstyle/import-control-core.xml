@@ -51,6 +51,7 @@
     <allow pkg="org.apache.kafka.clients"/>
     <allow pkg="org.apache.kafka.test"/>
     <allow pkg="org.apache.kafka.metalog" />
+    <allow pkg="kafka.testkit.junit" />
   </subpackage>
 
   <subpackage name="tools">

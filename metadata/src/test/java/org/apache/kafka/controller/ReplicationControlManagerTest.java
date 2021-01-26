@@ -19,6 +19,7 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
+import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableReplicaAssignment;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCollection;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
@@ -42,6 +43,8 @@ import java.util.Map;
 
 import static org.apache.kafka.common.protocol.Errors.INVALID_TOPIC_EXCEPTION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 
 @Timeout(40)
@@ -141,5 +144,42 @@ public class ReplicationControlManagerTest {
         expectedTopicErrors.put(".", new ApiError(INVALID_TOPIC_EXCEPTION,
             "Topic name cannot be \".\" or \"..\""));
         assertEquals(expectedTopicErrors, topicErrors);
+    }
+
+    private static void createTestTopic(ReplicationControlManager replicationControl,
+                                        String name, int[][] replicas) throws Exception {
+        assertFalse(replicas.length == 0);
+        CreateTopicsRequestData request = new CreateTopicsRequestData();
+        CreatableTopic topic = new CreatableTopic().setName(name);
+        topic.setNumPartitions(-1).setReplicationFactor((short) -1);
+        for (int i = 0; i < replicas.length; i++) {
+            topic.assignments().add(new CreatableReplicaAssignment().
+                setPartitionIndex(i).setBrokerIds(Replicas.toList(replicas[i])));
+        }
+        request.topics().add(topic);
+        ControllerResult<CreateTopicsResponseData> result =
+            replicationControl.createTopics(request);
+        CreatableTopicResult topicResult = result.response().topics().find(name);
+        assertNotNull(topicResult);
+        assertEquals((short) 0, topicResult.errorCode());
+        assertEquals(replicas.length, topicResult.numPartitions());
+        assertEquals(replicas[0].length, topicResult.replicationFactor());
+        ControllerTestUtils.replayAll(replicationControl, result.records());
+    }
+
+    @Test
+    public void testRemoveLeaderships() throws Exception {
+        ReplicationControlManager replicationControl = newReplicationControlManager();
+        for (int i = 0; i < 6; i++) {
+            registerBroker(i, replicationControl.clusterControl);
+            unfenceBroker(i, replicationControl.clusterControl);
+        }
+        createTestTopic(replicationControl, "foo", new int[][] {
+            new int[] {0, 1, 2},
+            new int[] {1, 2, 3},
+            new int[] {2, 3, 0},
+            new int[] {0, 2, 1}
+        });
+        // TODO: check isrMembers, etc.
     }
 }

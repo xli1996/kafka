@@ -21,7 +21,7 @@ import kafka.raft.KafkaRaftManager;
 import kafka.raft.RaftManager;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
-import kafka.server.KafkaServer;
+import kafka.server.Server;
 import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
 import kafka.server.MetaProperties;
@@ -168,7 +168,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     MetaProperties metaProperties = MetaProperties.apply(nodes.clusterId(),
                             OptionConverters.toScala(Optional.empty()),
                             OptionConverters.toScala(Optional.of(node.id())));
-                    TopicPartition metadataPartition = new TopicPartition(KafkaServer.metadataTopicName(), 0);
+                    TopicPartition metadataPartition = new TopicPartition(Server.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
                             Time.SYSTEM, new Metrics(), connectFutureManager.future);
                     Kip500Controller controller = new Kip500Controller(nodes.controllerProperties(node.id()), config,
@@ -220,7 +220,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     MetaProperties metaProperties = MetaProperties.apply(nodes.clusterId(),
                             OptionConverters.toScala(Optional.empty()),
                             OptionConverters.toScala(Optional.of(node.id())));
-                    TopicPartition metadataPartition = new TopicPartition(KafkaServer.metadataTopicName(), 0);
+                    TopicPartition metadataPartition = new TopicPartition(Server.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
                             Time.SYSTEM, new Metrics(), connectFutureManager.future);
                     Kip500Broker broker = new Kip500Broker(config, nodes.brokerProperties(node.id()),
@@ -230,7 +230,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         OptionConverters.toScala(Optional.of(threadNamePrefix)),
                         JavaConverters.asScalaBuffer(Collections.<String>emptyList()).toSeq(),
                         connectFutureManager.future,
-                        KafkaServer.SUPPORTED_FEATURES()
+                        Server.SUPPORTED_FEATURES()
                     );
                     kip500Brokers.put(node.id(), broker);
                     raftManagers.put(node.id(), raftManager);

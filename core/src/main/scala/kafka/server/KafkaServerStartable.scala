@@ -39,7 +39,7 @@ class KafkaServerStartable(
   reporters: Seq[KafkaMetricsReporter],
   threadNamePrefix: Option[String] = None
 ) extends Logging {
-  private val server = KafkaServer(staticServerConfig, Time.SYSTEM, threadNamePrefix, reporters)
+  private val server = Server(staticServerConfig, Time.SYSTEM, threadNamePrefix, reporters)
 
   def this(serverConfig: KafkaConfig) = this(serverConfig, Seq.empty)
 

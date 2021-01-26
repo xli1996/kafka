@@ -18,7 +18,7 @@ package kafka.raft
 
 import kafka.log.{Log, LogConfig, LogManager}
 import kafka.raft.KafkaRaftManager.RaftIoThread
-import kafka.server.KafkaServer.ControllerRole
+import kafka.server.Server.ControllerRole
 import kafka.server.{BrokerTopicStats, KafkaBroker, KafkaConfig, LogDirFailureChannel, MetaProperties}
 import kafka.utils.timer.SystemTimer
 import kafka.utils.{KafkaScheduler, Logging, ShutdownableThread}

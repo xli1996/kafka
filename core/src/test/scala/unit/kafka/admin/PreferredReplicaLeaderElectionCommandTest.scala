@@ -25,7 +25,7 @@ import java.util.Properties
 import scala.collection.Seq
 import kafka.common.AdminCommandFailedException
 import kafka.security.authorizer.AclAuthorizer
-import kafka.server.{KafkaConfig, LegacyBroker}
+import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.{Logging, TestUtils}
 import kafka.zk.ZooKeeperTestHarness
 import org.apache.kafka.common.{TopicPartition, Uuid}
@@ -44,7 +44,7 @@ import org.junit.{After, Test}
 import scala.jdk.CollectionConverters._
 
 class PreferredReplicaLeaderElectionCommandTest extends ZooKeeperTestHarness with Logging {
-  var servers: Seq[LegacyBroker] = Seq()
+  var servers: Seq[KafkaServer] = Seq()
 
   @After
   override def tearDown(): Unit = {

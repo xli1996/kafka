@@ -85,7 +85,7 @@ class KafkaApisTest {
   private val requestChannelMetrics: RequestChannel.Metrics = EasyMock.createNiceMock(classOf[RequestChannel.Metrics])
   private val replicaManager: ReplicaManager = EasyMock.createNiceMock(classOf[ReplicaManager])
   private val groupCoordinator: GroupCoordinator = EasyMock.createNiceMock(classOf[GroupCoordinator])
-  private val adminManager: LegacyAdminManager = EasyMock.createNiceMock(classOf[LegacyAdminManager])
+  private val adminManager: ZkAdminManager = EasyMock.createNiceMock(classOf[ZkAdminManager])
   private val txnCoordinator: TransactionCoordinator = EasyMock.createNiceMock(classOf[TransactionCoordinator])
   private val controller: KafkaController = EasyMock.createNiceMock(classOf[KafkaController])
   private val forwardingManager: ForwardingManager = EasyMock.createNiceMock(classOf[ForwardingManager])
@@ -130,7 +130,7 @@ class KafkaApisTest {
                       authorizer: Option[Authorizer] = None,
                       enableForwarding: Boolean = false,
                       metadataCache: MetadataCache = this.metadataCache,
-                      adminManager: LegacyAdminManager = this.adminManager,
+                      adminManager: ZkAdminManager = this.adminManager,
                       configRepository: ConfigRepository = this.configRepository): KafkaApis = {
     val brokerFeatures = BrokerFeatures.createDefault()
     val cache = new FinalizedFeatureCache(brokerFeatures)

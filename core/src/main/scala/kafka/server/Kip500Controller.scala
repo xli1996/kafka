@@ -55,7 +55,7 @@ class Kip500Controller(
   val threadNamePrefix: Option[String],
   val controllerQuorumVotersFuture: CompletableFuture[util.List[String]]
 ) extends Logging with KafkaMetricsGroup {
-  import kafka.server.KafkaServer._
+  import kafka.server.Server._
 
   val lock = new ReentrantLock()
   val awaitShutdownCond = lock.newCondition()

@@ -23,7 +23,7 @@ import kafka.coordinator.group.OffsetConfig
 import kafka.coordinator.transaction.{TransactionLog, TransactionStateManager}
 import kafka.message.{BrokerCompressionCodec, CompressionCodec, ZStdCompressionCodec}
 import kafka.security.authorizer.AuthorizerUtils
-import kafka.server.KafkaServer.{BrokerRole, ControllerRole, ProcessRole}
+import kafka.server.Server.{BrokerRole, ControllerRole, ProcessRole}
 import kafka.utils.CoreUtils
 import kafka.utils.Implicits._
 import org.apache.kafka.clients.CommonClientConfigs

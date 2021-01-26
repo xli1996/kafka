@@ -28,7 +28,7 @@ import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringSerializer
 
 class ReplicaFetchTest extends ZooKeeperTestHarness  {
-  var brokers: Seq[LegacyBroker] = null
+  var brokers: Seq[KafkaServer] = null
   val topic1 = "foo"
   val topic2 = "bar"
 

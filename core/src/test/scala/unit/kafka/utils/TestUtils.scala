@@ -150,21 +150,21 @@ object TestUtils extends Logging {
    *
    * @param config The configuration of the server
    */
-  def createServer(config: KafkaConfig, time: Time = Time.SYSTEM): LegacyBroker = {
+  def createServer(config: KafkaConfig, time: Time = Time.SYSTEM): KafkaServer = {
     createServer(config, time, None)
   }
 
-  def createServer(config: KafkaConfig, threadNamePrefix: Option[String]): LegacyBroker = {
+  def createServer(config: KafkaConfig, threadNamePrefix: Option[String]): KafkaServer = {
     createServer(config, Time.SYSTEM, threadNamePrefix)
   }
 
-  def createServer(config: KafkaConfig, time: Time, threadNamePrefix: Option[String]): LegacyBroker = {
-    val server = new LegacyBroker(config, time, threadNamePrefix = threadNamePrefix)
+  def createServer(config: KafkaConfig, time: Time, threadNamePrefix: Option[String]): KafkaServer = {
+    val server = new KafkaServer(config, time, threadNamePrefix = threadNamePrefix)
     server.startup()
     server
   }
 
-  def boundPort(server: LegacyBroker, securityProtocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): Int =
+  def boundPort(server: KafkaServer, securityProtocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): Int =
     server.boundPort(ListenerName.forSecurityProtocol(securityProtocol))
 
   def createBroker(id: Int, host: String, port: Int, securityProtocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): Broker =
@@ -214,7 +214,7 @@ object TestUtils extends Logging {
     }
   }
 
-  def getBrokerListStrFromServers(servers: Seq[LegacyBroker], protocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): String = {
+  def getBrokerListStrFromServers(servers: Seq[KafkaServer], protocol: SecurityProtocol = SecurityProtocol.PLAINTEXT): String = {
     servers.map { s =>
       val listener = s.config.advertisedListeners.find(_.securityProtocol == protocol).getOrElse(
         sys.error(s"Could not find listener with security protocol $protocol"))
@@ -222,7 +222,7 @@ object TestUtils extends Logging {
     }.mkString(",")
   }
 
-  def bootstrapServers(servers: Seq[LegacyBroker], listenerName: ListenerName): String = {
+  def bootstrapServers(servers: Seq[KafkaServer], listenerName: ListenerName): String = {
     servers.map { s =>
       val listener = s.config.advertisedListeners.find(_.listenerName == listenerName).getOrElse(
         sys.error(s"Could not find listener with name ${listenerName.value}"))
@@ -233,7 +233,7 @@ object TestUtils extends Logging {
   /**
     * Shutdown `servers` and delete their log directories.
     */
-  def shutdownServers(servers: Seq[LegacyBroker]): Unit = {
+  def shutdownServers(servers: Seq[KafkaServer]): Unit = {
     import ExecutionContext.Implicits._
     val future = Future.traverse(servers) { s =>
       Future {
@@ -343,7 +343,7 @@ object TestUtils extends Logging {
                   topic: String,
                   numPartitions: Int = 1,
                   replicationFactor: Int = 1,
-                  servers: Seq[LegacyBroker],
+                  servers: Seq[KafkaServer],
                   topicConfig: Properties = new Properties): scala.collection.immutable.Map[Int, Int] = {
     val adminZkClient = new AdminZkClient(zkClient)
     // create topic
@@ -373,7 +373,7 @@ object TestUtils extends Logging {
   def createTopic(zkClient: KafkaZkClient,
                   topic: String,
                   partitionReplicaAssignment: collection.Map[Int, Seq[Int]],
-                  servers: Seq[LegacyBroker]): scala.collection.immutable.Map[Int, Int] = {
+                  servers: Seq[KafkaServer]): scala.collection.immutable.Map[Int, Int] = {
     createTopic(zkClient, topic, partitionReplicaAssignment, servers, new Properties())
   }
 
@@ -385,7 +385,7 @@ object TestUtils extends Logging {
   def createTopic(zkClient: KafkaZkClient,
                   topic: String,
                   partitionReplicaAssignment: collection.Map[Int, Seq[Int]],
-                  servers: Seq[LegacyBroker],
+                  servers: Seq[KafkaServer],
                   topicConfig: Properties): scala.collection.immutable.Map[Int, Int] = {
     val adminZkClient = new AdminZkClient(zkClient)
     // create topic
@@ -411,7 +411,7 @@ object TestUtils extends Logging {
     * Create the consumer offsets/group metadata topic and wait until the leader is elected and metadata is propagated
     * to all brokers.
     */
-  def createOffsetsTopic(zkClient: KafkaZkClient, servers: Seq[LegacyBroker]): Unit = {
+  def createOffsetsTopic(zkClient: KafkaZkClient, servers: Seq[KafkaServer]): Unit = {
     val server = servers.head
     createTopic(zkClient, Topic.GROUP_METADATA_TOPIC_NAME,
       server.config.getInt(KafkaConfig.OffsetsTopicPartitionsProp),
@@ -886,13 +886,13 @@ object TestUtils extends Logging {
     throw new RuntimeException("unexpected error")
   }
 
-  def isLeaderLocalOnBroker(topic: String, partitionId: Int, server: LegacyBroker): Boolean = {
+  def isLeaderLocalOnBroker(topic: String, partitionId: Int, server: KafkaServer): Boolean = {
     server.replicaManager.nonOfflinePartition(new TopicPartition(topic, partitionId)).exists(_.leaderLogIfLocal.isDefined)
   }
 
   def findLeaderEpoch(brokerId: Int,
                       topicPartition: TopicPartition,
-                      servers: Iterable[LegacyBroker]): Int = {
+                      servers: Iterable[KafkaServer]): Int = {
     val leaderServer = servers.find(_.config.brokerId == brokerId)
     val leaderPartition = leaderServer.flatMap(_.replicaManager.nonOfflinePartition(topicPartition))
       .getOrElse(fail(s"Failed to find expected replica on broker $brokerId"))
@@ -900,7 +900,7 @@ object TestUtils extends Logging {
   }
 
   def findFollowerId(topicPartition: TopicPartition,
-                     servers: Iterable[LegacyBroker]): Int = {
+                     servers: Iterable[KafkaServer]): Int = {
     val followerOpt = servers.find { server =>
       server.replicaManager.nonOfflinePartition(topicPartition) match {
         case Some(partition) => !partition.leaderReplicaIdOpt.contains(server.config.brokerId)
@@ -918,7 +918,7 @@ object TestUtils extends Logging {
     * @param servers The Kafka broker servers.
     * @param timeout The amount of time waiting on this condition before assert to fail
     */
-  def waitUntilBrokerMetadataIsPropagated(servers: Seq[LegacyBroker],
+  def waitUntilBrokerMetadataIsPropagated(servers: Seq[KafkaServer],
                                           timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Unit = {
     val expectedBrokerIds = servers.map(_.config.brokerId).toSet
     waitUntilTrue(() => servers.forall(server =>
@@ -936,7 +936,7 @@ object TestUtils extends Logging {
    * @param timeout The amount of time waiting on this condition before assert to fail
    * @return The leader of the partition.
    */
-  def waitUntilMetadataIsPropagated(servers: Seq[LegacyBroker], topic: String, partition: Int,
+  def waitUntilMetadataIsPropagated(servers: Seq[KafkaServer], topic: String, partition: Int,
                                     timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Int = {
     var leader: Int = -1
     waitUntilTrue(
@@ -959,7 +959,7 @@ object TestUtils extends Logging {
     controllerId.getOrElse(fail(s"Controller not elected after $timeout ms"))
   }
 
-  def awaitLeaderChange(servers: Seq[LegacyBroker],
+  def awaitLeaderChange(servers: Seq[KafkaServer],
                         tp: TopicPartition,
                         oldLeader: Int,
                         timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Int = {
@@ -976,7 +976,7 @@ object TestUtils extends Logging {
     newLeaderExists.get
   }
 
-  def waitUntilLeaderIsKnown(servers: Seq[LegacyBroker],
+  def waitUntilLeaderIsKnown(servers: Seq[KafkaServer],
                              tp: TopicPartition,
                              timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Int = {
     def leaderIfExists: Option[Int] = {
@@ -1016,7 +1016,7 @@ object TestUtils extends Logging {
   }
 
   def ensureNoUnderReplicatedPartitions(zkClient: KafkaZkClient, topic: String, partitionToBeReassigned: Int, assignedReplicas: Seq[Int],
-                                                servers: Seq[LegacyBroker]): Unit = {
+                                                servers: Seq[KafkaServer]): Unit = {
     val topicPartition = new TopicPartition(topic, partitionToBeReassigned)
     waitUntilTrue(() => {
         val inSyncReplicas = zkClient.getInSyncReplicasForPartition(topicPartition)
@@ -1116,7 +1116,7 @@ object TestUtils extends Logging {
     new MockIsrChangeListener()
   }
 
-  def produceMessages(servers: Seq[LegacyBroker],
+  def produceMessages(servers: Seq[KafkaServer],
                       records: Seq[ProducerRecord[Array[Byte], Array[Byte]]],
                       acks: Int = -1): Unit = {
     val producer = createProducer(TestUtils.getBrokerListStrFromServers(servers), acks = acks)
@@ -1131,7 +1131,7 @@ object TestUtils extends Logging {
     debug(s"Sent ${records.size} messages for topics ${topics.mkString(",")}")
   }
 
-  def generateAndProduceMessages(servers: Seq[LegacyBroker],
+  def generateAndProduceMessages(servers: Seq[KafkaServer],
                                  topic: String,
                                  numMessages: Int,
                                  acks: Int = -1): Seq[String] = {
@@ -1144,7 +1144,7 @@ object TestUtils extends Logging {
     values
   }
 
-  def produceMessage(servers: Seq[LegacyBroker], topic: String, message: String,
+  def produceMessage(servers: Seq[KafkaServer], topic: String, message: String,
                      deliveryTimeoutMs: Int = 30 * 1000, requestTimeoutMs: Int = 20 * 1000): Unit = {
     val producer = createProducer(TestUtils.getBrokerListStrFromServers(servers),
       deliveryTimeoutMs = deliveryTimeoutMs, requestTimeoutMs = requestTimeoutMs)
@@ -1155,7 +1155,7 @@ object TestUtils extends Logging {
     }
   }
 
-  def verifyTopicDeletion(zkClient: KafkaZkClient, topic: String, numPartitions: Int, servers: Seq[LegacyBroker]): Unit = {
+  def verifyTopicDeletion(zkClient: KafkaZkClient, topic: String, numPartitions: Int, servers: Seq[KafkaServer]): Unit = {
     val topicPartitions = (0 until numPartitions).map(new TopicPartition(topic, _))
     // wait until admin path for delete topic is deleted, signaling completion of topic deletion
     waitUntilTrue(() => !zkClient.isTopicMarkedForDeletion(topic),
@@ -1196,7 +1196,7 @@ object TestUtils extends Logging {
   }
 
 
-  def causeLogDirFailure(failureType: LogDirFailureType, leaderServer: LegacyBroker, partition: TopicPartition): Unit = {
+  def causeLogDirFailure(failureType: LogDirFailureType, leaderServer: KafkaServer, partition: TopicPartition): Unit = {
     // Make log directory of the partition on the leader broker inaccessible by replacing it with a file
     val localLog = leaderServer.replicaManager.localLogOrException(partition)
     val logDir = localLog.dir.getParentFile
@@ -1398,7 +1398,7 @@ object TestUtils extends Logging {
     assertTrue(s"$message failed with exception(s) $exceptions", exceptions.isEmpty)
   }
 
-  def consumeTopicRecords[K, V](servers: Seq[LegacyBroker],
+  def consumeTopicRecords[K, V](servers: Seq[KafkaServer],
                                 topic: String,
                                 numMessages: Int,
                                 groupId: String = "group",
@@ -1456,7 +1456,7 @@ object TestUtils extends Logging {
   }
 
   def createTransactionalProducer(transactionalId: String,
-                                  servers: Seq[LegacyBroker],
+                                  servers: Seq[KafkaServer],
                                   batchSize: Int = 16384,
                                   transactionTimeoutMs: Long = 60000,
                                   maxBlockMs: Long = 60000,
@@ -1478,7 +1478,7 @@ object TestUtils extends Logging {
   }
 
   // Seeds the given topic with records with keys and values in the range [0..numRecords)
-  def seedTopicWithNumberedRecords(topic: String, numRecords: Int, servers: Seq[LegacyBroker]): Unit = {
+  def seedTopicWithNumberedRecords(topic: String, numRecords: Int, servers: Seq[KafkaServer]): Unit = {
     val props = new Properties()
     props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true")
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, TestUtils.getBrokerListStrFromServers(servers))
@@ -1549,7 +1549,7 @@ object TestUtils extends Logging {
     }
   }
 
-  def incrementalAlterConfigs(servers: Seq[LegacyBroker], adminClient: Admin, props: Properties,
+  def incrementalAlterConfigs(servers: Seq[KafkaServer], adminClient: Admin, props: Properties,
                               perBrokerConfig: Boolean, opType: OpType = OpType.SET): AlterConfigsResult  = {
     val configEntries = props.asScala.map { case (k, v) => new AlterConfigOp(new ConfigEntry(k, v), opType) }.toList.asJavaCollection
     val configs = if (perBrokerConfig) {
@@ -1693,7 +1693,7 @@ object TestUtils extends Logging {
     }
   }
 
-  def totalMetricValue(server: LegacyBroker, metricName: String): Long = {
+  def totalMetricValue(server: KafkaServer, metricName: String): Long = {
     val allMetrics = server.metrics.metrics
     val total = allMetrics.values().asScala.filter(_.metricName().name() == metricName)
       .foldLeft(0.0)((total, metric) => total + metric.metricValue.asInstanceOf[Double])
@@ -1805,7 +1805,7 @@ object TestUtils extends Logging {
       s"There still are ongoing reassignments", pause = pause)
   }
 
-  def addAndVerifyAcls(server: LegacyBroker, acls: Set[AccessControlEntry], resource: ResourcePattern): Unit = {
+  def addAndVerifyAcls(server: KafkaServer, acls: Set[AccessControlEntry], resource: ResourcePattern): Unit = {
     val authorizer = server.dataPlaneRequestProcessor.authorizer.get
     val aclBindings = acls.map { acl => new AclBinding(resource, acl) }
     authorizer.createAcls(null, aclBindings.toList.asJava).asScala

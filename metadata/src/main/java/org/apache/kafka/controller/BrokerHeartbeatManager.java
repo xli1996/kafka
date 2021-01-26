@@ -357,9 +357,8 @@ public class BrokerHeartbeatManager {
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
         }
-        if (!broker.shuttingDown()) {
-            return false;
-        }
+        if (broker.fenced()) return true;
+        if (!broker.shuttingDown()) return false;
         long curOffset = lowestActiveOffset();
         return curOffset >= broker.shutdownOffset;
     }

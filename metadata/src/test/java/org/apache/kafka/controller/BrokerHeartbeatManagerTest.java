@@ -226,4 +226,27 @@ public class BrokerHeartbeatManagerTest {
         assertEquals(broker0, iterator.next());
         assertFalse(iterator.hasNext());
     }
+
+    @Test
+    public void testShouldShutDown() {
+        BrokerHeartbeatManager manager = newBrokerHeartbeatManager();
+        manager.touch(0, false, 100);
+        manager.touch(1, false, 98);
+        manager.touch(2, false, 100);
+        manager.touch(3, false, 100);
+        manager.touch(4, true, 100);
+        manager.touch(5, false, 99);
+        assertFalse(manager.shouldShutDown(0));
+        assertFalse(manager.shouldShutDown(1));
+        assertFalse(manager.shouldShutDown(2));
+        assertFalse(manager.shouldShutDown(3));
+        assertTrue(manager.shouldShutDown(4));
+        assertFalse(manager.shouldShutDown(5));
+        assertEquals(98L, manager.lowestActiveOffset());
+        manager.beginBrokerShutDown(1);
+        assertEquals(99L, manager.lowestActiveOffset());
+        assertFalse(manager.shouldShutDown(1));
+        manager.updateShutdownOffset(1, 98);
+        assertTrue(manager.shouldShutDown(1));
+    }
 }

@@ -148,12 +148,12 @@ class ReplicaAlterLogDirsThread(name: String,
   }
 
   override protected def fetchEarliestOffsetFromLeader(topicPartition: TopicPartition, leaderEpoch: Int): Long = {
-    val partition = replicaMgr.getOnlinePartitionOrException(topicPartition)
+    val partition = replicaMgr.onlinePartitionOrException(topicPartition)
     partition.localLogOrException.logStartOffset
   }
 
   override protected def fetchLatestOffsetFromLeader(topicPartition: TopicPartition, leaderEpoch: Int): Long = {
-    val partition = replicaMgr.getOnlinePartitionOrException(topicPartition)
+    val partition = replicaMgr.onlinePartitionOrException(topicPartition)
     partition.localLogOrException.logEndOffset
   }
 
@@ -170,7 +170,7 @@ class ReplicaAlterLogDirsThread(name: String,
             .setPartition(tp.partition)
             .setErrorCode(Errors.NONE.code)
         } else {
-          val partition = replicaMgr.getOnlinePartitionOrException(tp)
+          val partition = replicaMgr.onlinePartitionOrException(tp)
           partition.lastOffsetForLeaderEpoch(
             currentLeaderEpoch = epochData.currentLeaderEpoch,
             leaderEpoch = epochData.leaderEpoch,
@@ -206,12 +206,12 @@ class ReplicaAlterLogDirsThread(name: String,
    * exchange with the current replica to truncate to the largest common log prefix for the topic partition
    */
   override def truncate(topicPartition: TopicPartition, truncationState: OffsetTruncationState): Unit = {
-    val partition = replicaMgr.getOnlinePartitionOrException(topicPartition)
+    val partition = replicaMgr.onlinePartitionOrException(topicPartition)
     partition.truncateTo(truncationState.offset, isFuture = true)
   }
 
   override protected def truncateFullyAndStartAt(topicPartition: TopicPartition, offset: Long): Unit = {
-    val partition = replicaMgr.getOnlinePartitionOrException(topicPartition)
+    val partition = replicaMgr.onlinePartitionOrException(topicPartition)
     partition.truncateFullyAndStartAt(offset, isFuture = true)
   }
 

@@ -95,7 +95,7 @@ class ReplicaAlterLogDirsThreadTest {
     when(replicaManager.futureLocalLogOrException(t1p0)).thenReturn(futureLog)
     when(replicaManager.futureLogExists(t1p0)).thenReturn(true)
     when(replicaManager.nonOfflinePartition(t1p0)).thenReturn(Some(partition))
-    when(replicaManager.getOnlinePartitionOrException(t1p0)).thenReturn(partition)
+    when(replicaManager.onlinePartitionOrException(t1p0)).thenReturn(partition)
 
     when(quotaManager.isQuotaExceeded).thenReturn(false)
 
@@ -192,7 +192,7 @@ class ReplicaAlterLogDirsThreadTest {
     when(replicaManager.futureLocalLogOrException(t1p0)).thenReturn(futureLog)
     when(replicaManager.futureLogExists(t1p0)).thenReturn(true)
     when(replicaManager.nonOfflinePartition(t1p0)).thenReturn(Some(partition))
-    when(replicaManager.getOnlinePartitionOrException(t1p0)).thenReturn(partition)
+    when(replicaManager.onlinePartitionOrException(t1p0)).thenReturn(partition)
 
     when(quotaManager.isQuotaExceeded).thenReturn(false)
 
@@ -288,7 +288,7 @@ class ReplicaAlterLogDirsThreadTest {
     expect(partitionT1p0.partitionId).andStubReturn(partitionT1p0Id)
     expect(partitionT1p0.partitionId).andStubReturn(partitionT1p1Id)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partitionT1p0)
     expect(partitionT1p0.lastOffsetForLeaderEpoch(Optional.empty(), leaderEpochT1p0, fetchOnlyFromLeader = false))
       .andReturn(new EpochEndOffset()
@@ -298,7 +298,7 @@ class ReplicaAlterLogDirsThreadTest {
         .setEndOffset(leoT1p0))
       .anyTimes()
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p1))
+    expect(replicaManager.onlinePartitionOrException(t1p1))
       .andStubReturn(partitionT1p1)
     expect(partitionT1p1.lastOffsetForLeaderEpoch(Optional.empty(), leaderEpochT1p1, fetchOnlyFromLeader = false))
       .andReturn(new EpochEndOffset()
@@ -356,7 +356,7 @@ class ReplicaAlterLogDirsThreadTest {
     //Stubs
     expect(partitionT1p0.partitionId).andStubReturn(partitionId)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partitionT1p0)
     expect(partitionT1p0.lastOffsetForLeaderEpoch(Optional.empty(), leaderEpoch, fetchOnlyFromLeader = false))
       .andReturn(new EpochEndOffset()
@@ -366,7 +366,7 @@ class ReplicaAlterLogDirsThreadTest {
         .setEndOffset(leo))
       .anyTimes()
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p1))
+    expect(replicaManager.onlinePartitionOrException(t1p1))
       .andThrow(new KafkaStorageException).once()
 
     replay(partitionT1p0, replicaManager)
@@ -431,9 +431,9 @@ class ReplicaAlterLogDirsThreadTest {
     expect(partitionT1p0.partitionId).andStubReturn(partitionT1p0Id)
     expect(partitionT1p1.partitionId).andStubReturn(partitionT1p1Id)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partitionT1p0)
-    expect(replicaManager.getOnlinePartitionOrException(t1p1))
+    expect(replicaManager.onlinePartitionOrException(t1p1))
       .andStubReturn(partitionT1p1)
     expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLogT1p0)
     expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
@@ -519,7 +519,7 @@ class ReplicaAlterLogDirsThreadTest {
     //Stubs
     expect(partition.partitionId).andStubReturn(partitionId)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partition)
     expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
     expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
@@ -597,7 +597,7 @@ class ReplicaAlterLogDirsThreadTest {
     val initialFetchOffset = 100
 
     //Stubs
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partition)
     expect(partition.truncateTo(capture(truncated), isFuture = EasyMock.eq(true))).anyTimes()
     expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
@@ -655,7 +655,7 @@ class ReplicaAlterLogDirsThreadTest {
     //Stubs
     expect(partition.partitionId).andStubReturn(partitionId)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partition)
     expect(partition.truncateTo(capture(truncated), isFuture = EasyMock.eq(true))).once()
 
@@ -742,7 +742,7 @@ class ReplicaAlterLogDirsThreadTest {
 
     expect(partition.partitionId).andStubReturn(partitionId)
 
-    expect(replicaManager.getOnlinePartitionOrException(t1p0))
+    expect(replicaManager.onlinePartitionOrException(t1p0))
         .andStubReturn(partition)
     expect(partition.lastOffsetForLeaderEpoch(Optional.of(1), leaderEpoch, fetchOnlyFromLeader = false))
         .andReturn(new EpochEndOffset()

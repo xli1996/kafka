@@ -167,7 +167,7 @@ class ReplicaManagerQuotasTest {
           .andReturn(offsetSnapshot)
 
       val replicaManager: ReplicaManager = EasyMock.createMock(classOf[ReplicaManager])
-      EasyMock.expect(replicaManager.getOnlinePartitionOrException(EasyMock.anyObject[TopicPartition]))
+      EasyMock.expect(replicaManager.onlinePartitionOrException(EasyMock.anyObject[TopicPartition]))
         .andReturn(partition).anyTimes()
 
       EasyMock.expect(replicaManager.shouldLeaderThrottle(EasyMock.anyObject[ReplicaQuota], EasyMock.anyObject[Partition], EasyMock.anyObject[Int]))

@@ -778,8 +778,8 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
-  def getOnlinePartitionOrException(topicPartition: TopicPartition): Partition = {
-    getOnlinePartitionOrError(topicPartition) match {
+  def onlinePartitionOrException(topicPartition: TopicPartition): Partition = {
+    onlinePartitionOrError(topicPartition) match {
       case Left(Errors.KAFKA_STORAGE_ERROR) =>
         throw new KafkaStorageException(s"Partition $topicPartition is in an offline log directory")
 
@@ -790,8 +790,8 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
-  def getNonOfflinePartitionOrException(topicPartition: TopicPartition): Partition = {
-    getNonOfflinePartitionOrError(topicPartition) match {
+  def nonOfflinePartitionOrException(topicPartition: TopicPartition): Partition = {
+    nonOfflinePartitionOrError(topicPartition) match {
       case Left(Errors.KAFKA_STORAGE_ERROR) =>
         throw new KafkaStorageException(s"Partition $topicPartition is in an offline log directory")
 
@@ -802,7 +802,7 @@ class ReplicaManager(val config: KafkaConfig,
     }
   }
 
-  def getOnlinePartitionOrError(topicPartition: TopicPartition): Either[Errors, Partition] = {
+  def onlinePartitionOrError(topicPartition: TopicPartition): Either[Errors, Partition] = {
     getPartition(topicPartition) match {
       case HostedPartition.Online(partition) =>
         Right(partition)
@@ -826,7 +826,7 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   // Online + Fenced
-  def getNonOfflinePartitionOrError(topicPartition: TopicPartition): Either[Errors, Partition] = {
+  def nonOfflinePartitionOrError(topicPartition: TopicPartition): Either[Errors, Partition] = {
     getPartition(topicPartition) match {
       case HostedPartition.Online(partition) =>
         Right(partition)
@@ -850,19 +850,19 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   def localOnlineLogOrException(topicPartition: TopicPartition): Log = {
-    getOnlinePartitionOrException(topicPartition).localLogOrException
+    onlinePartitionOrException(topicPartition).localLogOrException
   }
 
   def localNonOfflineLogOrException(topicPartition: TopicPartition): Log = {
-    getNonOfflinePartitionOrException(topicPartition).localLogOrException
+    nonOfflinePartitionOrException(topicPartition).localLogOrException
   }
 
   def futureLocalLogOrException(topicPartition: TopicPartition): Log = {
-    getNonOfflinePartitionOrException(topicPartition).futureLocalLogOrException
+    nonOfflinePartitionOrException(topicPartition).futureLocalLogOrException
   }
 
   def futureLogExists(topicPartition: TopicPartition): Boolean = {
-    getNonOfflinePartitionOrException(topicPartition).futureLog.isDefined
+    nonOfflinePartitionOrException(topicPartition).futureLog.isDefined
   }
 
   def localOnlineLog(topicPartition: TopicPartition): Option[Log] = {
@@ -978,7 +978,7 @@ class ReplicaManager(val config: KafkaConfig,
         (topicPartition, LogDeleteRecordsResult(-1L, -1L, Some(new InvalidTopicException(s"Cannot delete records of internal topic ${topicPartition.topic}"))))
       } else {
         try {
-          val partition = getOnlinePartitionOrException(topicPartition)
+          val partition = onlinePartitionOrException(topicPartition)
           val logDeleteResult = partition.deleteRecordsOnLeader(requestedOffset)
           (topicPartition, logDeleteResult)
         } catch {
@@ -1046,7 +1046,7 @@ class ReplicaManager(val config: KafkaConfig,
           logManager.maybeUpdatePreferredLogDir(topicPartition, destinationDir)
 
           // throw NotLeaderOrFollowerException if replica does not exist for the given partition
-          val partition = getOnlinePartitionOrException(topicPartition)
+          val partition = onlinePartitionOrException(topicPartition)
           partition.localLogOrException
 
           // If the destinationLDir is different from the current log directory of the replica:
@@ -1238,7 +1238,7 @@ class ReplicaManager(val config: KafkaConfig,
           Some(new InvalidTopicException(s"Cannot append to internal topic ${topicPartition.topic}"))))
       } else {
         try {
-          val partition = getOnlinePartitionOrException(topicPartition)
+          val partition = onlinePartitionOrException(topicPartition)
           val info = partition.appendRecordsToLeader(records, origin, requiredAcks)
           val numAppendedMessages = info.numMessages
 
@@ -1281,7 +1281,7 @@ class ReplicaManager(val config: KafkaConfig,
                               isolationLevel: Option[IsolationLevel],
                               currentLeaderEpoch: Optional[Integer],
                               fetchOnlyFromLeader: Boolean): Option[TimestampAndOffset] = {
-    val partition = getOnlinePartitionOrException(topicPartition)
+    val partition = onlinePartitionOrException(topicPartition)
     partition.fetchOffsetForTimestamp(timestamp, isolationLevel, currentLeaderEpoch, fetchOnlyFromLeader)
   }
 
@@ -1290,7 +1290,7 @@ class ReplicaManager(val config: KafkaConfig,
                                      maxNumOffsets: Int,
                                      isFromConsumer: Boolean,
                                      fetchOnlyFromLeader: Boolean): Seq[Long] = {
-    val partition = getOnlinePartitionOrException(topicPartition)
+    val partition = onlinePartitionOrException(topicPartition)
     partition.legacyFetchOffsetsForTimestamp(timestamp, maxNumOffsets, isFromConsumer, fetchOnlyFromLeader)
   }
 
@@ -1422,7 +1422,7 @@ class ReplicaManager(val config: KafkaConfig,
             s"remaining response limit $limitBytes" +
             (if (minOneMessage) s", ignoring response/partition size limits" else ""))
 
-        val partition = getOnlinePartitionOrException(tp)
+        val partition = onlinePartitionOrException(tp)
         val fetchTimeMs = time.milliseconds
 
         // If we are the leader, determine the preferred read-replica

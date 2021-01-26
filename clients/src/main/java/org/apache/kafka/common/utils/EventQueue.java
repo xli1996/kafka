@@ -37,7 +37,17 @@ public interface EventQueue extends AutoCloseable {
 
         @Override
         public void handleException(Throwable e) {
-            log.error("Unexpected error handling {}", this.getClass().getSimpleName(), e);
+            if (e instanceof EventQueueClosedException) {
+                log.info("Not processing {} because the event queue is closed.",
+                    this.toString());
+            } else {
+                log.error("Unexpected error handling {}", this.toString(), e);
+            }
+        }
+
+        @Override
+        public String toString() {
+            return this.getClass().getSimpleName();
         }
     }
 

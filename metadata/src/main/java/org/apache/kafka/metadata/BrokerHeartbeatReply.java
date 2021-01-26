@@ -34,14 +34,14 @@ public class BrokerHeartbeatReply {
     /**
      * True if the heartbeat reply should tell the broker that it should shut down.
      */
-    private final boolean shouldShutdown;
+    private final boolean shouldShutDown;
 
     public BrokerHeartbeatReply(boolean isCaughtUp,
                                 boolean isFenced,
-                                boolean shouldShutdown) {
+                                boolean shouldShutDown) {
         this.isCaughtUp = isCaughtUp;
         this.isFenced = isFenced;
-        this.shouldShutdown = shouldShutdown;
+        this.shouldShutDown = shouldShutDown;
     }
 
     public boolean isCaughtUp() {
@@ -52,13 +52,13 @@ public class BrokerHeartbeatReply {
         return isFenced;
     }
 
-    public boolean shouldShutdown() {
-        return shouldShutdown;
+    public boolean shouldShutDown() {
+        return shouldShutDown;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(isCaughtUp, isFenced, shouldShutdown);
+        return Objects.hash(isCaughtUp, isFenced, shouldShutDown);
     }
 
     @Override
@@ -67,14 +67,14 @@ public class BrokerHeartbeatReply {
         BrokerHeartbeatReply other = (BrokerHeartbeatReply) o;
         return other.isCaughtUp == isCaughtUp &&
             other.isFenced == isFenced &&
-            other.shouldShutdown == shouldShutdown;
+            other.shouldShutDown == shouldShutDown;
     }
 
     @Override
     public String toString() {
         return "BrokerHeartbeatReply(isCaughtUp=" + isCaughtUp +
             ", isFenced=" + isFenced +
-            ", shouldShutdown = " + shouldShutdown +
+            ", shouldShutDown = " + shouldShutDown +
             ")";
     }
 }

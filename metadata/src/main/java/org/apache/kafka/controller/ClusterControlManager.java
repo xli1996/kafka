@@ -216,24 +216,24 @@ public class ClusterControlManager {
         boolean isFenced = registration.fenced();
         boolean shouldShutdown = false;
         if (isFenced) {
-            if (request.shouldShutdown()) {
+            if (request.wantShutDown()) {
                 // If the broker is fenced, and requests a shutdown, do it immediately.
                 isFenced = true;
                 shouldShutdown = true;
-            } else if (isCaughtUp && !request.shouldFence()) {
+            } else if (isCaughtUp && !request.wantFence()) {
                 records.add(new ApiMessageAndVersion(new UnfenceBrokerRecord().
                     setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
                 isFenced = false;
                 shouldShutdown = false;
             }
         } else {
-            if (request.shouldFence()) {
+            if (request.wantFence()) {
                 records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
                     setId(brokerId).setEpoch(request.brokerEpoch()), (short) 0));
                 isFenced = true;
-                shouldShutdown = request.shouldShutdown();
+                shouldShutdown = request.wantShutDown();
             } else {
-                if (request.shouldShutdown()) {
+                if (request.wantShutDown()) {
                     heartbeatManager.beginBrokerShutDown(request.brokerId());
                 }
                 if (heartbeatManager.shouldShutDown(request.brokerId())) {

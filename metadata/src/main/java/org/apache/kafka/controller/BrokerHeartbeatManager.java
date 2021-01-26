@@ -58,13 +58,13 @@ public class BrokerHeartbeatManager {
          * When this field is updated, we also may have to update the broker's position in
          * the unfenced list.
          */
-        private long lastContactNs;
+        long lastContactNs;
 
         /**
          * The last metadata offset which this broker reported.  When this field is updated,
          * we may also have to update the broker's position in the active set.
          */
-        private long metadataOffset;
+        long metadataOffset;
 
         /**
          * The offset at which the broker should complete its controlled shutdown, or -1
@@ -341,7 +341,7 @@ public class BrokerHeartbeatManager {
         }
     }
 
-    public void beginBrokerShutDown(int brokerId) {
+    void beginBrokerShutDown(int brokerId) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
@@ -352,19 +352,18 @@ public class BrokerHeartbeatManager {
         }
     }
 
-    public boolean shouldShutDown(int brokerId) {
+    boolean shouldShutDown(int brokerId) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
         }
-        if (!broker.shuttingDown()) {
-            return false;
-        }
+        if (broker.fenced()) return true;
+        if (!broker.shuttingDown()) return false;
         long curOffset = lowestActiveOffset();
         return curOffset >= broker.shutdownOffset;
     }
 
-    public long lowestActiveOffset() {
+    long lowestActiveOffset() {
         Iterator<BrokerHeartbeatState> iterator = active.iterator();
         if (!iterator.hasNext()) {
             return Long.MAX_VALUE;
@@ -373,7 +372,7 @@ public class BrokerHeartbeatManager {
         return first.metadataOffset;
     }
 
-    public void updateShutdownOffset(int brokerId, long offset) {
+    void updateShutdownOffset(int brokerId, long offset) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
@@ -423,9 +422,9 @@ public class BrokerHeartbeatManager {
      *
      * @throws InvalidReplicationFactorException    If too many replicas were requested.
      */
-    public List<List<Integer>> placeReplicas(int numPartitions, short numReplicas,
-                                             Function<Integer, Optional<String>> idToRack,
-                                             ReplicaPlacementPolicy policy) {
+    List<List<Integer>> placeReplicas(int numPartitions, short numReplicas,
+                                      Function<Integer, Optional<String>> idToRack,
+                                      ReplicaPlacementPolicy policy) {
         Iterator<UsableBroker> iterator = new UsableBrokerIterator(
             unfenced.iterator(), idToRack);
         return policy.createPlacement(numPartitions, numReplicas, iterator);

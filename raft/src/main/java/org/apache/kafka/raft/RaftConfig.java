@@ -79,7 +79,6 @@ public class RaftConfig {
     private final int fetchTimeoutMs;
     private final int appendLingerMs;
     private final Map<Integer, InetSocketAddress> voterConnections;
-    private final List<Node> voterNodes;
 
     public RaftConfig(AbstractConfig abstractConfig) {
         this(parseVoterConnections(abstractConfig.getList(QUORUM_VOTERS_CONFIG)),
@@ -100,17 +99,13 @@ public class RaftConfig {
         int fetchTimeoutMs,
         int appendLingerMs
     ) {
+        this.voterConnections = voterConnections;
         this.requestTimeoutMs = requestTimeoutMs;
         this.retryBackoffMs = retryBackoffMs;
         this.electionTimeoutMs = electionTimeoutMs;
         this.electionBackoffMaxMs = electionBackoffMaxMs;
         this.fetchTimeoutMs = fetchTimeoutMs;
         this.appendLingerMs = appendLingerMs;
-        this.voterConnections = voterConnections;
-        this.voterNodes = this.voterConnections.entrySet().stream()
-            .map(connection -> new Node(connection.getKey(), connection.getValue().getHostName(),
-                connection.getValue().getPort()))
-            .collect(Collectors.toList());
     }
 
     public static Map<Integer, InetSocketAddress> parseVoterConnections(List<String> voterEntries) {
@@ -186,10 +181,6 @@ public class RaftConfig {
 
     public Map<Integer, InetSocketAddress> quorumVoterConnections() {
         return voterConnections;
-    }
-
-    public List<Node> quorumVoterNodes() {
-        return voterNodes;
     }
 
     private static Integer parseVoterId(String idString) {

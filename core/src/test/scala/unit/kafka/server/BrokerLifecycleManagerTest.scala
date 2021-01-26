@@ -183,7 +183,7 @@ class BrokerLifecycleManagerTest {
       Assert.assertEquals(BrokerState.PENDING_CONTROLLED_SHUTDOWN, manager.state())
     }
     context.mockClient.prepareResponseFrom(new BrokerHeartbeatResponse(
-      new BrokerHeartbeatResponseData().setShouldShutdown(true)), controllerNode)
+      new BrokerHeartbeatResponseData().setShouldShutDown(true)), controllerNode)
     context.time.sleep(3000)
     TestUtils.retry(10000) {
       context.mockClient.wakeup()

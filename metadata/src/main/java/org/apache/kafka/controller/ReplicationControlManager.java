@@ -466,10 +466,11 @@ public class ReplicationControlManager {
                 return new ApiError(Errors.INVALID_REQUEST,
                     "A manual partition assignment was specified, but replication " +
                     "factor was not set to -1.");
-            } else if (topic.assignments().size() != topic.numPartitions()) {
-                return new ApiError(Errors.INVALID_REPLICA_ASSIGNMENT, "" + topic.numPartitions() +
-                    " partitions were specified, but only " + topic.assignments().size() +
-                    " manual partition assignments were given.");
+            }
+            if (topic.numPartitions() != -1) {
+                return new ApiError(Errors.INVALID_REQUEST,
+                    "A manual partition assignment was specified, but numPartitions " +
+                        "was not set to -1.");
             }
             for (CreatableReplicaAssignment assignment : topic.assignments()) {
                 if (newParts.containsKey(assignment.partitionIndex())) {

@@ -117,6 +117,11 @@ public class ClusterControlManager {
         heartbeatManager = null;
     }
 
+    // VisibleForTesting
+    Map<Integer, BrokerRegistration> brokerRegistrations() {
+        return brokerRegistrations;
+    }
+
     /**
      * Process an incoming broker registration request.
      */
@@ -145,7 +150,8 @@ public class ClusterControlManager {
 
         RegisterBrokerRecord record = new RegisterBrokerRecord().setBrokerId(brokerId).
             setIncarnationId(request.incarnationId()).
-            setBrokerEpoch(brokerEpoch);
+            setBrokerEpoch(brokerEpoch).
+            setRack(request.rack());
         for (BrokerRegistrationRequestData.Listener listener : request.listeners()) {
             record.endPoints().add(new RegisterBrokerRecord.BrokerEndpoint().
                 setHost(listener.host()).

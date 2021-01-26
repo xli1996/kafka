@@ -796,17 +796,17 @@ public final class QuorumController implements Controller {
         return appendWriteEvent("processBrokerHeartbeat",
                 new ControllerWriteOperation<BrokerHeartbeatReply>() {
             private int brokerId = -1;
-            private boolean shutdownRequested = false;
-            private boolean shutdownAllowed = false;
+            private boolean wantShutDown = false;
+            private boolean shouldShutDown = false;
 
             @Override
             public ControllerResult<BrokerHeartbeatReply> generateRecordsAndResult() {
                 ControllerResult<BrokerHeartbeatReply> result = clusterControl.
                     processBrokerHeartbeat(request, lastCommittedOffset);
                 brokerId = request.brokerId();
-                shutdownRequested = request.shouldShutdown();
-                shutdownAllowed = result.response().shouldShutdown();
-                if (shutdownRequested && !shutdownAllowed) {
+                wantShutDown = request.wantShutDown();
+                shouldShutDown = result.response().shouldShutDown();
+                if (wantShutDown && !shouldShutDown) {
                     // TODO: optimize this a bit better so we don't have to iterate
                     // over all the partitions where this broker is an ISR member.
                     replicationControl.removeLeaderships(
@@ -818,7 +818,7 @@ public final class QuorumController implements Controller {
 
             @Override
             public void processBatchEndOffset(long offset) {
-                if (shutdownRequested && !shutdownAllowed) {
+                if (wantShutDown && !shouldShutDown) {
                     clusterControl.updateShutdownOffset(brokerId, offset);
                 }
             }

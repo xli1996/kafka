@@ -82,7 +82,7 @@ public class ReplicationControlManagerTest {
         ControllerResult<BrokerHeartbeatReply> result = clusterControl.
             processBrokerHeartbeat(new BrokerHeartbeatRequestData().
                 setBrokerId(brokerId).setBrokerEpoch(100).setCurrentMetadataOffset(1).
-                setShouldFence(false).setShouldShutdown(false), 0);
+                setWantFence(false).setWantShutDown(false), 0);
         assertEquals(new BrokerHeartbeatReply(true, false, false), result.response());
         ControllerTestUtils.replayAll(clusterControl, result.records());
     }

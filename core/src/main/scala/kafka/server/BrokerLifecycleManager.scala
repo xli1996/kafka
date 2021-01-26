@@ -298,8 +298,8 @@ class BrokerLifecycleManager(val config: KafkaConfig,
       setBrokerEpoch(_brokerEpoch).
       setBrokerId(brokerId).
       setCurrentMetadataOffset(metadataOffset).
-      setShouldFence(!readyToUnfence).
-      setShouldShutdown(_state == BrokerState.PENDING_CONTROLLED_SHUTDOWN)
+      setWantFence(!readyToUnfence).
+      setWantShutDown(_state == BrokerState.PENDING_CONTROLLED_SHUTDOWN)
     _channelManager.sendRequest(new BrokerHeartbeatRequest.Builder(data),
       new BrokerHeartbeatResponseHandler())
   }
@@ -350,7 +350,7 @@ class BrokerLifecycleManager(val config: KafkaConfig,
               debug(s"The broker is RUNNING. Processing heartbeat response.")
               scheduleNextCommunicationAfterSuccess()
             case BrokerState.PENDING_CONTROLLED_SHUTDOWN =>
-              if (!message.data().shouldShutdown()) {
+              if (!message.data().shouldShutDown()) {
                 info(s"The broker is in PENDING_CONTROLLED_SHUTDOWN state, still waiting " +
                   "for the active controller.")
               } else {

@@ -110,7 +110,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         }
 
         generatedClusterConfigs.forEach(config -> {
-            switch(config.clusterType()) {
+            switch (config.clusterType()) {
                 case Quorum:
                     testInvocations.accept(new QuorumClusterInvocationContext(config.copyOf()));
                     break;

@@ -24,7 +24,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  *
  * For Scala tests, the method should be defined in a companion object with the same name as the test class.
  */
-@Target({TYPE,METHOD})
+@Target({TYPE, METHOD})
 @Retention(RUNTIME)
 @TestTemplate
 public @interface ClusterTemplate {

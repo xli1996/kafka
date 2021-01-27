@@ -38,6 +38,7 @@ import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.common.utils.LogContext;
+import org.apache.kafka.controller.BrokersToIsrs.TopicPartition;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.apache.kafka.timeline.TimelineHashMap;
 import org.slf4j.Logger;
@@ -47,22 +48,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Random;
-import java.util.Set;
 
 import static org.apache.kafka.clients.admin.AlterConfigOp.OpType.SET;
 import static org.apache.kafka.common.config.ConfigResource.Type.TOPIC;
 
 
 public class ReplicationControlManager {
-    private final static int[] EMPTY = new int[0];
-
-    private final static int[] NO_LEADER = new int[] {-1};
-
     static class TopicControlInfo {
         private final Uuid id;
         private final TimelineHashMap<Integer, PartitionControlInfo> parts;
@@ -175,7 +172,7 @@ public class ReplicationControlManager {
             return builder.toString();
         }
 
-        public int chooseNewLeader(int[] newIsr) {
+        int chooseNewLeader(int[] newIsr) {
             for (int i = 0; i < replicas.length; i++) {
                 int replica = replicas[i];
                 if (Replicas.contains(newIsr, replica)) {
@@ -228,9 +225,8 @@ public class ReplicationControlManager {
 
     /**
      * A map of broker IDs to the partitions that the broker is in the ISR for.
-     * Partitions with no isr members appear in this map under id -1.
      */
-    private final TimelineHashMap<Integer, TimelineHashMap<Uuid, int[]>> isrMembers;
+    private final BrokersToIsrs brokersToIsrs;
 
     ReplicationControlManager(SnapshotRegistry snapshotRegistry,
                               LogContext logContext,
@@ -248,7 +244,7 @@ public class ReplicationControlManager {
         this.clusterControl = clusterControl;
         this.topicsByName = new TimelineHashMap<>(snapshotRegistry, 0);
         this.topics = new TimelineHashMap<>(snapshotRegistry, 0);
-        this.isrMembers = new TimelineHashMap<>(snapshotRegistry, 0);
+        this.brokersToIsrs = new BrokersToIsrs(snapshotRegistry);
     }
 
     public void replay(TopicRecord record) {
@@ -269,15 +265,17 @@ public class ReplicationControlManager {
             log.info("Created partition {}:{} with {}.", record.topicId(),
                 record.partitionId(), newPartInfo.toString());
             topicInfo.parts.put(record.partitionId(), newPartInfo);
-            updateIsrMembers(record.topicId(), record.partitionId(), null, newPartInfo.isr);
+            brokersToIsrs.update(record.topicId(), record.partitionId(), null,
+                newPartInfo.isr, -1, newPartInfo.leader);
         } else {
             String diff = newPartInfo.diff(prevPartInfo);
             if (!diff.isEmpty()) {
                 log.info("Modified partition {}:{}: {}.", record.topicId(),
                     record.partitionId(), diff);
                 topicInfo.parts.put(record.partitionId(), newPartInfo);
-                updateIsrMembers(record.topicId(), record.partitionId(),
-                    prevPartInfo.isr, newPartInfo.isr);
+                brokersToIsrs.update(record.topicId(), record.partitionId(),
+                    prevPartInfo.isr, newPartInfo.isr, prevPartInfo.leader,
+                    newPartInfo.leader);
             }
         }
     }
@@ -295,108 +293,13 @@ public class ReplicationControlManager {
         }
         PartitionControlInfo newPartitionInfo = prevPartitionInfo.merge(record);
         topicInfo.parts.put(record.partitionId(), newPartitionInfo);
-        updateIsrMembers(record.topicId(), record.partitionId(),
-            prevPartitionInfo.isr, newPartitionInfo.isr);
+        brokersToIsrs.update(record.topicId(), record.partitionId(),
+            prevPartitionInfo.isr, newPartitionInfo.isr, prevPartitionInfo.leader,
+            newPartitionInfo.leader);
         log.debug("Applied ISR change record: {}", record.toString());
     }
 
-    /**
-     * Update our records of a partition's ISR.
-     *
-     * @param topicId       The topic ID of the partition.
-     * @param partitionId   The partition ID of the partition.
-     * @param prevIsr       The previous ISR, or null if the partition is new.
-     * @param nextIsr       The new ISR, or null if the partition is being removed.
-     */
-    private void updateIsrMembers(Uuid topicId, int partitionId, int[] prevIsr, int[] nextIsr) {
-        if (prevIsr == null) {
-            prevIsr = EMPTY;
-        } else if (prevIsr.length == 0) {
-            prevIsr = NO_LEADER;
-        }
-        if (nextIsr == null) {
-            nextIsr = EMPTY;
-        } else if (nextIsr.length == 0) {
-            nextIsr = NO_LEADER;
-        }
-        List<Integer> added = new ArrayList<>();
-        List<Integer> removed = new ArrayList<>();
-        int i = 0, j = 0;
-        while (true) {
-            if (i == prevIsr.length) {
-                if (j == nextIsr.length) {
-                    break;
-                }
-                added.add(nextIsr[j]);
-                j++;
-            } else if (j == nextIsr.length) {
-                removed.add(prevIsr[i]);
-                i++;
-            } else {
-                int prevPartition = prevIsr[i];
-                int newPartition = nextIsr[j];
-                if (prevPartition < newPartition) {
-                    removed.add(prevPartition);
-                    i++;
-                } else if (prevPartition > newPartition) {
-                    added.add(newPartition);
-                    j++;
-                } else {
-                    i++;
-                    j++;
-                }
-            }
-        }
-        for (Integer addedBroker : added) {
-            TimelineHashMap<Uuid, int[]> topicMap = isrMembers.get(addedBroker);
-            if (topicMap == null) {
-                topicMap = new TimelineHashMap<>(snapshotRegistry, 0);
-                isrMembers.put(addedBroker, topicMap);
-            }
-            int[] partitions = topicMap.get(topicId);
-            int[] newPartitions;
-            if (partitions == null) {
-                newPartitions = new int[1];
-                newPartitions[0] = partitionId;
-            } else {
-                newPartitions = new int[partitions.length + 1];
-                System.arraycopy(partitions, 0, newPartitions, 0, partitions.length);
-                newPartitions[newPartitions.length - 1] = partitionId;
-                Arrays.sort(newPartitions);
-            }
-            topicMap.put(topicId, newPartitions);
-        }
-        for (Integer removedBroker : removed) {
-            TimelineHashMap<Uuid, int[]> topicMap = isrMembers.get(removedBroker);
-            if (topicMap == null) {
-                throw new RuntimeException("Broker " + removedBroker + " is not in " +
-                    "isrMembers for " + topicId + ":" + partitionId);
-            }
-            int[] partitions = topicMap.get(topicId);
-            if (partitions == null) {
-                throw new RuntimeException("Broker " + removedBroker + " has no " +
-                    "partition entry in isrMembers for " + topicId + ":" + partitionId);
-            }
-            if (partitions.length == 1) {
-                topicMap.remove(topicId);
-                if (topicMap.isEmpty()) {
-                    isrMembers.remove(removedBroker);
-                }
-            } else {
-                int[] newPartitions = new int[partitions.length - 1];
-                int a = 0;
-                for (int b = 0; b < partitions.length; b++) {
-                    int prev = partitions[b];
-                    if (prev != partitionId) {
-                        newPartitions[a++] = prev;
-                    }
-                }
-                topicMap.put(topicId, newPartitions);
-            }
-        }
-    }
-
-    public ControllerResult<CreateTopicsResponseData>
+    ControllerResult<CreateTopicsResponseData>
             createTopics(CreateTopicsRequestData request) {
         Map<String, ApiError> topicErrors = new HashMap<>();
         List<ApiMessageAndVersion> records = new ArrayList<>();
@@ -596,7 +499,12 @@ public class ReplicationControlManager {
         return topic.parts.get(partitionId);
     }
 
-    public ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
+    // VisibleForTesting
+    BrokersToIsrs brokersToIsrs() {
+        return brokersToIsrs;
+    }
+
+    ControllerResult<AlterIsrResponseData> alterIsr(AlterIsrRequestData request) {
         clusterControl.checkBrokerEpoch(request.brokerId(), request.brokerEpoch());
         AlterIsrResponseData response = new AlterIsrResponseData();
         List<ApiMessageAndVersion> records = new ArrayList<>();
@@ -660,52 +568,62 @@ public class ReplicationControlManager {
         return new ControllerResult<>(records, response);
     }
 
-    public void handleNewlyFenced(Set<Integer> newlyFenced,
-                                  List<ApiMessageAndVersion> records) {
-        for (Integer brokerId : newlyFenced) {
-            removeLeaderships(brokerId, true, records);
+    void removeFromIsr(int brokerId, List<ApiMessageAndVersion> records) {
+        Iterator<TopicPartition> iterator = brokersToIsrs.iterator(brokerId, false);
+        while (iterator.hasNext()) {
+            TopicPartition topicPartition = iterator.next();
+            TopicControlInfo topic = topics.get(topicPartition.topicId());
+            if (topic == null) {
+                throw new RuntimeException("Topic ID " + topicPartition.topicId() + " existed in " +
+                    "isrMembers, but not in the topics map.");
+            }
+            PartitionControlInfo partition = topic.parts.get(topicPartition.partitionId());
+            if (partition == null) {
+                throw new RuntimeException("Partition " + topicPartition +
+                    " existed in isrMembers, but not in the partitions map.");
+            }
+            int[] newIsr = Replicas.copyWithout(partition.isr, brokerId);
+            int newLeader, newLeaderEpoch;
+            if (partition.leader == brokerId) {
+                newLeader = partition.chooseNewLeader(newIsr);
+                newLeaderEpoch = partition.leaderEpoch + 1;
+            } else {
+                newLeader = partition.leader;
+                newLeaderEpoch = partition.leaderEpoch;
+            }
+            records.add(new ApiMessageAndVersion(new IsrChangeRecord().
+                setPartitionId(topicPartition.partitionId()).
+                setTopicId(topic.id).
+                setIsr(Replicas.toList(newIsr)).
+                setLeader(newLeader).
+                setLeaderEpoch(newLeaderEpoch).
+                setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
         }
     }
 
-    public void removeLeaderships(int brokerId, boolean removeFromIsr,
-                                  List<ApiMessageAndVersion> records) {
-        TimelineHashMap<Uuid, int[]> topicMap = isrMembers.get(brokerId);
-        if (topicMap == null) return;
-        for (Entry<Uuid, int[]> entry : topicMap.entrySet()) {
-            Uuid topicId = entry.getKey();
-            int[] partitionIds = entry.getValue();
-            TopicControlInfo topic = topics.get(topicId);
+
+    void removeLeaderships(int brokerId, List<ApiMessageAndVersion> records) {
+        Iterator<TopicPartition> iterator = brokersToIsrs.iterator(brokerId, true);
+        while (iterator.hasNext()) {
+            TopicPartition topicPartition = iterator.next();
+            TopicControlInfo topic = topics.get(topicPartition.topicId());
             if (topic == null) {
-                throw new RuntimeException("Topic ID " + topicId + " existed in " +
+                throw new RuntimeException("Topic ID " + topicPartition.topicId() + " existed in " +
                     "isrMembers, but not in the topics map.");
             }
-            for (int partitionId : partitionIds) {
-                PartitionControlInfo partition = topic.parts.get(partitionId);
-                if (partition == null) {
-                    throw new RuntimeException("Partition " +
-                        topicId + ":" + partitionId + " existed in " +
-                        "isrMembers, but not in the partitions map.");
-                }
-                int[] newIsr = removeFromIsr ?
-                    Replicas.copyWithout(partition.isr, brokerId) : partition.isr;
-                int newLeader, newLeaderEpoch;
-                if (partition.leader == brokerId) {
-                    newLeader = partition.chooseNewLeader(newIsr);
-                    newLeaderEpoch = partition.leaderEpoch + 1;
-                } else if (!removeFromIsr) {
-                    continue;
-                } else {
-                    newLeader = partition.leader;
-                    newLeaderEpoch = partition.leaderEpoch;
-                }
-                records.add(new ApiMessageAndVersion(new IsrChangeRecord().
-                    setPartitionId(partitionId).
-                    setTopicId(topic.id).
-                    setIsr(Replicas.toList(newIsr)).
-                    setLeader(newLeader).
-                    setLeaderEpoch(newLeaderEpoch).
-                    setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
+            PartitionControlInfo partition = topic.parts.get(topicPartition.partitionId());
+            if (partition == null) {
+                throw new RuntimeException("Partition " + topicPartition +
+                    " existed in isrMembers, but not in the partitions map.");
             }
+            int newLeader = partition.chooseNewLeader(partition.isr);
+            records.add(new ApiMessageAndVersion(new IsrChangeRecord().
+                setPartitionId(topicPartition.partitionId()).
+                setTopicId(topic.id).
+                setIsr(Replicas.toList(partition.isr)).
+                setLeader(newLeader).
+                setLeaderEpoch(partition.leaderEpoch + 1).
+                setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
         }
     }
 }

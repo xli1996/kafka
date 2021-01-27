@@ -20,7 +20,7 @@ package org.apache.kafka.shell;
 import kafka.raft.KafkaRaftManager;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
-import kafka.server.KafkaServer;
+import kafka.server.Server;
 import kafka.server.MetaProperties;
 import kafka.tools.TerseFailure;
 import net.sourceforge.argparse4j.ArgumentParsers;
@@ -124,7 +124,7 @@ public final class MetadataShell {
                 OptionConverters.toScala(Optional.of(fakeId)),
                 OptionConverters.toScala(Optional.empty()));
             TopicPartition metadataPartition =
-                new TopicPartition(KafkaServer.metadataTopicName(), 0);
+                new TopicPartition(Server.metadataTopicName(), 0);
             KafkaRaftManager raftManager = null;
             MetadataNodeManager nodeManager = null;
             try {

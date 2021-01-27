@@ -23,7 +23,7 @@ import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue}
 import com.yammer.metrics.core.Timer
 import kafka.api.{ApiVersion, KAFKA_2_6_IV0, KAFKA_2_7_IV0, LeaderAndIsr}
 import kafka.metrics.KafkaYammerMetrics
-import kafka.server.{KafkaConfig, LegacyBroker}
+import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.{LogCaptureAppender, TestUtils}
 import kafka.zk.{FeatureZNodeStatus, _}
 import org.apache.kafka.common.errors.{ControllerMovedException, StaleBrokerEpochException}
@@ -43,14 +43,14 @@ import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
 class ControllerIntegrationTest extends ZooKeeperTestHarness {
-  var servers = Seq.empty[LegacyBroker]
+  var servers = Seq.empty[KafkaServer]
   val firstControllerEpoch = KafkaController.InitialControllerEpoch + 1
   val firstControllerEpochZkVersion = KafkaController.InitialControllerEpochZkVersion + 1
 
   @Before
   override def setUp(): Unit = {
     super.setUp()
-    servers = Seq.empty[LegacyBroker]
+    servers = Seq.empty[KafkaServer]
   }
 
   @After
@@ -200,7 +200,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     controllerBroker.shutdown()
     controllerBroker.awaitShutdown()
 
-    def verifyMetadata(broker: LegacyBroker): Unit = {
+    def verifyMetadata(broker: KafkaServer): Unit = {
       broker.startup()
       TestUtils.waitUntilTrue(() => {
         val partitionInfoOpt = broker.metadataCache.getPartitionInfo(topic, 0)
@@ -992,7 +992,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     }
   }
 
-  private def preferredReplicaLeaderElection(controllerId: Int, otherBroker: LegacyBroker, tp: TopicPartition,
+  private def preferredReplicaLeaderElection(controllerId: Int, otherBroker: KafkaServer, tp: TopicPartition,
                                              replicas: Set[Int], leaderEpoch: Int): Unit = {
     otherBroker.shutdown()
     otherBroker.awaitShutdown()
@@ -1059,7 +1059,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     }.values.headOption.getOrElse(fail(s"Unable to find metric $metricName")).asInstanceOf[Timer]
   }
 
-  private def getController(): LegacyBroker = {
+  private def getController(): KafkaServer = {
     val controllerId = TestUtils.waitUntilControllerElected(zkClient)
     servers.filter(s => s.config.brokerId == controllerId).head
   }

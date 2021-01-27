@@ -145,7 +145,7 @@ public class Replicas {
      *
      * @return              A new array without the given value.
      */
-    public static int[] copyWithout(int[] replicas, Integer value) {
+    public static int[] copyWithout(int[] replicas, int value) {
         int size = 0;
         for (int i = 0; i < replicas.length; i++) {
             if (replicas[i] != value) {
@@ -161,5 +161,20 @@ public class Replicas {
             }
         }
         return result;
+    }
+
+    /**
+     * Copy a replica array with the given value.
+     *
+     * @param replicas      The replica array.
+     * @param value         The value to add.
+     *
+     * @return              A new array with the given value.
+     */
+    public static int[] copyWith(int[] replicas, int value) {
+        int[] newReplicas = new int[replicas.length + 1];
+        System.arraycopy(replicas, 0, newReplicas, 0, replicas.length);
+        newReplicas[newReplicas.length - 1] = value;
+        return newReplicas;
     }
 }

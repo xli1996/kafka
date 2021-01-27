@@ -41,7 +41,6 @@ import org.apache.kafka.timeline.TimelineHashMap;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -117,6 +116,11 @@ public class ClusterControlManager {
         heartbeatManager = null;
     }
 
+    // VisibleForTesting
+    Map<Integer, BrokerRegistration> brokerRegistrations() {
+        return brokerRegistrations;
+    }
+
     /**
      * Process an incoming broker registration request.
      */
@@ -145,7 +149,8 @@ public class ClusterControlManager {
 
         RegisterBrokerRecord record = new RegisterBrokerRecord().setBrokerId(brokerId).
             setIncarnationId(request.incarnationId()).
-            setBrokerEpoch(brokerEpoch);
+            setBrokerEpoch(brokerEpoch).
+            setRack(request.rack());
         for (BrokerRegistrationRequestData.Listener listener : request.listeners()) {
             record.endPoints().add(new RegisterBrokerRecord.BrokerEndpoint().
                 setHost(listener.host()).
@@ -173,9 +178,9 @@ public class ClusterControlManager {
             heartbeatManager.touch(brokerId, existing.fenced(), -1);
         }
 
-        return new ControllerResult<>(
-            Collections.singletonList(new ApiMessageAndVersion(record, (short) 0)),
-                new BrokerRegistrationReply(brokerEpoch));
+        List<ApiMessageAndVersion> records = new ArrayList<>();
+        records.add(new ApiMessageAndVersion(record, (short) 0));
+        return new ControllerResult<>(records, new BrokerRegistrationReply(brokerEpoch));
     }
 
     public ControllerResult<Void> decommissionBroker(int brokerId) {
@@ -184,16 +189,16 @@ public class ClusterControlManager {
         }
         BrokerRegistration existing = brokerRegistrations.get(brokerId);
         if (existing == null) {
-            return new ControllerResult<>(Collections.emptyList(), null);
+            return new ControllerResult<>(new ArrayList<>(), null);
         }
-        ControllerResult<Void> result = new ControllerResult<>(
-            Collections.singletonList(new ApiMessageAndVersion(
-                new UnregisterBrokerRecord().
-                    setBrokerId(brokerId).
-                    setBrokerEpoch(existing.epoch()),
-                (short) 0)), null);
+        List<ApiMessageAndVersion> records = new ArrayList<>();
+        records.add(new ApiMessageAndVersion(
+            new UnregisterBrokerRecord().
+                setBrokerId(brokerId).
+                setBrokerEpoch(existing.epoch()),
+            (short) 0));
         heartbeatManager.remove(brokerId);
-        return result;
+        return new ControllerResult<>(records, null);
     }
 
     public ControllerResult<BrokerHeartbeatReply>

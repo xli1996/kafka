@@ -63,7 +63,7 @@ class Kip500Broker(
   val supportedFeatures: util.Map[String, VersionRange]
 ) extends KafkaBroker {
 
-  import kafka.server.KafkaServer._
+  import kafka.server.Server._
 
   private val logContext: LogContext = new LogContext(s"[Kip500Broker id=${config.brokerId}] ")
 

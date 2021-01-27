@@ -20,7 +20,7 @@ package kafka.tools
 import java.io.PrintStream
 import java.nio.file.{Files, Paths}
 
-import kafka.server.KafkaServer.{BrokerRole, ControllerRole}
+import kafka.server.Server.{BrokerRole, ControllerRole}
 import kafka.server.{BrokerMetadataCheckpoint, KafkaConfig, MetaProperties, RawMetaProperties}
 import kafka.utils.{Exit, Logging}
 import net.sourceforge.argparse4j.ArgumentParsers

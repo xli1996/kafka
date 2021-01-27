@@ -20,7 +20,7 @@ package kafka.admin
 import java.util.Properties
 
 import kafka.api.KAFKA_2_7_IV0
-import kafka.server.{BaseRequestTest, KafkaConfig, LegacyBroker}
+import kafka.server.{BaseRequestTest, KafkaConfig, KafkaServer}
 import kafka.utils.TestUtils
 import kafka.utils.TestUtils.waitUntilTrue
 import org.apache.kafka.common.feature.{Features, SupportedVersionRange}
@@ -41,7 +41,7 @@ class FeatureCommandTest extends BaseRequestTest {
                                            Utils.mkEntry("feature_2", new SupportedVersionRange(1, 5))))
 
   private def updateSupportedFeatures(features: Features[SupportedVersionRange],
-                                      targetServers: Set[LegacyBroker]): Unit = {
+                                      targetServers: Set[KafkaServer]): Unit = {
     targetServers.foreach(s => {
       s.brokerFeatures.setSupportedFeatures(features)
       s.zkClient.updateBrokerInfo(s.createBrokerInfo)
@@ -65,7 +65,7 @@ class FeatureCommandTest extends BaseRequestTest {
   }
 
   private def updateSupportedFeaturesInAllBrokers(features: Features[SupportedVersionRange]): Unit = {
-    updateSupportedFeatures(features, Set[LegacyBroker]() ++ servers)
+    updateSupportedFeatures(features, Set[KafkaServer]() ++ servers)
   }
 
   /**

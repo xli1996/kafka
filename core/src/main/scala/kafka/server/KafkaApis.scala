@@ -99,7 +99,7 @@ import scala.annotation.nowarn
  */
 class KafkaApis(val requestChannel: RequestChannel,
                 val replicaManager: ReplicaManager,
-                val adminManager: LegacyAdminManager,
+                val adminManager: ZkAdminManager,
                 val groupCoordinator: GroupCoordinator,
                 val txnCoordinator: TransactionCoordinator,
                 val legacyController: KafkaController,

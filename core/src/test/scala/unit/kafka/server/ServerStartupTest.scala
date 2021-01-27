@@ -27,7 +27,7 @@ import org.junit.{After, Test}
 
 class ServerStartupTest extends ZooKeeperTestHarness {
 
-  private var server: LegacyBroker = null
+  private var server: KafkaServer = null
 
   @After
   override def tearDown(): Unit = {
@@ -107,7 +107,7 @@ class ServerStartupTest extends ZooKeeperTestHarness {
     val brokerId = 0
 
     val props = TestUtils.createBrokerConfig(brokerId, zkConnect)
-    server = new LegacyBroker(KafkaConfig.fromProps(props))
+    server = new KafkaServer(KafkaConfig.fromProps(props))
 
     server.startup()
     TestUtils.waitUntilTrue(() => server.currentState() == BrokerState.RUNNING,

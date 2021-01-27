@@ -18,7 +18,7 @@ package org.apache.kafka.streams.integration.utils;
 
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
-import kafka.server.LegacyBroker;
+import kafka.server.KafkaServer;
 import kafka.utils.MockTime;
 import kafka.utils.TestUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -56,7 +56,7 @@ public class KafkaEmbedded {
     private final Properties effectiveConfig;
     private final File logDir;
     private final TemporaryFolder tmpFolder;
-    private final LegacyBroker kafka;
+    private final KafkaServer kafka;
 
     /**
      * Creates and starts an embedded Kafka broker.
@@ -214,7 +214,7 @@ public class KafkaEmbedded {
     }
 
     @SuppressWarnings("WeakerAccess")
-    public LegacyBroker kafkaServer() {
+    public KafkaServer kafkaServer() {
         return kafka;
     }
 }

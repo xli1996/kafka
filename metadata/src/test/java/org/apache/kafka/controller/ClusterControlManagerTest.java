@@ -17,6 +17,8 @@
 
 package org.apache.kafka.controller;
 
+import org.apache.kafka.common.Endpoint;
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.errors.StaleBrokerEpochException;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.metadata.RegisterBrokerRecord;
@@ -25,14 +27,17 @@ import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.MockTime;
 import org.apache.kafka.metadata.BrokerHeartbeatReply;
+import org.apache.kafka.metadata.BrokerRegistration;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +79,34 @@ public class ClusterControlManagerTest {
         clusterControl.replay(unfenceBrokerRecord);
         assertFalse(clusterControl.unfenced(0));
         assertTrue(clusterControl.unfenced(1));
+    }
+
+    @Test
+    public void testDecommission() throws Exception {
+        RegisterBrokerRecord brokerRecord = new RegisterBrokerRecord().
+            setBrokerId(1).
+            setBrokerEpoch(100).
+            setIncarnationId(Uuid.fromString("fPZv1VBsRFmnlRvmGcOW9w")).
+            setRack("arack");
+        brokerRecord.endPoints().add(new RegisterBrokerRecord.BrokerEndpoint().
+            setSecurityProtocol(SecurityProtocol.PLAINTEXT.id).
+            setPort((short) 9092).
+            setName("PLAINTEXT").
+            setHost("example.com"));
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        ClusterControlManager clusterControl = new ClusterControlManager(
+            new LogContext(), new MockTime(0, 0, 0), snapshotRegistry, 1000,
+            new SimpleReplicaPlacementPolicy(new Random()));
+        clusterControl.activate();
+        clusterControl.replay(brokerRecord);
+        assertEquals(new BrokerRegistration(1, 100,
+            Uuid.fromString("fPZv1VBsRFmnlRvmGcOW9w"), Collections.singletonMap("PLAINTEXT",
+            new Endpoint("PLAINTEXT", SecurityProtocol.PLAINTEXT, "example.com", 9092)),
+            Collections.emptyMap(), Optional.of("arack"), true),
+                clusterControl.brokerRegistrations().get(1));
+        ControllerResult<Void> result = clusterControl.decommissionBroker(1);
+        ControllerTestUtils.replayAll(clusterControl, result.records());
+        assertFalse(clusterControl.brokerRegistrations().containsKey(1));
     }
 
     @ParameterizedTest

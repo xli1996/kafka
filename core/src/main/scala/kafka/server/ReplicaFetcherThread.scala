@@ -158,7 +158,7 @@ class ReplicaFetcherThread(name: String,
                                     fetchOffset: Long,
                                     partitionData: FetchData): Option[LogAppendInfo] = {
     val logTrace = isTraceEnabled
-    val partition = replicaMgr.nonOfflinePartition(topicPartition).get
+    val partition = replicaMgr.onlinePartition(topicPartition).get
     val log = partition.localLogOrException
     val records = toMemoryRecords(partitionData.records)
 
@@ -308,7 +308,7 @@ class ReplicaFetcherThread(name: String,
    * The logic for finding the truncation offset is implemented in AbstractFetcherThread.getOffsetTruncationState
    */
   override def truncate(tp: TopicPartition, offsetTruncationState: OffsetTruncationState): Unit = {
-    val partition = replicaMgr.nonOfflinePartition(tp).get
+    val partition = replicaMgr.onlinePartition(tp).get
     val log = partition.localLogOrException
 
     partition.truncateTo(offsetTruncationState.offset, isFuture = false)
@@ -324,7 +324,7 @@ class ReplicaFetcherThread(name: String,
   }
 
   override protected def truncateFullyAndStartAt(topicPartition: TopicPartition, offset: Long): Unit = {
-    val partition = replicaMgr.nonOfflinePartition(topicPartition).get
+    val partition = replicaMgr.onlinePartition(topicPartition).get
     partition.truncateFullyAndStartAt(offset, isFuture = false)
   }
 

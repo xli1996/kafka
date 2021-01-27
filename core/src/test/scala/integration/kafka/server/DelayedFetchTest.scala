@@ -70,7 +70,7 @@ class DelayedFetchTest extends EasyMockSupport {
         currentLeaderEpoch,
         fetchOnlyFromLeader = true))
         .andThrow(new FencedLeaderEpochException("Requested epoch has been fenced"))
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
 
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.FENCED_LEADER_EPOCH)
 
@@ -113,7 +113,7 @@ class DelayedFetchTest extends EasyMockSupport {
     EasyMock.expect(replicaManager.onlinePartitionOrException(topicPartition))
       .andThrow(new NotLeaderOrFollowerException(s"Replica for $topicPartition not available"))
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.NOT_LEADER_OR_FOLLOWER)
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
 
     replayAll()
 
@@ -162,7 +162,7 @@ class DelayedFetchTest extends EasyMockSupport {
         .setErrorCode(Errors.NONE.code)
         .setLeaderEpoch(lastFetchedEpoch.get)
         .setEndOffset(fetchOffset - 1))
-    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt(), EasyMock.anyBoolean())).andReturn(false)
+    EasyMock.expect(replicaManager.isAddingReplica(EasyMock.anyObject(), EasyMock.anyInt())).andReturn(false)
     expectReadFromReplica(replicaId, topicPartition, fetchStatus.fetchInfo, Errors.NONE)
     replayAll()
 

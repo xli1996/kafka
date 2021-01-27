@@ -60,19 +60,19 @@ class ReplicaAlterLogDirsThread(name: String,
   private var inProgressPartition: Option[TopicPartition] = None
 
   override protected def latestEpoch(topicPartition: TopicPartition): Option[Int] = {
-    replicaMgr.futureLocalLogOrException(topicPartition).latestEpoch
+    replicaMgr.futureLocalDeferredOrOnlineLogOrException(topicPartition).latestEpoch
   }
 
   override protected def logStartOffset(topicPartition: TopicPartition): Long = {
-    replicaMgr.futureLocalLogOrException(topicPartition).logStartOffset
+    replicaMgr.futureLocalDeferredOrOnlineLogOrException(topicPartition).logStartOffset
   }
 
   override protected def logEndOffset(topicPartition: TopicPartition): Long = {
-    replicaMgr.futureLocalLogOrException(topicPartition).logEndOffset
+    replicaMgr.futureLocalDeferredOrOnlineLogOrException(topicPartition).logEndOffset
   }
 
   override protected def endOffsetForEpoch(topicPartition: TopicPartition, epoch: Int): Option[OffsetAndEpoch] = {
-    replicaMgr.futureLocalLogOrException(topicPartition).endOffsetForEpoch(epoch)
+    replicaMgr.futureLocalDeferredOrOnlineLogOrException(topicPartition).endOffsetForEpoch(epoch)
   }
 
   def fetchFromLeader(fetchRequest: FetchRequest.Builder): Map[TopicPartition, FetchData] = {
@@ -110,7 +110,7 @@ class ReplicaAlterLogDirsThread(name: String,
   override def processPartitionData(topicPartition: TopicPartition,
                                     fetchOffset: Long,
                                     partitionData: PartitionData[Records]): Option[LogAppendInfo] = {
-    val partition = replicaMgr.nonOfflinePartition(topicPartition).get
+    val partition = replicaMgr.onlinePartition(topicPartition).get
     val futureLog = partition.futureLocalLogOrException
     val records = toMemoryRecords(partitionData.records)
 
@@ -139,7 +139,7 @@ class ReplicaAlterLogDirsThread(name: String,
       // It is possible that the log dir fetcher completed just before this call, so we
       // filter only the partitions which still have a future log dir.
       val filteredFetchStates = initialFetchStates.filter { case (tp, _) =>
-        replicaMgr.futureLogExists(tp)
+        replicaMgr.futureLocalDeferredOrOnlineLogExists(tp)
       }
       super.addPartitions(filteredFetchStates)
     } finally {
@@ -255,7 +255,7 @@ class ReplicaAlterLogDirsThread(name: String,
     val partitionsWithError = mutable.Set[TopicPartition]()
 
     try {
-      val logStartOffset = replicaMgr.futureLocalLogOrException(tp).logStartOffset
+      val logStartOffset = replicaMgr.futureLocalDeferredOrOnlineLogOrException(tp).logStartOffset
       val lastFetchedEpoch = if (isTruncationOnFetchSupported)
         fetchState.lastFetchedEpoch.map(_.asInstanceOf[Integer]).asJava
       else

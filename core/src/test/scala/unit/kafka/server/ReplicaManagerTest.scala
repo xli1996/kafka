@@ -261,7 +261,7 @@ class ReplicaManagerTest {
       assertEquals(0, replicaManager.replicaAlterLogDirsManager.fetcherThreadMap.size)
       replicaManager.alterReplicaLogDirs(Map(topicPartition -> newReplicaFolder.getAbsolutePath))
       // make sure the future log is created
-      replicaManager.futureLocalLogOrException(topicPartition)
+      replicaManager.futureLocalDeferredOrOnlineLogOrException(topicPartition)
       assertEquals(1, replicaManager.replicaAlterLogDirsManager.fetcherThreadMap.size)
       (1 to loopEpochChange).foreach(epoch => replicaManager.becomeLeaderOrFollower(0, leaderAndIsrRequest(epoch), (_, _) => ()))
       // wait for the ReplicaAlterLogDirsThread to complete
@@ -611,8 +611,8 @@ class ReplicaManagerTest {
       assertEquals(Errors.NONE, leaderAndIsrResponse.error)
 
       // Follower replica state is initialized, but initial state is not known
-      assertTrue(replicaManager.nonOfflinePartition(tp).isDefined)
-      val partition = replicaManager.nonOfflinePartition(tp).get
+      assertTrue(replicaManager.deferredOrOnlinePartition(tp).isDefined)
+      val partition = replicaManager.deferredOrOnlinePartition(tp).get
 
       assertTrue(partition.getReplica(1).isDefined)
       val followerReplica = partition.getReplica(1).get

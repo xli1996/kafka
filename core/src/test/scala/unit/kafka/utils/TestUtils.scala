@@ -887,14 +887,14 @@ object TestUtils extends Logging {
   }
 
   def isLeaderLocalOnBroker(topic: String, partitionId: Int, server: LegacyBroker): Boolean = {
-    server.replicaManager.nonOfflinePartition(new TopicPartition(topic, partitionId)).exists(_.leaderLogIfLocal.isDefined)
+    server.replicaManager.deferredOrOnlinePartition(new TopicPartition(topic, partitionId)).exists(_.leaderLogIfLocal.isDefined)
   }
 
   def findLeaderEpoch(brokerId: Int,
                       topicPartition: TopicPartition,
                       servers: Iterable[LegacyBroker]): Int = {
     val leaderServer = servers.find(_.config.brokerId == brokerId)
-    val leaderPartition = leaderServer.flatMap(_.replicaManager.nonOfflinePartition(topicPartition))
+    val leaderPartition = leaderServer.flatMap(_.replicaManager.deferredOrOnlinePartition(topicPartition))
       .getOrElse(fail(s"Failed to find expected replica on broker $brokerId"))
     leaderPartition.getLeaderEpoch
   }
@@ -902,7 +902,7 @@ object TestUtils extends Logging {
   def findFollowerId(topicPartition: TopicPartition,
                      servers: Iterable[LegacyBroker]): Int = {
     val followerOpt = servers.find { server =>
-      server.replicaManager.nonOfflinePartition(topicPartition) match {
+      server.replicaManager.deferredOrOnlinePartition(topicPartition) match {
         case Some(partition) => !partition.leaderReplicaIdOpt.contains(server.config.brokerId)
         case None => false
       }
@@ -966,7 +966,7 @@ object TestUtils extends Logging {
     def newLeaderExists: Option[Int] = {
       servers.find { server =>
         server.config.brokerId != oldLeader &&
-          server.replicaManager.nonOfflinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
+          server.replicaManager.deferredOrOnlinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
       }.map(_.config.brokerId)
     }
 
@@ -981,7 +981,7 @@ object TestUtils extends Logging {
                              timeout: Long = JTestUtils.DEFAULT_MAX_WAIT_MS): Int = {
     def leaderIfExists: Option[Int] = {
       servers.find { server =>
-        server.replicaManager.nonOfflinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
+        server.replicaManager.deferredOrOnlinePartition(tp).exists(_.leaderLogIfLocal.isDefined)
       }.map(_.config.brokerId)
     }
 
@@ -1164,7 +1164,7 @@ object TestUtils extends Logging {
       "Topic path /brokers/topics/%s not deleted after /admin/delete_topics/%s path is deleted".format(topic, topic))
     // ensure that the topic-partition has been deleted from all brokers' replica managers
     waitUntilTrue(() =>
-      servers.forall(server => topicPartitions.forall(tp => server.replicaManager.nonOfflinePartition(tp).isEmpty)),
+      servers.forall(server => topicPartitions.forall(tp => server.replicaManager.deferredOrOnlinePartition(tp).isEmpty)),
       "Replica manager's should have deleted all of this topic's partitions")
     // ensure that logs from all replicas are deleted if delete topic is marked successful in ZooKeeper
     assertTrue("Replica logs not deleted after delete topic is complete",
@@ -1198,7 +1198,7 @@ object TestUtils extends Logging {
 
   def causeLogDirFailure(failureType: LogDirFailureType, leaderServer: LegacyBroker, partition: TopicPartition): Unit = {
     // Make log directory of the partition on the leader broker inaccessible by replacing it with a file
-    val localLog = leaderServer.replicaManager.localNonOfflineLogOrException(partition)
+    val localLog = leaderServer.replicaManager.localDeferredOrOnlineLogOrException(partition)
     val logDir = localLog.dir.getParentFile
     CoreUtils.swallow(Utils.delete(logDir), this)
     logDir.createNewFile()
@@ -1217,7 +1217,7 @@ object TestUtils extends Logging {
 
     // Wait for ReplicaHighWatermarkCheckpoint to happen so that the log directory of the topic will be offline
     TestUtils.waitUntilTrue(() => !leaderServer.logManager.isLogDirOnline(logDir.getAbsolutePath), "Expected log directory offline", 3000L)
-    assertTrue(leaderServer.replicaManager.localNonOfflineLog(partition).isEmpty)
+    assertTrue(leaderServer.replicaManager.localDeferredOrOnlineLog(partition).isEmpty)
   }
 
   /**

@@ -59,7 +59,7 @@ class ReplicaAlterLogDirsThreadTest {
     val replicaManager = Mockito.mock(classOf[ReplicaManager])
     val quotaManager = Mockito.mock(classOf[ReplicationQuotaManager])
 
-    when(replicaManager.futureLogExists(t1p0)).thenReturn(false)
+    when(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).thenReturn(false)
 
     val endPoint = new BrokerEndPoint(0, "localhost", 1000)
     val thread = new ReplicaAlterLogDirsThread(
@@ -92,9 +92,9 @@ class ReplicaAlterLogDirsThreadTest {
     val logEndOffset = 0
 
     when(partition.partitionId).thenReturn(partitionId)
-    when(replicaManager.futureLocalLogOrException(t1p0)).thenReturn(futureLog)
-    when(replicaManager.futureLogExists(t1p0)).thenReturn(true)
-    when(replicaManager.nonOfflinePartition(t1p0)).thenReturn(Some(partition))
+    when(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).thenReturn(futureLog)
+    when(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).thenReturn(true)
+    when(replicaManager.deferredOrOnlinePartition(t1p0)).thenReturn(Some(partition))
     when(replicaManager.onlinePartitionOrException(t1p0)).thenReturn(partition)
 
     when(quotaManager.isQuotaExceeded).thenReturn(false)
@@ -189,9 +189,9 @@ class ReplicaAlterLogDirsThreadTest {
     val logEndOffset = 0
 
     when(partition.partitionId).thenReturn(partitionId)
-    when(replicaManager.futureLocalLogOrException(t1p0)).thenReturn(futureLog)
-    when(replicaManager.futureLogExists(t1p0)).thenReturn(true)
-    when(replicaManager.nonOfflinePartition(t1p0)).thenReturn(Some(partition))
+    when(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).thenReturn(futureLog)
+    when(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).thenReturn(true)
+    when(replicaManager.deferredOrOnlinePartition(t1p0)).thenReturn(Some(partition))
     when(replicaManager.onlinePartitionOrException(t1p0)).thenReturn(partition)
 
     when(quotaManager.isQuotaExceeded).thenReturn(false)
@@ -435,10 +435,10 @@ class ReplicaAlterLogDirsThreadTest {
       .andStubReturn(partitionT1p0)
     expect(replicaManager.onlinePartitionOrException(t1p1))
       .andStubReturn(partitionT1p1)
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLogT1p0)
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
-    expect(replicaManager.futureLocalLogOrException(t1p1)).andStubReturn(futureLogT1p1)
-    expect(replicaManager.futureLogExists(t1p1)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andStubReturn(futureLogT1p0)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p1)).andStubReturn(futureLogT1p1)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p1)).andStubReturn(true)
     expect(partitionT1p0.truncateTo(capture(truncateCaptureT1p0), anyBoolean())).anyTimes()
     expect(partitionT1p1.truncateTo(capture(truncateCaptureT1p1), anyBoolean())).anyTimes()
 
@@ -521,8 +521,8 @@ class ReplicaAlterLogDirsThreadTest {
 
     expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partition)
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andStubReturn(futureLog)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
 
     expect(partition.truncateTo(capture(truncateToCapture), EasyMock.eq(true))).anyTimes()
     expect(futureLog.logEndOffset).andReturn(futureReplicaLEO).anyTimes()
@@ -600,8 +600,8 @@ class ReplicaAlterLogDirsThreadTest {
     expect(replicaManager.onlinePartitionOrException(t1p0))
       .andStubReturn(partition)
     expect(partition.truncateTo(capture(truncated), isFuture = EasyMock.eq(true))).anyTimes()
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andStubReturn(futureLog)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
 
     expect(replicaManager.logManager).andReturn(logManager).anyTimes()
 
@@ -659,8 +659,8 @@ class ReplicaAlterLogDirsThreadTest {
       .andStubReturn(partition)
     expect(partition.truncateTo(capture(truncated), isFuture = EasyMock.eq(true))).once()
 
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andStubReturn(futureLog)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
     expect(futureLog.logEndOffset).andReturn(futureReplicaLEO).anyTimes()
     expect(futureLog.latestEpoch).andStubReturn(Some(futureReplicaLeaderEpoch))
     expect(futureLog.endOffsetForEpoch(futureReplicaLeaderEpoch)).andReturn(
@@ -752,8 +752,8 @@ class ReplicaAlterLogDirsThreadTest {
           .setEndOffset(replicaLEO))
     expect(partition.truncateTo(futureReplicaLEO, isFuture = true)).once()
 
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andStubReturn(futureLog)
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andStubReturn(futureLog)
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
     expect(futureLog.latestEpoch).andStubReturn(Some(leaderEpoch))
     expect(futureLog.logEndOffset).andStubReturn(futureReplicaLEO)
     expect(futureLog.endOffsetForEpoch(leaderEpoch)).andReturn(
@@ -908,14 +908,14 @@ class ReplicaAlterLogDirsThreadTest {
            replicaManager: ReplicaManager): IExpectationSetters[Option[Partition]] = {
     expect(replicaManager.localOnlineLog(t1p0)).andReturn(Some(logT1p0)).anyTimes()
     expect(replicaManager.localOnlineLogOrException(t1p0)).andReturn(logT1p0).anyTimes()
-    expect(replicaManager.futureLocalLogOrException(t1p0)).andReturn(futureLog).anyTimes()
-    expect(replicaManager.futureLogExists(t1p0)).andStubReturn(true)
-    expect(replicaManager.nonOfflinePartition(t1p0)).andReturn(Some(partition)).anyTimes()
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).andReturn(futureLog).anyTimes()
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).andStubReturn(true)
+    expect(replicaManager.deferredOrOnlinePartition(t1p0)).andReturn(Some(partition)).anyTimes()
     expect(replicaManager.localOnlineLog(t1p1)).andReturn(Some(logT1p1)).anyTimes()
     expect(replicaManager.localOnlineLogOrException(t1p1)).andReturn(logT1p1).anyTimes()
-    expect(replicaManager.futureLocalLogOrException(t1p1)).andReturn(futureLog).anyTimes()
-    expect(replicaManager.futureLogExists(t1p1)).andStubReturn(true)
-    expect(replicaManager.nonOfflinePartition(t1p1)).andReturn(Some(partition)).anyTimes()
+    expect(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p1)).andReturn(futureLog).anyTimes()
+    expect(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p1)).andStubReturn(true)
+    expect(replicaManager.deferredOrOnlinePartition(t1p1)).andReturn(Some(partition)).anyTimes()
   }
 
   def stubWithFetchMessages(logT1p0: Log, logT1p1: Log, futureLog: Log, partition: Partition, replicaManager: ReplicaManager,

@@ -354,7 +354,7 @@ class BrokerLifecycleManager(val config: KafkaConfig,
                 info(s"The broker is in PENDING_CONTROLLED_SHUTDOWN state, still waiting " +
                   "for the active controller.")
               } else {
-                info(s"Transitioning from PENDING_CONTROLLED_SHUTDOWN to SHUTTING_DOWN.")
+                info(s"The controlled has asked us to exit controlled shutdown.")
                 beginShutdown()
               }
             case BrokerState.SHUTTING_DOWN =>

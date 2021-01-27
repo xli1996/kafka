@@ -191,8 +191,8 @@ class MetadataPartitionsBuilder(val brokerId: Int,
 
   def build(): MetadataPartitions = {
     val result = new MetadataPartitions(newNameMap, newIdMap)
-    newNameMap = null
-    newIdMap = null
+    newNameMap = Collections.unmodifiableMap(newNameMap)
+    newIdMap = Collections.unmodifiableMap(newIdMap)
     result
   }
 

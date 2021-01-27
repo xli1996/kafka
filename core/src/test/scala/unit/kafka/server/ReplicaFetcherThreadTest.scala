@@ -941,7 +941,7 @@ class ReplicaFetcherThreadTest {
     expect(partition.isAddingLocalReplica).andReturn(isReassigning)
 
     val replicaManager: ReplicaManager = createNiceMock(classOf[ReplicaManager])
-    expect(replicaManager.deferredOrOnlinePartition(anyObject[TopicPartition])).andReturn(Some(partition))
+    expect(replicaManager.onlinePartition(anyObject[TopicPartition])).andReturn(Some(partition))
     val brokerTopicStats = new BrokerTopicStats
     expect(replicaManager.brokerTopicStats).andReturn(brokerTopicStats).anyTimes()
 
@@ -977,11 +977,11 @@ class ReplicaFetcherThreadTest {
 
   def stub(partition: Partition, replicaManager: ReplicaManager, log: Log): Unit = {
     expect(replicaManager.localOnlineLogOrException(t1p0)).andReturn(log).anyTimes()
-    expect(replicaManager.deferredOrOnlinePartition(t1p0)).andReturn(Some(partition)).anyTimes()
+    expect(replicaManager.onlinePartition(t1p0)).andReturn(Some(partition)).anyTimes()
     expect(replicaManager.localOnlineLogOrException(t1p1)).andReturn(log).anyTimes()
-    expect(replicaManager.deferredOrOnlinePartition(t1p1)).andReturn(Some(partition)).anyTimes()
+    expect(replicaManager.onlinePartition(t1p1)).andReturn(Some(partition)).anyTimes()
     expect(replicaManager.localOnlineLogOrException(t2p1)).andReturn(log).anyTimes()
-    expect(replicaManager.deferredOrOnlinePartition(t2p1)).andReturn(Some(partition)).anyTimes()
+    expect(replicaManager.onlinePartition(t2p1)).andReturn(Some(partition)).anyTimes()
   }
 
   private def kafkaConfigNoTruncateOnFetch: KafkaConfig = {

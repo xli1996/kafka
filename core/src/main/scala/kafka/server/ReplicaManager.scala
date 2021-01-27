@@ -213,7 +213,8 @@ class ReplicaManager(val config: KafkaConfig,
                      val delayedElectLeaderPurgatory: DelayedOperationPurgatory[DelayedElectLeader],
                      threadNamePrefix: Option[String],
                      val configRepository: ConfigRepository,
-                     val alterIsrManager: AlterIsrManager)
+                     val alterIsrManager: AlterIsrManager,
+                     usingRaftMetadataQuorum: Boolean)
     extends Logging with KafkaMetricsGroup {
 
   def this(config: KafkaConfig,
@@ -229,7 +230,8 @@ class ReplicaManager(val config: KafkaConfig,
            logDirFailureChannel: LogDirFailureChannel,
            alterIsrManager: AlterIsrManager,
            configRepository: ConfigRepository,
-           threadNamePrefix: Option[String]) = {
+           threadNamePrefix: Option[String],
+           usingRaftMetadataQuorum: Boolean) = {
     this(config, metrics, time, zkClient, scheduler, logManager, isShuttingDown,
       quotaManagers, brokerTopicStats, metadataCache, logDirFailureChannel,
       DelayedOperationPurgatory[DelayedProduce](
@@ -243,7 +245,7 @@ class ReplicaManager(val config: KafkaConfig,
         purgeInterval = config.deleteRecordsPurgatoryPurgeIntervalRequests),
       DelayedOperationPurgatory[DelayedElectLeader](
         purgatoryName = "ElectLeader", brokerId = config.brokerId),
-      threadNamePrefix, configRepository, alterIsrManager)
+      threadNamePrefix, configRepository, alterIsrManager, usingRaftMetadataQuorum)
   }
 
   def this(config: KafkaConfig,
@@ -258,10 +260,11 @@ class ReplicaManager(val config: KafkaConfig,
            metadataCache: MetadataCache,
            logDirFailureChannel: LogDirFailureChannel,
            alterIsrManager: AlterIsrManager,
-           threadNamePrefix: Option[String] = None) = {
+           threadNamePrefix: Option[String] = None,
+           usingRaftMetadataQuorum: Boolean = false) = {
     this(config, metrics, time, Some(zkClient), scheduler, logManager, isShuttingDown,
       quotaManagers, brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager,
-      new ZkConfigRepository(new AdminZkClient(zkClient)), threadNamePrefix)
+      new ZkConfigRepository(new AdminZkClient(zkClient)), threadNamePrefix, usingRaftMetadataQuorum)
   }
 
   /* epoch of the controller that last changed the leader */
@@ -291,7 +294,7 @@ class ReplicaManager(val config: KafkaConfig,
   // Changes are initially deferrable when using a Raft-based metadata quorum, and may flip-flop thereafter;
   // changes are never deferrable when using ZooKeeper.  When true, this indicates that we should transition online
   // partitions to the deferred state if we see metadata with a different leader epoch.
-  @volatile private var changesDeferrable: Boolean = zkClient.isEmpty
+  @volatile private var changesDeferrable: Boolean = usingRaftMetadataQuorum
   stateChangeLogger.info(s"Metadata changes deferrable=$changesDeferrable")
 
   def deferrableMetadataChanges(): Unit = {
@@ -415,7 +418,7 @@ class ReplicaManager(val config: KafkaConfig,
       changesDeferrable = false
       stateChangeLogger.info(s"Applied ${leaderCount + partitionsToMakeFollowers.size} deferred partitions: " +
         s"$leaderCount leader(s) and ${partitionsToMakeFollowers.size} follower(s)")
-      stateChangeLogger.info("Metadata changes are no longer deferrable")
+      stateChangeLogger.info("Metadata changes are not deferrable")
     }
   }
 

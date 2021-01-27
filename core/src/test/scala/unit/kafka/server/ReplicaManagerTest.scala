@@ -1535,7 +1535,7 @@ class ReplicaManagerTest {
       new AtomicBoolean(false), quotaManager, mockBrokerTopicStats,
       metadataCache, mockLogDirFailureChannel, mockProducePurgatory, mockFetchPurgatory,
       mockDeleteRecordsPurgatory, mockElectLeaderPurgatory, Option(this.getClass.getName),
-      new ZkConfigRepository(new AdminZkClient(kafkaZkClient)), alterIsrManager) {
+      new ZkConfigRepository(new AdminZkClient(kafkaZkClient)), alterIsrManager, false) {
 
       override protected def createReplicaFetcherManager(metrics: Metrics,
                                                      time: Time,
@@ -1712,7 +1712,7 @@ class ReplicaManagerTest {
       new AtomicBoolean(false), quotaManager, new BrokerTopicStats,
       metadataCache, new LogDirFailureChannel(config.logDirs.size), mockProducePurgatory, mockFetchPurgatory,
       mockDeleteRecordsPurgatory, mockDelayedElectLeaderPurgatory, Option(this.getClass.getName),
-      new ZkConfigRepository(new AdminZkClient(kafkaZkClient)), alterIsrManager)
+      new ZkConfigRepository(new AdminZkClient(kafkaZkClient)), alterIsrManager, false)
   }
 
   @Test

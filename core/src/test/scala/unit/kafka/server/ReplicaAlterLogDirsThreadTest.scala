@@ -94,7 +94,7 @@ class ReplicaAlterLogDirsThreadTest {
     when(partition.partitionId).thenReturn(partitionId)
     when(replicaManager.futureLocalDeferredOrOnlineLogOrException(t1p0)).thenReturn(futureLog)
     when(replicaManager.futureLocalDeferredOrOnlineLogExists(t1p0)).thenReturn(true)
-    when(replicaManager.deferredOrOnlinePartition(t1p0)).thenReturn(Some(partition))
+    when(replicaManager.onlinePartition(t1p0)).thenReturn(Some(partition))
     when(replicaManager.onlinePartitionOrException(t1p0)).thenReturn(partition)
 
     when(quotaManager.isQuotaExceeded).thenReturn(false)

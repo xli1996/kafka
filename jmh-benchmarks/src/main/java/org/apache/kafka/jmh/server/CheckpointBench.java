@@ -139,7 +139,8 @@ public class CheckpointBench {
                 metadataCache,
                 this.failureChannel,
                 alterIsrManager,
-                Option.empty());
+                Option.empty(),
+                false);
         replicaManager.startup();
 
         List<TopicPartition> topicPartitions = new ArrayList<>();

@@ -17,8 +17,20 @@
 
 package org.apache.kafka.controller;
 
+import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
+import org.apache.kafka.common.message.BrokerRegistrationRequestData;
+import org.apache.kafka.common.message.BrokerRegistrationRequestData.Listener;
+import org.apache.kafka.common.message.BrokerRegistrationRequestData.ListenerCollection;
+import org.apache.kafka.common.message.CreateTopicsRequestData;
+import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
+import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCollection;
+import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
+import org.apache.kafka.controller.BrokersToIsrs.TopicPartition;
+import org.apache.kafka.metadata.BrokerHeartbeatReply;
+import org.apache.kafka.metadata.BrokerRegistrationReply;
 import org.apache.kafka.metalog.LocalLogManagerTestEnv;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -26,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -35,6 +48,7 @@ import static org.apache.kafka.controller.ConfigurationControlManagerTest.CONFIG
 import static org.apache.kafka.controller.ConfigurationControlManagerTest.entry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(value = 40)
 public class QuorumControllerTest {
@@ -111,5 +125,56 @@ public class QuorumControllerTest {
                 BROKER0, Collections.emptyList())).get());
         logEnv.logManagers().forEach(m -> m.setMaxReadOffset(1L));
         assertEquals(Collections.singletonMap(BROKER0, ApiError.NONE), future1.get());
+    }
+
+    @Test
+    public void testDecommissionBroker() throws Throwable {
+        try (LocalLogManagerTestEnv logEnv = new LocalLogManagerTestEnv(1)) {
+            try (QuorumControllerTestEnv controlEnv =
+                     new QuorumControllerTestEnv(logEnv, b -> b.setConfigDefs(CONFIGS))) {
+                ListenerCollection listeners = new ListenerCollection();
+                listeners.add(new Listener().setName("PLAINTEXT").
+                    setHost("localhost").setPort(9092));
+                QuorumController active = controlEnv.activeController();
+                CompletableFuture<BrokerRegistrationReply> reply = active.registerBroker(
+                    new BrokerRegistrationRequestData().
+                        setBrokerId(0).
+                        setClusterId(Uuid.fromString("06B-K3N1TBCNYFgruEVP0Q")).
+                        setIncarnationId(Uuid.fromString("kxAT73dKQsitIedpiPtwBA")).
+                        setListeners(listeners));
+                assertEquals(0L, reply.get().epoch());
+                CreateTopicsRequestData createTopicsRequestData =
+                    new CreateTopicsRequestData().setTopics(
+                        new CreatableTopicCollection(Collections.singleton(
+                            new CreatableTopic().setName("foo").setNumPartitions(1).
+                                setReplicationFactor((short) 1)).iterator()));
+                assertEquals(Errors.INVALID_REPLICATION_FACTOR.code(), active.createTopics(
+                    createTopicsRequestData).get().topics().find("foo").errorCode());
+                assertEquals(new BrokerHeartbeatReply(true, false, false),
+                    active.processBrokerHeartbeat(new BrokerHeartbeatRequestData().
+                            setWantFence(false).setBrokerEpoch(0L).setBrokerId(0).
+                            setCurrentMetadataOffset(100000L)).get());
+                assertEquals(Errors.NONE.code(), active.createTopics(
+                    createTopicsRequestData).get().topics().find("foo").errorCode());
+                CompletableFuture<TopicPartition> topicPartitionFuture = active.appendReadEvent(
+                    "debugGetPartition", () -> {
+                        Iterator<TopicPartition> iterator = active.
+                            replicationControl().brokersToIsrs().iterator(0, true);
+                        assertTrue(iterator.hasNext());
+                        return iterator.next();
+                    });
+                assertEquals(0, topicPartitionFuture.get().partitionId());
+                active.decommissionBroker(0).get();
+                topicPartitionFuture = active.appendReadEvent(
+                    "debugGetPartition", () -> {
+                        Iterator<TopicPartition> iterator = active.
+                            replicationControl().brokersToIsrs().noLeaderIterator();
+                        assertTrue(iterator.hasNext());
+                        return iterator.next();
+                    });
+                assertEquals(0, topicPartitionFuture.get().partitionId());
+            }
+        }
+        assertFalse(true);
     }
 }

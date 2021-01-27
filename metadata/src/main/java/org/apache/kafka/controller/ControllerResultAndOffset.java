@@ -19,7 +19,7 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -28,7 +28,7 @@ class ControllerResultAndOffset<T> extends ControllerResult<T> {
     private final long offset;
 
     public ControllerResultAndOffset(T response) {
-        super(Collections.emptyList(), response);
+        super(new ArrayList<>(), response);
         this.offset = -1;
     }
 

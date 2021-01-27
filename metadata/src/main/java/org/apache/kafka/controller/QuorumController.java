@@ -48,6 +48,7 @@ import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
 import org.apache.kafka.common.utils.EventQueue;
 import org.apache.kafka.common.utils.EventQueue.EarliestDeadlineFunction;
+import org.apache.kafka.common.utils.EventQueueClosedException;
 import org.apache.kafka.common.utils.KafkaEventQueue;
 import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.common.utils.Time;
@@ -62,6 +63,7 @@ import org.apache.kafka.metalog.MetaLogManager;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -305,7 +307,13 @@ public final class QuorumController implements Controller {
         }
     }
 
-    private <T> CompletableFuture<T> appendReadEvent(String name, Supplier<T> handler) {
+    // VisibleForTesting
+    ReplicationControlManager replicationControl() {
+        return replicationControl;
+    }
+
+    // VisibleForTesting
+    <T> CompletableFuture<T> appendReadEvent(String name, Supplier<T> handler) {
         ControllerReadEvent<T> event = new ControllerReadEvent<T>(name, handler);
         queue.append(event);
         return event.future();
@@ -378,7 +386,7 @@ public final class QuorumController implements Controller {
                     // If the purgatory is empty, there are no pending operations and no
                     // uncommitted state.  We can return immediately.
                     this.resultAndOffset = new ControllerResultAndOffset<>(-1,
-                        Collections.emptyList(), result.response());
+                        new ArrayList<>(), result.response());
                     log.debug("Completing read-only operation {} immediately because " +
                         "the purgatory is empty.", this);
                     complete(null);
@@ -523,6 +531,11 @@ public final class QuorumController implements Controller {
         ControllerWriteEvent<T> event = new ControllerWriteEvent<>(name, op);
         queue.scheduleDeferred(name, new EarliestDeadlineFunction(deadlineNs), event);
         event.future.exceptionally(e -> {
+            if (e instanceof UnknownServerException && e.getCause() != null &&
+                    e.getCause() instanceof EventQueueClosedException) {
+                log.error("Cancelling write event {} because the event queue is closed.", name);
+                return null;
+            }
             log.error("Unexpected exception while executing deferred write event {}. " +
                 "Rescheduling for a minute from now.", name, e);
             scheduleDeferredWriteEvent(name,
@@ -737,8 +750,11 @@ public final class QuorumController implements Controller {
 
     @Override
     public CompletableFuture<Void> decommissionBroker(int brokerId) {
-        return appendWriteEvent("decommissionBroker", () ->
-            clusterControl.decommissionBroker(brokerId));
+        return appendWriteEvent("decommissionBroker", () -> {
+            ControllerResult<Void> result = clusterControl.decommissionBroker(brokerId);
+            replicationControl.removeFromIsr(brokerId, result.records());
+            return result;
+        });
     }
 
     @Override

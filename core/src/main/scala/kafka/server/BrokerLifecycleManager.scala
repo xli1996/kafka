@@ -252,6 +252,9 @@ class BrokerLifecycleManager(val config: KafkaConfig,
         setIncarnationId(incarnationId).
         setListeners(_advertisedListeners).
         setRack(rack)
+    if (isTraceEnabled) {
+      trace(s"Sending broker registration ${data}")
+    }
     _channelManager.sendRequest(new BrokerRegistrationRequest.Builder(data),
       new BrokerRegistrationResponseHandler())
   }
@@ -300,6 +303,9 @@ class BrokerLifecycleManager(val config: KafkaConfig,
       setCurrentMetadataOffset(metadataOffset).
       setWantFence(!readyToUnfence).
       setWantShutDown(_state == BrokerState.PENDING_CONTROLLED_SHUTDOWN)
+    if (isTraceEnabled) {
+      trace(s"Sending broker heartbeat ${data}")
+    }
     _channelManager.sendRequest(new BrokerHeartbeatRequest.Builder(data),
       new BrokerHeartbeatResponseHandler())
   }

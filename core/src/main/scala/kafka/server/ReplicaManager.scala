@@ -32,7 +32,7 @@ import kafka.metrics.KafkaMetricsGroup
 import kafka.server.{FetchMetadata => SFetchMetadata}
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
-import kafka.server.metadata.{ConfigRepository, MetadataBroker, MetadataImageBuilder, MetadataPartition, MetadataPartitions, ZkConfigRepository}
+import kafka.server.metadata.{ConfigRepository, MetadataBroker, MetadataBrokers, MetadataImageBuilder, MetadataPartition, ZkConfigRepository}
 import kafka.utils._
 import kafka.utils.Implicits._
 import kafka.zk.{AdminZkClient, KafkaZkClient}
@@ -306,104 +306,59 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   def applyDeferredMetadataChanges(): Unit = {
+    val startMs = time.milliseconds()
     replicaStateChangeLock synchronized {
-      val traceLoggingEnabled = stateChangeLogger.isTraceEnabled
       stateChangeLogger.info(s"Applying deferred metadata changes")
-      stateChangeLogger.info(s"allPartitions=${allPartitions.toString()}")
       val highWatermarkCheckpoints = new LazyOffsetCheckpoints(this.highWatermarkCheckpoints)
-      val metadataImage = metadataCache.currentImage()
-      // all brokers, including both alive and not
-      val acceptableLeaderBrokerIds = metadataImage.brokers.iterator().map(broker => broker.id).toSet
-      val allBrokersByIdMap = metadataImage.brokers.iterator().map(broker => broker.id -> broker).toMap
       val partitionsMadeFollower = mutable.Set[Partition]()
       val partitionsMadeLeader = mutable.Set[Partition]()
       val leadershipChangeCallbacks =
         mutable.Map[(Iterable[Partition], Iterable[Partition]) => Unit, (mutable.Set[Partition], mutable.Set[Partition])]()
       try {
-        deferredPartitionsIterator.foreach { metadata =>
-          val state = metadata.metadata
-          val partition = metadata.partition
-          val topicPartition = partition.topicPartition
-          val mostRecentMetadataOffset = metadata.mostRecentMetadataOffset
-          val onLeadershipChange = metadata.onLeadershipChange
-          val wasNew = metadata.wasNew
-          val leader = state.leaderId == localBrokerId
-          val leaderOrFollower = if (leader) "leader" else "follower"
-          val partitionLogMsgPrefix = s"Apply deferred $leaderOrFollower partition $topicPartition last seen in metadata batch $mostRecentMetadataOffset"
-          try {
-            if (leader) {
-              val isrState = state.toLeaderAndIsrPartitionState(wasNew)
-              if (partition.makeLeader(isrState, highWatermarkCheckpoints)) {
-                partitionsMadeLeader += partition
-                leadershipChangeCallbacks.getOrElseUpdate(onLeadershipChange, (mutable.Set(), mutable.Set()))._1 += partition
-                if (traceLoggingEnabled) {
-                  stateChangeLogger.trace(s"$partitionLogMsgPrefix: completed the become-leader state change.")
-                }
-              } else {
-                stateChangeLogger.info(s"$partitionLogMsgPrefix: skipped the become-leader state change " +
-                  "since it is already the leader.")
-              }
-            } else {
-              // follower
-              if (!acceptableLeaderBrokerIds.contains(state.leaderId)) {
-                // The leader broker should always be present in the metadata cache.
-                // If not, we should record the error message and abort the transition process for this partition
-                stateChangeLogger.error(s"$partitionLogMsgPrefix: $topicPartition cannot become follower " +
-                  s"since the new leader ${state.leaderId} is unavailable.")
-                // Create the local replica even if the leader is unavailable. This is required to ensure that we include
-                // the partition's high watermark in the checkpoint file (see KAFKA-1647)
-                partition.createLogIfNotExists(wasNew, isFutureReplica = false, highWatermarkCheckpoints)
-              } else {
-                val isrState = state.toLeaderAndIsrPartitionState(wasNew)
-                if (partition.makeFollower(isrState, highWatermarkCheckpoints)) {
-                  partitionsMadeFollower += partition
-                  leadershipChangeCallbacks.getOrElseUpdate(onLeadershipChange, (mutable.Set(), mutable.Set()))._2 += partition
-                  if (traceLoggingEnabled) {
-                    stateChangeLogger.trace(s"$partitionLogMsgPrefix: completed the become-follower state change for $topicPartition with new leader ${state.leaderId}.")
-                  }
-                } else {
-                  stateChangeLogger.info(s"$partitionLogMsgPrefix: skipped the become-follower state change for $topicPartition " +
-                    s"since the new leader ${state.leaderId} is the same as the old leader.")
-                }
-              }
-            }
-            allPartitions.put(partition.topicPartition, HostedPartition.Online(partition))
-          } catch {
-            case e: KafkaStorageException =>
-              stateChangeLogger.error(s"$partitionLogMsgPrefix: unable to complete the become-leader state change " +
-                s"because the replica for the partition is offline due to disk error $e")
-              val dirOpt = getLogDir(partition.topicPartition)
-              error(s"Error while making broker the leader for partition $partition in dir $dirOpt", e)
-              markPartitionOffline(topicPartition)
-          }
-        }
-        if (partitionsMadeFollower.nonEmpty) {
-          replicaFetcherManager.removeFetcherForPartitions(partitionsMadeFollower.map(_.topicPartition))
-          stateChangeLogger.info(s"Apply deferred follower partitions: stopped followers for ${partitionsMadeFollower.size} partitions")
-
-          partitionsMadeFollower.foreach { partition =>
-            completeDelayedFetchOrProduceRequests(partition.topicPartition)
-          }
-          if (isShuttingDown.get()) {
-            if (traceLoggingEnabled) {
-              partitionsMadeFollower.foreach { partition =>
-                stateChangeLogger.trace(s"Apply deferred follower partitions: skipped the " +
-                  s"adding-fetcher step of the become-follower state for " +
-                  s"${partition.topicPartition} since we are shutting down.")
-              }
-            }
+        val leaderPartitionStates = mutable.Map[Partition, MetadataPartition]()
+        val followerPartitionStates = mutable.Map[Partition, MetadataPartition]()
+        val partitionsAlreadyExisting = mutable.Set[MetadataPartition]()
+        val mostRecentMetadataOffsets = mutable.Map[Partition, Long]()
+        deferredPartitionsIterator.foreach { deferredPartition =>
+          val state = deferredPartition.metadata
+          val partition = deferredPartition.partition
+          if (state.leaderId == localBrokerId) {
+            leaderPartitionStates.put(partition, state)
           } else {
-            // we do not need to check if the leader exists again since this has been done at the beginning of this process
-            val partitionsToMakeFollowerWithLeaderAndOffset = partitionsMadeFollower.map { partition =>
-              val leader = allBrokersByIdMap(partition.leaderReplicaIdOpt.get).brokerEndPoint(config.interBrokerListenerName)
-              val log = partition.localLogOrException
-              val fetchOffset = initialFetchOffset(log)
-              partition.topicPartition -> InitialFetchState(leader, partition.getLeaderEpoch, fetchOffset)
-            }.toMap
-
-            replicaFetcherManager.addFetcherForPartitions(partitionsToMakeFollowerWithLeaderAndOffset)
+            followerPartitionStates.put(partition, state)
           }
+          if (!deferredPartition.wasNew) {
+            partitionsAlreadyExisting += state
+          }
+          mostRecentMetadataOffsets.put(partition, deferredPartition.mostRecentMetadataOffset)
         }
+
+        val partitionsMadeLeader = makeLeaders(partitionsAlreadyExisting, leaderPartitionStates,
+          highWatermarkCheckpoints,-1, mostRecentMetadataOffsets)
+        val partitionsMadeFollower = makeFollowers(partitionsAlreadyExisting,
+          metadataCache.currentImage().brokers, followerPartitionStates,
+          highWatermarkCheckpoints, -1, mostRecentMetadataOffsets)
+
+        // We need to transition anything that hasn't transitioned from Deferred to Offline to the Online state.
+        // We also need to identify the leadership change callback(s) to invoke
+        deferredPartitionsIterator.foreach { deferredPartition =>
+          val state = deferredPartition.metadata
+          val partition = deferredPartition.partition
+          val topicPartition = partition.topicPartition
+          // identify for callback if necessary
+          if (state.leaderId == localBrokerId) {
+            if (partitionsMadeLeader.contains(partition)) {
+              leadershipChangeCallbacks.getOrElseUpdate(
+                deferredPartition.onLeadershipChange, (mutable.Set(), mutable.Set()))._1 += partition
+            }
+          } else if (partitionsMadeFollower.contains(partition)) {
+            leadershipChangeCallbacks.getOrElseUpdate(
+              deferredPartition.onLeadershipChange, (mutable.Set(), mutable.Set()))._2 += partition
+          }
+          // transition from Deferred to Online
+          allPartitions.put(topicPartition, HostedPartition.Online(partition))
+        }
+
         updateLeaderAndFollowerMetrics(partitionsMadeFollower.map(_.topic).toSet)
 
         maybeAddLogDirFetchers(partitionsMadeFollower, highWatermarkCheckpoints)
@@ -431,8 +386,11 @@ class ReplicaManager(val config: KafkaConfig,
           throw e
       }
       changesDeferrable = false
+      val endMs = time.milliseconds()
+      val elapsedMs = endMs - startMs
       stateChangeLogger.info(s"Applied ${partitionsMadeLeader.size + partitionsMadeFollower.size} deferred partitions: " +
-        s"${partitionsMadeLeader.size} leader(s) and ${partitionsMadeFollower.size} follower(s)")
+        s"${partitionsMadeLeader.size} leader(s) and ${partitionsMadeFollower.size} follower(s)" +
+        s"in $elapsedMs ms")
       stateChangeLogger.info("Metadata changes are not deferrable")
     }
   }
@@ -1851,7 +1809,6 @@ class ReplicaManager(val config: KafkaConfig,
       stateChangeLogger.info(("Metadata batch %d: %d local partition(s) changed, %d " +
         "local partition(s) removed.").format(metadataOffset, builder.localChanged().size,
           builder.localRemoved().size))
-      stateChangeLogger.info(s"allPartitions=${allPartitions.toString()}")
       if (stateChangeLogger.isTraceEnabled) {
         builder.localChanged().foreach { state =>
           stateChangeLogger.trace(s"Metadata batch $metadataOffset: locally changed: ${state}")
@@ -1895,14 +1852,20 @@ class ReplicaManager(val config: KafkaConfig,
           }
         }
       }
+      val prevPartitions = imageBuilder.prevImage.partitions
+      val changedPartitionsPreviouslyExisting = mutable.Set[MetadataPartition]()
+      builder.localChanged().foreach(metadataPartition =>
+        prevPartitions.get(metadataPartition.topicName, metadataPartition.partitionIndex).foreach(
+          changedPartitionsPreviouslyExisting.add))
+      val nextBrokers = imageBuilder.nextBrokers()
       val highWatermarkCheckpoints = new LazyOffsetCheckpoints(this.highWatermarkCheckpoints)
       val partitionsBecomeLeader = if (partitionsToBeLeader.nonEmpty)
-        makeLeaders(imageBuilder.prevImage.partitions, partitionsToBeLeader,
+        makeLeaders(changedPartitionsPreviouslyExisting, partitionsToBeLeader,
           highWatermarkCheckpoints, metadataOffset)
       else
         Set.empty[Partition]
       val partitionsBecomeFollower = if (partitionsToBeFollower.nonEmpty)
-        makeFollowers(imageBuilder, partitionsToBeFollower, highWatermarkCheckpoints,
+        makeFollowers(changedPartitionsPreviouslyExisting, nextBrokers, partitionsToBeFollower, highWatermarkCheckpoints,
           metadataOffset)
       else {
         Set.empty[Partition]
@@ -1953,7 +1916,6 @@ class ReplicaManager(val config: KafkaConfig,
     }
     val endMs = time.milliseconds()
     val elapsedMs = endMs - startMs
-    stateChangeLogger.info(s"allPartitions=${allPartitions.toString()}")
     stateChangeLogger.info(s"Metadata batch $metadataOffset: handled replica changes " +
       s"in ${elapsedMs} ms")
   }
@@ -1987,53 +1949,58 @@ class ReplicaManager(val config: KafkaConfig,
       replicaAlterLogDirsManager.addFetcherForPartitions(futureReplicasAndInitialOffset)
   }
 
-  private def makeLeaders(prevPartitions: MetadataPartitions,
+  private def makeLeaders(prevPartitionsAlreadyExisting: Set[MetadataPartition],
                           partitionStates: Map[Partition, MetadataPartition],
                           highWatermarkCheckpoints: OffsetCheckpoints,
-                          metadataOffset: Long): Set[Partition] = {
-    val partitionsToMakeLeaders = mutable.Set[Partition]()
+                          defaultMetadataOffset: Long,
+                          metadataOffsets: Map[Partition, Long] = Map.empty): Set[Partition] = {
+    val partitionsMadeLeaders = mutable.Set[Partition]()
+    val traceLoggingEnabled = stateChangeLogger.isTraceEnabled
+    val deferredBatches = metadataOffsets.nonEmpty
+    val topLevelLogPrefix = if (deferredBatches)
+      "Metadata batch <multiple deferred>"
+    else
+      s"Metadata batch $defaultMetadataOffset"
     try {
       // First stop fetchers for all the partitions
       replicaFetcherManager.removeFetcherForPartitions(partitionStates.keySet.map(_.topicPartition))
-      stateChangeLogger.info(s"Metadata batch $metadataOffset: stopped " +
-        s"${partitionStates.size} fetcher(s)")
+      stateChangeLogger.info(s"$topLevelLogPrefix: stopped ${partitionStates.size} fetcher(s)")
       // Update the partition information to be the leader
       partitionStates.forKeyValue { (partition, state) =>
+        val metadataOffset = metadataOffsets.getOrElse(partition, defaultMetadataOffset)
+        val topicPartition = partition.topicPartition
+        val partitionLogMsgPrefix = if (deferredBatches)
+          s"Apply deferred leader partition $topicPartition last seen in metadata batch $metadataOffset"
+        else
+          s"Metadata batch $metadataOffset $topicPartition"
         try {
           val isrState = state.toLeaderAndIsrPartitionState(
-            prevPartitions.get(state.topicName, state.partitionIndex).isEmpty)
+            !prevPartitionsAlreadyExisting(state))
           if (partition.makeLeader(isrState, highWatermarkCheckpoints)) {
-            partitionsToMakeLeaders += partition
+            partitionsMadeLeaders += partition
+            if (traceLoggingEnabled) {
+              stateChangeLogger.trace(s"$partitionLogMsgPrefix: completed the become-leader state change.")
+            }
           } else {
-            stateChangeLogger.info(s"Metadata batch $metadataOffset: skipped the " +
-              s"become-leader state change for ${partition.topicPartition} since it " +
-              "is already the leader.")
+            stateChangeLogger.info(s"$partitionLogMsgPrefix: skipped the " +
+              "become-leader state change since it is already the leader.")
           }
         } catch {
           case e: KafkaStorageException =>
-            stateChangeLogger.error(s"Metadata batch $metadataOffset: unable to make " +
-              s"${state.toTopicPartition()}) a leader because the replica for the " +
-              s"partition is offline due to disk error $e")
-            val dirOpt = getLogDir(partition.topicPartition)
+            stateChangeLogger.error(s"$partitionLogMsgPrefix: unable to make " +
+              s"leader because the replica for the partition is offline due to disk error $e")
+            val dirOpt = getLogDir(topicPartition)
             error(s"Error while making broker the leader for partition $partition in dir $dirOpt", e)
+            markPartitionOffline(topicPartition)
         }
       }
     } catch {
       case e: Throwable =>
-        partitionStates.keys.foreach { partition =>
-          stateChangeLogger.error(s"Metadata batch $metadataOffset: error while " +
-            "processing batch.", e)
-        }
+          stateChangeLogger.error(s"$topLevelLogPrefix: error while processing batch.", e)
         // Re-throw the exception for it to be caught in BrokerMetadataListener
         throw e
     }
-    if (stateChangeLogger.isTraceEnabled) {
-      partitionStates.keys.foreach { partition =>
-        stateChangeLogger.trace(s"Completed batch $metadataOffset become-leader " +
-          s"transition for partition ${partition.topicPartition}")
-      }
-    }
-    partitionsToMakeLeaders
+    partitionsMadeLeaders
   }
 
   /*
@@ -2113,101 +2080,133 @@ class ReplicaManager(val config: KafkaConfig,
     partitionsToMakeLeaders
   }
 
-  private def makeFollowers(builder: MetadataImageBuilder,
+  private def makeFollowers(prevPartitionsAlreadyExisting: Set[MetadataPartition],
+                            currentBrokers: MetadataBrokers,
                             partitionStates: Map[Partition, MetadataPartition],
                             highWatermarkCheckpoints: OffsetCheckpoints,
-                            metadataOffset: Long): Set[Partition] = {
+                            defaultMetadataOffset: Long,
+                            metadataOffsets: Map[Partition, Long] = Map.empty): Set[Partition] = {
     val traceLoggingEnabled = stateChangeLogger.isTraceEnabled
-    if (traceLoggingEnabled)
+    val deferredBatches = metadataOffsets.nonEmpty
+    val topLevelLogPrefix = if (deferredBatches)
+      "Metadata batch <multiple deferred>"
+    else
+      s"Metadata batch $defaultMetadataOffset"
+    if (traceLoggingEnabled) {
       partitionStates.forKeyValue { (partition, state) =>
-        stateChangeLogger.trace(s"Metadata batch $metadataOffset: starting the " +
-          s"become-follower transition for partition ${partition.topicPartition} with leader " +
-          s"${state.leaderId}")
+        val metadataOffset = metadataOffsets.getOrElse(partition, defaultMetadataOffset)
+        val topicPartition = partition.topicPartition
+        val partitionLogMsgPrefix = if (deferredBatches)
+          s"Apply deferred follower partition $topicPartition last seen in metadata batch $metadataOffset"
+        else
+          s"Metadata batch $metadataOffset $topicPartition"
+        stateChangeLogger.trace(s"$partitionLogMsgPrefix: starting the " +
+          s"become-follower transition with leader ${state.leaderId}")
+      }
     }
 
-    val partitionsToMakeFollower: mutable.Set[Partition] = mutable.Set()
-    val prevPartitions = builder.prevImage.partitions
+    val partitionsMadeFollower: mutable.Set[Partition] = mutable.Set()
+    // all brokers, including both alive and not
+    val acceptableLeaderBrokerIds = currentBrokers.iterator().map(broker => broker.id).toSet
+    val allBrokersByIdMap = currentBrokers.iterator().map(broker => broker.id -> broker).toMap
     try {
       partitionStates.forKeyValue { (partition, state) =>
-        val tp = partition.topicPartition
+        val metadataOffset = metadataOffsets.getOrElse(partition, defaultMetadataOffset)
+        val topicPartition = partition.topicPartition
+        val partitionLogMsgPrefix = if (deferredBatches)
+          s"Apply deferred follower partition $topicPartition last seen in metadata batch $metadataOffset"
+        else
+          s"Metadata batch $metadataOffset $topicPartition"
         try {
-          val isNew = prevPartitions.get(state.topicName, state.partitionIndex).isEmpty
-          builder.broker(state.leaderId) match {
-            // Only change partition state when the leader is available
-            case Some(_) =>
-              val isrState = state.toLeaderAndIsrPartitionState(isNew)
-              if (partition.makeFollower(isrState, highWatermarkCheckpoints))
-                partitionsToMakeFollower += partition
-              else
-                stateChangeLogger.info(s"Metadata batch $metadataOffset: skipped the " +
-                  s"become-follower state change for ${tp} since " +
-                  s"the new leader ${state.leaderId} is the same as the old leader.")
-            case None =>
-              // The leader broker should always be present in the metadata cache.
-              // If not, we should record the error message and abort the transition process for this partition
-              stateChangeLogger.error(s"Metadata batch $metadataOffset: " +
-                s"${partition.topicPartition} cannot become follower since the new " +
-                s"leader ${state.leaderId} is unavailable.")
-              // Create the local replica even if the leader is unavailable. This is required to ensure that we include
-              // the partition's high watermark in the checkpoint file (see KAFKA-1647)
-              partition.createLogIfNotExists(isNew, isFutureReplica = false,
-                highWatermarkCheckpoints)
+          val isNew = !prevPartitionsAlreadyExisting(state)
+          if (!acceptableLeaderBrokerIds.contains(state.leaderId)) {
+            // The leader broker should always be present in the metadata cache.
+            // If not, we should record the error message and abort the transition process for this partition
+            stateChangeLogger.error(s"$partitionLogMsgPrefix: cannot become follower " +
+              s"since the new leader ${state.leaderId} is unavailable.")
+            // Create the local replica even if the leader is unavailable. This is required to ensure that we include
+            // the partition's high watermark in the checkpoint file (see KAFKA-1647)
+            partition.createLogIfNotExists(isNew, isFutureReplica = false, highWatermarkCheckpoints)
+          } else {
+            val isrState = state.toLeaderAndIsrPartitionState(isNew)
+            if (partition.makeFollower(isrState, highWatermarkCheckpoints)) {
+              partitionsMadeFollower += partition
+              if (traceLoggingEnabled) {
+                stateChangeLogger.trace(s"$partitionLogMsgPrefix: completed the " +
+                  s"become-follower state change with new leader ${state.leaderId}.")
+              }
+            } else {
+              stateChangeLogger.info(s"$partitionLogMsgPrefix: skipped the " +
+                s"become-follower state change since " +
+                s"the new leader ${state.leaderId} is the same as the old leader.")
+            }
           }
         } catch {
           case e: KafkaStorageException =>
-            stateChangeLogger.error(s"Metadata batch $metadataOffset: skipped the " +
-              s"become-follower state change for ${partition.topicPartition} since the " +
-              s"replia for the partition is offline due to disk error $e")
+            stateChangeLogger.error(s"$partitionLogMsgPrefix: unable to complete the " +
+              s"become-follower state change since the " +
+              s"replica for the partition is offline due to disk error $e")
             val dirOpt = getLogDir(partition.topicPartition)
-            error(s"Error while making broker the follower for partition ${partition.topicPartition} with leader " +
-              s"${state.leaderId} in dir $dirOpt", e)
+            error(s"Error while making broker the follower with leader ${state.leaderId} in dir $dirOpt", e)
+            markPartitionOffline(topicPartition)
         }
       }
 
-      replicaFetcherManager.removeFetcherForPartitions(partitionsToMakeFollower.map(_.topicPartition))
-      stateChangeLogger.info(s"Metadata batch $metadataOffset: as part of become-follower request, " +
-        s"stopped followers for ${partitionsToMakeFollower.size} partitions")
+      if (partitionsMadeFollower.nonEmpty) {
+        replicaFetcherManager.removeFetcherForPartitions(partitionsMadeFollower.map(_.topicPartition))
+        stateChangeLogger.info(s"$topLevelLogPrefix: stopped followers for ${partitionsMadeFollower.size} partitions")
 
-      partitionsToMakeFollower.foreach { partition =>
-        completeDelayedFetchOrProduceRequests(partition.topicPartition)
-      }
+        partitionsMadeFollower.foreach { partition =>
+          completeDelayedFetchOrProduceRequests(partition.topicPartition)
+        }
 
-      if (isShuttingDown.get()) {
-        if (traceLoggingEnabled) {
-          partitionsToMakeFollower.foreach { partition =>
-            stateChangeLogger.trace(s"Metadata batch $metadataOffset: skipped the " +
-              s"adding-fetcher step of the become-follower state for " +
-              s"${partition.topicPartition} with leader ${partitionStates(partition).leaderId} " +
-              "since we are shutting down.")
+        if (isShuttingDown.get()) {
+          if (traceLoggingEnabled) {
+            partitionsMadeFollower.foreach { partition =>
+              val metadataOffset = metadataOffsets.getOrElse(partition, defaultMetadataOffset)
+              val topicPartition = partition.topicPartition
+              val partitionLogMsgPrefix = if (deferredBatches)
+                s"Apply deferred follower partition $topicPartition last seen in metadata batch $metadataOffset"
+              else
+                s"Metadata batch $metadataOffset $topicPartition"
+              stateChangeLogger.trace(s"$partitionLogMsgPrefix: skipped the " +
+                s"adding-fetcher step of the become-follower state for " +
+                s"$topicPartition since we are shutting down.")
+            }
           }
-        }
-      } else {
-        // we do not need to check if the leader exists again since this has been done at the beginning of this process
-        val partitionsToMakeFollowerWithLeaderAndOffset = partitionsToMakeFollower.map { partition =>
-          val leader = builder.broker(partition.leaderReplicaIdOpt.get).get.
-            brokerEndPoint(config.interBrokerListenerName)
-          val log = partition.localLogOrException
-          val fetchOffset = initialFetchOffset(log)
-          partition.topicPartition -> InitialFetchState(leader, partition.getLeaderEpoch, fetchOffset)
-        }.toMap
+        } else {
+          // we do not need to check if the leader exists again since this has been done at the beginning of this process
+          val partitionsToMakeFollowerWithLeaderAndOffset = partitionsMadeFollower.map { partition =>
+            val leader = allBrokersByIdMap(partition.leaderReplicaIdOpt.get).brokerEndPoint(config.interBrokerListenerName)
+            val log = partition.localLogOrException
+            val fetchOffset = initialFetchOffset(log)
+            partition.topicPartition -> InitialFetchState(leader, partition.getLeaderEpoch, fetchOffset)
+          }.toMap
 
-        replicaFetcherManager.addFetcherForPartitions(partitionsToMakeFollowerWithLeaderAndOffset)
+          replicaFetcherManager.addFetcherForPartitions(partitionsToMakeFollowerWithLeaderAndOffset)
+        }
       }
     } catch {
       case e: Throwable =>
-        stateChangeLogger.error(s"Metadata batch $metadataOffset: error while processing batch", e)
+        stateChangeLogger.error(s"$topLevelLogPrefix: error while processing batch", e)
         // Re-throw the exception for it to be caught in BrokerMetadataListener
         throw e
     }
 
     if (traceLoggingEnabled)
-      partitionStates.keys.foreach { partition =>
-        stateChangeLogger.trace(s"Completed batch $metadataOffset become-follower " +
-          s"transition for partition ${partition.topicPartition} with new leader " +
-          s"${partitionStates(partition).leaderId}")
+      partitionsMadeFollower.foreach { partition =>
+        val metadataOffset = metadataOffsets.getOrElse(partition, defaultMetadataOffset)
+        val topicPartition = partition.topicPartition
+        val partitionLogMsgPrefix = if (deferredBatches)
+          s"Apply deferred follower partition $topicPartition last seen in metadata batch $metadataOffset"
+        else
+          s"Metadata batch $metadataOffset $topicPartition"
+        val state = partitionStates(partition)
+        stateChangeLogger.trace(s"$partitionLogMsgPrefix: completed become-follower " +
+          s"transition for partition $topicPartition with new leader ${state.leaderId}")
       }
 
-    partitionsToMakeFollower
+    partitionsMadeFollower
   }
 
   def makeDeferred(builder: MetadataImageBuilder,

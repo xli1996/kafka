@@ -175,6 +175,5 @@ public class QuorumControllerTest {
                 assertEquals(0, topicPartitionFuture.get().partitionId());
             }
         }
-        assertFalse(true);
     }
 }

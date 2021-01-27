@@ -273,8 +273,10 @@ class BrokerToControllerRequestThread(val networkClient: KafkaClient,
               request.request, handleResponse(curController.get, request))
         }
         sendableRequests.clear()
-        debug(s"sending request(s): " +
-          requestsToSend.map(r => r.request.apiKey()).mkString(", ") + ".")
+        if (isDebugEnabled) {
+          debug(s"sending request(s): " +
+            requestsToSend.map(r => r.request).mkString(", ") + ".")
+        }
         (requestsToSend, Long.MaxValue)
       }
     }

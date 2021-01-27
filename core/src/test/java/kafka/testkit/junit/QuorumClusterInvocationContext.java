@@ -1,5 +1,6 @@
 package kafka.testkit.junit;
 
+import integration.kafka.server.IntegrationTestHelper;
 import kafka.network.SocketServer;
 import kafka.server.Kip500Broker;
 import kafka.server.Kip500Controller;
@@ -47,37 +48,37 @@ public class QuorumClusterInvocationContext implements TestTemplateInvocationCon
     @Override
     public String getDisplayName(int invocationIndex) {
         String clusterDesc = clusterConfig.nameTags().entrySet().stream()
-                .map(Object::toString)
-                .collect(Collectors.joining(", "));
+            .map(Object::toString)
+            .collect(Collectors.joining(", "));
         return String.format("[Quorum %d] %s", invocationIndex, clusterDesc);
     }
 
     @Override
     public List<Extension> getAdditionalExtensions() {
         return Arrays.asList(
-                (BeforeTestExecutionCallback) context -> {
-                    KafkaClusterTestKit.Builder builder = new KafkaClusterTestKit.Builder(
-                            new TestKitNodes.Builder().
-                                    setNumKip500BrokerNodes(clusterConfig.brokers()).
-                                    setNumControllerNodes(clusterConfig.controllers()).build());
+            (BeforeTestExecutionCallback) context -> {
+                KafkaClusterTestKit.Builder builder = new KafkaClusterTestKit.Builder(
+                    new TestKitNodes.Builder().
+                        setNumKip500BrokerNodes(clusterConfig.brokers()).
+                        setNumControllerNodes(clusterConfig.controllers()).build());
 
-                    // Copy properties into the TestKit builder
-                    clusterConfig.serverProperties().forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
-                    // TODO how to pass down security protocol and listener name?
-                    KafkaClusterTestKit cluster = builder.build();
-                    clusterReference.set(cluster);
-                    cluster.format();
-                    cluster.startup();
-                    kafka.utils.TestUtils.waitUntilTrue(
-                            () -> cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
-                            () -> "Broker never made it to RUNNING state.",
-                            org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
-                            100L);
-                },
-                (AfterTestExecutionCallback) context -> clusterReference.get().close(),
-                new ClusterInstanceParameterResolver(new QuorumClusterInstance(clusterReference, clusterConfig)),
-                new ClusterConfigParameterResolver(clusterConfig),
-                new IntegrationTestHelperParameterResolver()
+                // Copy properties into the TestKit builder
+                clusterConfig.serverProperties().forEach((key, value) -> builder.setConfigProp(key.toString(), value.toString()));
+                // TODO how to pass down security protocol and listener name?
+                KafkaClusterTestKit cluster = builder.build();
+                clusterReference.set(cluster);
+                cluster.format();
+                cluster.startup();
+                kafka.utils.TestUtils.waitUntilTrue(
+                    () -> cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
+                    () -> "Broker never made it to RUNNING state.",
+                    org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
+                    100L);
+            },
+            (AfterTestExecutionCallback) context -> clusterReference.get().close(),
+            new ClusterInstanceParameterResolver(new QuorumClusterInstance(clusterReference, clusterConfig)),
+            new GenericParameterResolver<>(clusterConfig, ClusterConfig.class),
+            new GenericParameterResolver<>(new IntegrationTestHelper(), IntegrationTestHelper.class)
         );
     }
 

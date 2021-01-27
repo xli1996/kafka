@@ -1,12 +1,11 @@
 package kafka.testkit.junit;
 
+import integration.kafka.server.IntegrationTestHelper;
 import kafka.api.IntegrationTestHarness;
 import kafka.network.SocketServer;
 import kafka.server.LegacyBroker;
 import kafka.utils.TestUtils;
-import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.Admin;
-import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.common.security.auth.SecurityProtocol;
 import org.apache.kafka.metadata.BrokerState;
@@ -15,7 +14,7 @@ import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
 import org.junit.jupiter.api.extension.Extension;
 import org.junit.jupiter.api.extension.TestTemplateInvocationContext;
 import scala.Option;
-import scala.jdk.javaapi.CollectionConverters;
+import scala.collection.JavaConverters;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -50,64 +49,64 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
     @Override
     public String getDisplayName(int invocationIndex) {
         String clusterDesc = clusterConfig.nameTags().entrySet().stream()
-                .map(Object::toString)
-                .collect(Collectors.joining(", "));
+            .map(Object::toString)
+            .collect(Collectors.joining(", "));
         return String.format("[Legacy %d] %s", invocationIndex, clusterDesc);
     }
 
     @Override
     public List<Extension> getAdditionalExtensions() {
         return Arrays.asList(
-                (BeforeTestExecutionCallback) context -> {
-                    // We have to wait to actually create the underlying cluster until after our @BeforeEach methods
-                    // have run. This allows tests to set up external dependencies like ZK, MiniKDC, etc.
-                    // However, since we cannot create this instance until we are inside the test invocation, we have
-                    // to use a container class (AtomicReference) to provide this cluster object to the test itself
+            (BeforeTestExecutionCallback) context -> {
+                // We have to wait to actually create the underlying cluster until after our @BeforeEach methods
+                // have run. This allows tests to set up external dependencies like ZK, MiniKDC, etc.
+                // However, since we cannot create this instance until we are inside the test invocation, we have
+                // to use a container class (AtomicReference) to provide this cluster object to the test itself
 
-                    IntegrationTestHarness cluster = new IntegrationTestHarness() { // extends KafkaServerTestHarness
-                        @Override
-                        public SecurityProtocol securityProtocol() {
-                            return SecurityProtocol.forName(clusterConfig.securityProtocol());
-                        }
+                IntegrationTestHarness cluster = new IntegrationTestHarness() { // extends KafkaServerTestHarness
+                    @Override
+                    public SecurityProtocol securityProtocol() {
+                        return SecurityProtocol.forName(clusterConfig.securityProtocol());
+                    }
 
-                        @Override
-                        public ListenerName listenerName() {
-                            return clusterConfig.listenerName().map(ListenerName::normalised)
-                                .orElseGet(() -> ListenerName.forSecurityProtocol(securityProtocol()));
-                        }
+                    @Override
+                    public ListenerName listenerName() {
+                        return clusterConfig.listenerName().map(ListenerName::normalised)
+                            .orElseGet(() -> ListenerName.forSecurityProtocol(securityProtocol()));
+                    }
 
-                        @Override
-                        public Option<Properties> serverSaslProperties() {
-                            return Option.apply(clusterConfig.serverProperties());
-                        }
+                    @Override
+                    public Option<Properties> serverSaslProperties() {
+                        return Option.apply(clusterConfig.serverProperties());
+                    }
 
-                        @Override
-                        public Option<Properties> clientSaslProperties() {
-                            // TODO add this to ClusterConfig
-                            return super.clientSaslProperties();
-                        }
+                    @Override
+                    public Option<Properties> clientSaslProperties() {
+                        // TODO add this to ClusterConfig
+                        return super.clientSaslProperties();
+                    }
 
-                        @Override
-                        public int brokerCount() {
-                            // Brokers and controllers are the same in legacy mode, so just use the max
-                            return Math.max(clusterConfig.brokers(), clusterConfig.controllers());
-                        }
-                    };
-                    cluster.adminClientConfig().putAll(clusterConfig.adminClientProperties());
-                    // TODO consumer and producer configs
-                    clusterReference.set(cluster);
-                    clusterReference.get().setUp();
+                    @Override
+                    public int brokerCount() {
+                        // Brokers and controllers are the same in legacy mode, so just use the max
+                        return Math.max(clusterConfig.brokers(), clusterConfig.controllers());
+                    }
+                };
+                cluster.adminClientConfig().putAll(clusterConfig.adminClientProperties());
+                // TODO consumer and producer configs
+                clusterReference.set(cluster);
+                clusterReference.get().setUp();
 
-                    kafka.utils.TestUtils.waitUntilTrue(
-                            () -> CollectionConverters.asJava(clusterReference.get().servers()).get(0).currentState() == BrokerState.RUNNING,
-                            () -> "Broker never made it to RUNNING state.",
-                            org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
-                            100L);
-                },
-                (AfterTestExecutionCallback) context -> clusterReference.get().tearDown(),
-                new ClusterInstanceParameterResolver(new LegacyClusterInstance(clusterConfig, clusterReference)),
-                new ClusterConfigParameterResolver(clusterConfig),
-                new IntegrationTestHelperParameterResolver()
+                kafka.utils.TestUtils.waitUntilTrue(
+                    () -> clusterReference.get().servers().head().currentState() == BrokerState.RUNNING,
+                    () -> "Broker never made it to RUNNING state.",
+                    org.apache.kafka.test.TestUtils.DEFAULT_MAX_WAIT_MS,
+                    100L);
+            },
+            (AfterTestExecutionCallback) context -> clusterReference.get().tearDown(),
+            new ClusterInstanceParameterResolver(new LegacyClusterInstance(clusterConfig, clusterReference)),
+            new GenericParameterResolver<>(clusterConfig, ClusterConfig.class),
+            new GenericParameterResolver<>(new IntegrationTestHelper(), IntegrationTestHelper.class)
         );
     }
 
@@ -128,7 +127,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
 
         @Override
         public Collection<SocketServer> brokers() {
-            return CollectionConverters.asJava(clusterReference.get().servers()).stream()
+            return JavaConverters.asJavaCollection(clusterReference.get().servers()).stream()
                     .map(LegacyBroker::socketServer)
                     .collect(Collectors.toList());
         }
@@ -140,7 +139,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
 
         @Override
         public Collection<SocketServer> controllers() {
-            return CollectionConverters.asJava(clusterReference.get().servers()).stream()
+            return JavaConverters.asJavaCollection(clusterReference.get().servers()).stream()
                 .filter(broker -> broker.legacyController().isDefined())
                 .map(LegacyBroker::socketServer)
                 .collect(Collectors.toList());
@@ -148,7 +147,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
 
         @Override
         public Optional<SocketServer> anyBroker() {
-            return CollectionConverters.asJava(clusterReference.get().servers()).stream()
+            return JavaConverters.asJavaCollection(clusterReference.get().servers()).stream()
                 .filter(broker -> broker.currentState() != BrokerState.NOT_RUNNING && broker.currentState() != BrokerState.SHUTTING_DOWN)
                 .map(LegacyBroker::socketServer)
                 .findFirst();
@@ -156,7 +155,7 @@ public class LegacyClusterInvocationContext implements TestTemplateInvocationCon
 
         @Override
         public Optional<SocketServer> anyController() {
-            return CollectionConverters.asJava(clusterReference.get().servers()).stream()
+            return JavaConverters.asJavaCollection(clusterReference.get().servers()).stream()
                 .filter(broker -> broker.currentState() != BrokerState.NOT_RUNNING && broker.currentState() != BrokerState.SHUTTING_DOWN)
                 .filter(broker -> broker.kafkaController().isActive())
                 .map(LegacyBroker::socketServer)

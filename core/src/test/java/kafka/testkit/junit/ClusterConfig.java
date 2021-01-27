@@ -15,7 +15,8 @@ public class ClusterConfig {
     public enum Type {
         Raft,
         Zk,
-        Both
+        Both,
+        Default
     }
 
     private final Type type;
@@ -93,7 +94,7 @@ public class ClusterConfig {
     }
 
     public static Builder defaultClusterBuilder() {
-        return new Builder(Type.Raft, 1, 1, SecurityProtocol.PLAINTEXT.name);
+        return new Builder(Type.Zk, 1, 1, SecurityProtocol.PLAINTEXT.name);
     }
 
     public static Builder clusterBuilder(Type type, int brokers, int controllers, String securityProtocol) {

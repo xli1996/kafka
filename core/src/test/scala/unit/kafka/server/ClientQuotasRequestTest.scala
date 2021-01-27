@@ -45,7 +45,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
   private val RequestPercentageProp = QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG
   private val IpConnectionRateProp = QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testAlterClientQuotasRequest(): Unit = {
 
     val entity = new ClientQuotaEntity(Map((ClientQuotaEntity.USER -> "user"), (ClientQuotaEntity.CLIENT_ID -> "client-id")).asJava)
@@ -115,7 +115,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     ))
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testAlterClientQuotasRequestValidateOnly(): Unit = {
     val entity = new ClientQuotaEntity(Map((ClientQuotaEntity.USER -> "user")).asJava)
 
@@ -173,7 +173,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     ))
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testClientQuotasForScramUsers(): Unit = {
     val userName = "user"
 
@@ -196,7 +196,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     ))
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testAlterIpQuotasRequest(): Unit = {
     val knownHost = "1.2.3.4"
     val unknownHost = "2.3.4.5"
@@ -385,7 +385,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     }
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testDescribeClientQuotasMatchPartial(): Unit = {
     setupDescribeClientQuotasMatchTest()
 
@@ -492,13 +492,13 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     testMatchEntities(ClientQuotaFilter.containsOnly(List.empty.asJava), 0, entity => false)
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testClientQuotasUnsupportedEntityTypes(): Unit = {
     val entity = new ClientQuotaEntity(Map(("other" -> "name")).asJava)
     assertThrows(classOf[UnsupportedVersionException], () => verifyDescribeEntityQuotas(entity, Map.empty))
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testClientQuotasSanitized(): Unit = {
     // An entity with name that must be sanitized when writing to Zookeeper.
     val entity = new ClientQuotaEntity(Map((ClientQuotaEntity.USER -> "user with spaces")).asJava)
@@ -512,7 +512,7 @@ class ClientQuotasRequestTest(cluster: ClusterInstance,
     ))
   }
 
-  @ClusterTest(clusterType = Type.Zk)
+  @ClusterTest
   def testClientQuotasWithDefaultName(): Unit = {
     // An entity using the name associated with the default entity name. The entity's name should be sanitized so
     // that it does not conflict with the default entity name.

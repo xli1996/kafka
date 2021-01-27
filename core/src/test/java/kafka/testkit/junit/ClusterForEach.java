@@ -63,8 +63,7 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
 
     @Override
     public Stream<TestTemplateInvocationContext> provideTestTemplateInvocationContexts(ExtensionContext context) {
-        Optional<ClusterTestDefaults> defaults = Optional.ofNullable(context.getRequiredTestClass().getDeclaredAnnotation(ClusterTestDefaults.class));
-
+        ClusterTestDefaults defaults = getClusterTestDefaults(context.getRequiredTestClass());
         List<TestTemplateInvocationContext> generatedContexts = new ArrayList<>();
 
         // Process the @ClusterTemplate annotation
@@ -79,14 +78,14 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         // Process single @ClusterTest annotation
         ClusterTest clusterTestAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTest.class);
         if (clusterTestAnnot != null) {
-            processClusterTest(context, clusterTestAnnot, defaults, generatedContexts::add);
+            processClusterTest(clusterTestAnnot, defaults, generatedContexts::add);
         }
 
         // Process multiple @ClusterTest annotation within @ClusterTests
         ClusterTests clusterTestsAnnot = context.getRequiredTestMethod().getDeclaredAnnotation(ClusterTests.class);
         if (clusterTestsAnnot != null) {
             for (ClusterTest annot : clusterTestsAnnot.value()) {
-                processClusterTest(context, annot, defaults, generatedContexts::add);
+                processClusterTest(annot, defaults, generatedContexts::add);
             }
         }
 
@@ -97,7 +96,8 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         return generatedContexts.stream();
     }
 
-    private void processClusterTemplate(ExtensionContext context, ClusterTemplate annot, Consumer<TestTemplateInvocationContext> testInvocations) {
+    private void processClusterTemplate(ExtensionContext context, ClusterTemplate annot,
+                                        Consumer<TestTemplateInvocationContext> testInvocations) {
         // If specified, call cluster config generated method (must be static)
         List<ClusterConfig> generatedClusterConfigs = new ArrayList<>();
         if (!annot.value().isEmpty()) {
@@ -127,14 +127,32 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
         ReflectionUtils.invokeMethod(method, testInstance, generator);
     }
 
-    private void processClusterTest(
-            ExtensionContext context,
-            ClusterTest annot,
-            Optional<ClusterTestDefaults> defaults,
-            Consumer<TestTemplateInvocationContext> testInvocations) {
-        int brokers = defaults.map(ClusterTestDefaults::brokers).orElse(annot.brokers());
-        int controllers = defaults.map(ClusterTestDefaults::controllers).orElse(annot.controllers());
-        ClusterConfig.Type type = defaults.map(ClusterTestDefaults::clusterType).orElse(annot.clusterType());
+    private void processClusterTest(ClusterTest annot, ClusterTestDefaults defaults,
+                                    Consumer<TestTemplateInvocationContext> testInvocations) {
+        final ClusterConfig.Type type;
+        if (annot.clusterType() == ClusterConfig.Type.Default) {
+            type = defaults.clusterType();
+        } else {
+            type = annot.clusterType();
+        }
+
+        final int brokers;
+        if (annot.brokers() == 0) {
+            brokers = defaults.brokers();
+        } else {
+            brokers = annot.brokers();
+        }
+
+        final int controllers;
+        if (annot.controllers() == 0) {
+            controllers = defaults.controllers();
+        } else {
+            controllers = annot.controllers();
+        }
+
+        if (brokers <= 0 || controllers <= 0) {
+            throw new IllegalArgumentException("Number of brokers/controllers must be greater than zero.");
+        }
 
         ClusterConfig.Builder builder = ClusterConfig.clusterBuilder(type, brokers, controllers, annot.securityProtocol());
         if (!annot.name().isEmpty()) {
@@ -160,5 +178,15 @@ public class ClusterForEach implements TestTemplateInvocationContextProvider {
                 testInvocations.accept(new QuorumClusterInvocationContext(builder.build()));
                 break;
         }
+    }
+
+    private ClusterTestDefaults getClusterTestDefaults(Class<?> testClass) {
+        return Optional.ofNullable(testClass.getDeclaredAnnotation(ClusterTestDefaults.class))
+            .orElseGet(() -> EmptyClass.class.getDeclaredAnnotation(ClusterTestDefaults.class));
+    }
+
+    @ClusterTestDefaults
+    private final static class EmptyClass {
+        // Just used as a convenience to get default values from the annotation
     }
 }

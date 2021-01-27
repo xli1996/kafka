@@ -10,11 +10,20 @@ import java.util.Properties;
 
 public interface ClusterInstance {
 
+    enum ClusterType {
+        Zk,
+        Raft
+    }
+
+    ClusterType clusterType();
+
+    ClusterConfig config();
+
+    ListenerName listener();
+
     String brokerList();
 
     Collection<SocketServer> brokers();
-
-    ListenerName listener();
 
     Collection<SocketServer> controllers();
 
@@ -22,20 +31,16 @@ public interface ClusterInstance {
 
     Optional<SocketServer> anyController();
 
-    ClusterType clusterType();
-
-    ClusterConfig config();
-
     Object getUnderlying();
+
+    default <T> T getUnderlying(Class<T> asClass) {
+        return asClass.cast(getUnderlying());
+    }
+
+    Admin createAdminClient(Properties configOverrides);
 
     default Admin createAdminClient() {
         return createAdminClient(new Properties());
     }
 
-    Admin createAdminClient(Properties configOverrides);
-
-    enum ClusterType {
-        Zk,
-        Raft
-    }
 }

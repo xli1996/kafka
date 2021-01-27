@@ -2,11 +2,11 @@ package kafka.testkit.junit.annotations;
 
 import org.junit.jupiter.api.TestTemplate;
 
+import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
 
 import static java.lang.annotation.ElementType.METHOD;
-import static java.lang.annotation.ElementType.TYPE;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
 /**
@@ -24,9 +24,13 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  *
  * For Scala tests, the method should be defined in a companion object with the same name as the test class.
  */
+@Documented
 @Target({METHOD})
 @Retention(RUNTIME)
 @TestTemplate
 public @interface ClusterTemplate {
+    /**
+     * Specify the static method used for generating cluster configs
+     */
     String value();
 }

@@ -1531,8 +1531,8 @@ class ReplicaManager(val config: KafkaConfig,
     val builder = imageBuilder.partitionsBuilder()
     val startMs = time.milliseconds()
     replicaStateChangeLock synchronized {
-      stateChangeLogger.info("Metadata batch %d: %d local partition(s) changed, %d " +
-        "local partition(s) removed.".format(metadataOffset, builder.localChanged().size,
+      stateChangeLogger.info(("Metadata batch %d: %d local partition(s) changed, %d " +
+        "local partition(s) removed.").format(metadataOffset, builder.localChanged().size,
           builder.localRemoved().size))
       if (stateChangeLogger.isTraceEnabled) {
         builder.localChanged().foreach { state =>

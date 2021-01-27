@@ -341,14 +341,15 @@ public class BrokerHeartbeatManager {
         }
     }
 
-    void beginBrokerShutDown(int brokerId) {
+    void beginBrokerShutDown(int brokerId, boolean deferred) {
         BrokerHeartbeatState broker = brokers.get(brokerId);
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
         }
         if (!broker.shuttingDown()) {
+            log.debug("broker {} has entered controlled shutdown.", brokerId);
             active.remove(broker);
-            broker.shutdownOffset = Long.MAX_VALUE;
+            broker.shutdownOffset = deferred ? Long.MAX_VALUE : 0;
         }
     }
 
@@ -357,10 +358,27 @@ public class BrokerHeartbeatManager {
         if (broker == null) {
             throw new RuntimeException("Unable to locate broker " + brokerId);
         }
-        if (broker.fenced()) return true;
-        if (!broker.shuttingDown()) return false;
+        if (broker.fenced()) {
+            log.debug("broker {} can shut down immediately because it is fenced.");
+            return true;
+        }
+        if (!broker.shuttingDown()) {
+            log.trace("broker {} should not shut down because it is not in the " +
+                "shutdown state.", brokerId);
+            return false;
+        }
         long curOffset = lowestActiveOffset();
-        return curOffset >= broker.shutdownOffset;
+        if (curOffset >= broker.shutdownOffset) {
+            log.debug("broker {} should shut down. The current lowest active offset, {} " +
+                "is greater or equal to the broker shutdown offset of {}", brokerId,
+                curOffset, broker.shutdownOffset);
+            return true;
+        } else {
+            log.debug("broker {} must wait to shut down. The current lowest active offset, {} " +
+                    "is lower than the broker shutdown offset of {}", brokerId,
+                curOffset, broker.shutdownOffset);
+            return false;
+        }
     }
 
     long lowestActiveOffset() {
@@ -379,6 +397,7 @@ public class BrokerHeartbeatManager {
         }
         active.remove(broker);
         broker.shutdownOffset = offset;
+        log.debug("Updated the shutdown offset for broker {} to {}.", brokerId, offset);
     }
 
     /**

@@ -813,30 +813,31 @@ public final class QuorumController implements Controller {
             processBrokerHeartbeat(BrokerHeartbeatRequestData request) {
         return appendWriteEvent("processBrokerHeartbeat",
                 new ControllerWriteOperation<BrokerHeartbeatReply>() {
-            private int brokerId = -1;
-            private boolean wantShutDown = false;
-            private boolean shouldShutDown = false;
+            private boolean updateShutdownOffset = false;
 
             @Override
             public ControllerResult<BrokerHeartbeatReply> generateRecordsAndResult() {
+                clusterControl.checkBrokerEpoch(request.brokerId(), request.brokerEpoch());
+                List<ApiMessageAndVersion> records = new ArrayList<>();
+                boolean movingLeadersForShutDown = false;
+                if (request.wantShutDown()) {
+                    records = replicationControl.removeLeaderships(request.brokerId());
+                    movingLeadersForShutDown = !records.isEmpty();
+                }
                 ControllerResult<BrokerHeartbeatReply> result = clusterControl.
-                    processBrokerHeartbeat(request, lastCommittedOffset);
-                brokerId = request.brokerId();
-                wantShutDown = request.wantShutDown();
-                shouldShutDown = result.response().shouldShutDown();
-                if (wantShutDown && !shouldShutDown) {
-                    // TODO: optimize this a bit better so we don't have to iterate
-                    // over all the partitions where this broker is an ISR member.
-                    replicationControl.removeLeaderships(request.brokerId(), result.records());
+                    processBrokerHeartbeat(request, lastCommittedOffset, movingLeadersForShutDown);
+                if (movingLeadersForShutDown && !result.response().shouldShutDown()) {
+                    updateShutdownOffset = true;
                 }
                 rescheduleMaybeFenceReplicas();
-                return result;
+                records.addAll(result.records());
+                return new ControllerResult<>(records, result.response());
             }
 
             @Override
             public void processBatchEndOffset(long offset) {
-                if (wantShutDown && !shouldShutDown) {
-                    clusterControl.updateShutdownOffset(brokerId, offset);
+                if (updateShutdownOffset) {
+                    clusterControl.updateShutdownOffset(request.brokerId(), offset);
                 }
             }
         });

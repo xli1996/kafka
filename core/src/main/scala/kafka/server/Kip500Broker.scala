@@ -324,7 +324,6 @@ class Kip500Broker(
       // We're now ready to unfence the broker.
       lifecycleManager.setReadyToUnfence()
 
-      info(KafkaBroker.STARTED_MESSAGE)
       maybeChangeStatus(STARTING, STARTED)
     } catch {
       case e: Throwable =>

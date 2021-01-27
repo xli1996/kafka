@@ -83,7 +83,7 @@ class DelayedDeleteRecords(delayMs: Long,
               case None =>
                 (false, Errors.NOT_LEADER_OR_FOLLOWER, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
             }
-          case HostedPartition.Deferred(_, _, _, _) =>
+          case HostedPartition.Deferred(_, _, _, _, _) =>
             (false, Errors.NOT_LEADER_OR_FOLLOWER, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
 
           case HostedPartition.Offline =>

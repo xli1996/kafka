@@ -45,7 +45,7 @@ import scala.jdk.CollectionConverters._
 /**
  * A KIP-500 Kafka controller.
  */
-class Kip500Controller(
+class ControllerServer(
   val metaProperties: MetaProperties,
   val config: KafkaConfig,
   val metaLogManager: MetaLogManager,

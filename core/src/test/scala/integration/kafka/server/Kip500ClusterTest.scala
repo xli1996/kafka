@@ -81,6 +81,7 @@ class Kip500ClusterTest {
     try {
       cluster.format()
       cluster.startup()
+      cluster.waitForReadyBrokers()
       TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
         "Broker never made it to RUNNING state.")
       TestUtils.waitUntilTrue(() => OptionConverters.toJava(cluster.raftManagers().get(0).currentLeader).isPresent,
@@ -120,6 +121,7 @@ class Kip500ClusterTest {
     try {
       cluster.format()
       cluster.startup()
+      cluster.waitForReadyBrokers()
       TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
         "Broker never made it to RUNNING state.")
       TestUtils.waitUntilTrue(() => OptionConverters.toJava(cluster.raftManagers().get(0).currentLeader).isPresent,
@@ -162,6 +164,7 @@ class Kip500ClusterTest {
     try {
       cluster.format()
       cluster.startup()
+      cluster.waitForReadyBrokers()
       TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
         "Broker never made it to RUNNING state.")
       TestUtils.waitUntilTrue(() => OptionConverters.toJava(cluster.raftManagers().get(0).currentLeader).isPresent,

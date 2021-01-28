@@ -86,8 +86,8 @@ class QuotaCache {
       Map[QuotaEntity, Map[String, Double]] = inReadLock(lock) {
 
     // Do some preliminary validation of the filter types and convert them to correct QuotaMatch type
-    val entityFilters: mutable.Map[String, QuotaMatch] = mutable.HashMap.empty
-    filters.foreach(component => {
+    val entityFilters = mutable.HashMap.empty[String, QuotaMatch]
+    filters.foreach { component =>
       val entityType = component.entityType()
       if (entityFilters.contains(entityType)) {
         throw new InvalidRequestException(s"Duplicate ${entityType} filter component entity type")
@@ -107,7 +107,7 @@ class QuotaCache {
         TypeMatch
       }
       entityFilters.put(entityType, entityMatch)
-    })
+    }
 
     if (entityFilters.isEmpty) {
       return Map.empty
@@ -120,37 +120,25 @@ class QuotaCache {
           "not be used with user or clientId filter component.")
       }
       val ipMatch = entityFilters.get(ClientQuotaEntity.IP)
-      if (ipMatch.isDefined) {
-        ipMatch.get match {
+      ipMatch.fold(Set.empty[QuotaEntity]) {
           case ExactMatch(ip) => ipEntityIndex.getOrElse(SpecificIp(ip), Set.empty).toSet
           case DefaultMatch => ipEntityIndex.getOrElse(DefaultIp, Set.empty).toSet
           case TypeMatch => ipEntityIndex.values.flatten.toSet
-        }
-      } else {
-        Set.empty
       }
     } else if (entityFilters.contains(ClientQuotaEntity.USER) || entityFilters.contains(ClientQuotaEntity.CLIENT_ID)) {
       // If either are present, check both user and client indexes
       val userMatch = entityFilters.get(ClientQuotaEntity.USER)
-      val userIndexMatches: Set[QuotaEntity] = if (userMatch.isDefined) {
-        userMatch.get match {
-          case ExactMatch(user) => userEntityIndex.getOrElse(SpecificUser(user), Set.empty).toSet
-          case DefaultMatch => userEntityIndex.getOrElse(DefaultUser, Set.empty).toSet
-          case TypeMatch => userEntityIndex.values.flatten.toSet
-        }
-      } else {
-        Set.empty
+      val userIndexMatches = userMatch.fold(Set.empty[QuotaEntity]) {
+        case ExactMatch(user) => userEntityIndex.getOrElse(SpecificUser(user), Set.empty).toSet
+        case DefaultMatch => userEntityIndex.getOrElse(DefaultUser, Set.empty).toSet
+        case TypeMatch => userEntityIndex.values.flatten.toSet
       }
 
       val clientMatch = entityFilters.get(ClientQuotaEntity.CLIENT_ID)
-      val clientIndexMatches: Set[QuotaEntity] = if (clientMatch.isDefined) {
-        clientMatch.get match {
-          case ExactMatch(clientId) => clientIdEntityIndex.getOrElse(SpecificClientId(clientId), Set.empty).toSet
-          case DefaultMatch => clientIdEntityIndex.getOrElse(DefaultClientId, Set.empty).toSet
-          case TypeMatch => clientIdEntityIndex.values.flatten.toSet
-        }
-      } else {
-        Set.empty
+      val clientIndexMatches = clientMatch.fold(Set.empty[QuotaEntity]) {
+        case ExactMatch(clientId) => clientIdEntityIndex.getOrElse(SpecificClientId(clientId), Set.empty).toSet
+        case DefaultMatch => clientIdEntityIndex.getOrElse(DefaultClientId, Set.empty).toSet
+        case TypeMatch => clientIdEntityIndex.values.flatten.toSet
       }
 
       val candidateMatches = if (userMatch.isDefined && clientMatch.isDefined) {

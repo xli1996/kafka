@@ -62,7 +62,7 @@ class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
     }
   }
 
-  private[server] def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
+  def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
     val entityMap = mutable.Map[String, String]()
     quotaRecord.entity().forEach { entityData =>
       entityMap.put(entityData.entityType(), entityData.entityName())
@@ -114,7 +114,7 @@ class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
     }
   }
 
-  private[server] def handleIpQuota(ipEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
+  def handleIpQuota(ipEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
     val inetAddress = ipEntity match {
       case IpEntity(ip) => try {
         Some(InetAddress.getByName(ip))
@@ -143,19 +143,15 @@ class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
     connectionQuotas.updateIpConnectionRateQuota(inetAddress, newValue)
   }
 
-  private[server] def handleUserClientQuota(quotaEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
-    val managerOpt = quotaRecord.key() match {
-      case QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG => Some(quotaManagers.fetch)
-      case QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG => Some(quotaManagers.produce)
-      case QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG => Some(quotaManagers.request)
-      case QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG => Some(quotaManagers.controllerMutation)
+  def handleUserClientQuota(quotaEntity: QuotaEntity, quotaRecord: QuotaRecord): Unit = {
+    val manager = quotaRecord.key() match {
+      case QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG => quotaManagers.fetch
+      case QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG => quotaManagers.produce
+      case QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG => quotaManagers.request
+      case QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG => quotaManagers.controllerMutation
       case _ =>
         warn(s"Ignoring unexpected quota key ${quotaRecord.key()} for entity $quotaEntity")
-        None
-    }
-
-    if (managerOpt.isEmpty) {
-      return
+        return
     }
 
     quotaCache.updateQuotaCache(quotaEntity, quotaRecord.key, quotaRecord.value, quotaRecord.remove)
@@ -179,12 +175,10 @@ class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
       Some(new Quota(quotaRecord.value(), true))
     }
 
-    managerOpt.foreach {
-      manager => manager.updateQuota(
-        sanitizedUser = sanitizedUser,
-        clientId = sanitizedClientId.map(Sanitizer.desanitize),
-        sanitizedClientId = sanitizedClientId,
-        quota = quotaValue)
-    }
+    manager.updateQuota(
+      sanitizedUser = sanitizedUser,
+      clientId = sanitizedClientId.map(Sanitizer.desanitize),
+      sanitizedClientId = sanitizedClientId,
+      quota = quotaValue)
   }
 }

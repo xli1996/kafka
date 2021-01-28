@@ -219,8 +219,6 @@ class Kip500Broker(
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
 
-
-
       brokerMetadataListener = new BrokerMetadataListener(
         config, metadataCache, time,
         BrokerMetadataListener.defaultProcessors(

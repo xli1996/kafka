@@ -51,7 +51,7 @@ import scala.jdk.CollectionConverters._
 /**
  * A KIP-500 Kafka broker.
  */
-class Kip500Broker(
+class BrokerServer(
   val config: KafkaConfig,
   val metaProps: MetaProperties,
   val metaLogManager: MetaLogManager,

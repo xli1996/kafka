@@ -60,8 +60,8 @@ class KafkaRaftServer(
   private val raftManager = new KafkaRaftManager(metaProps, metadataPartition, config, time, metrics,
     controllerQuorumVotersFuture)
 
-  val broker: Option[Kip500Broker] = if (roles.contains(BrokerRole)) {
-    Some(new Kip500Broker(
+  val broker: Option[BrokerServer] = if (roles.contains(BrokerRole)) {
+    Some(new BrokerServer(
       config,
       metaProps,
       raftManager.metaLogManager,
@@ -76,8 +76,8 @@ class KafkaRaftServer(
     None
   }
 
-  val controller: Option[Kip500Controller] = if (roles.contains(ControllerRole)) {
-    Some(new Kip500Controller(
+  val controller: Option[ControllerServer] = if (roles.contains(ControllerRole)) {
+    Some(new ControllerServer(
       metaProps,
       config,
       raftManager.metaLogManager,

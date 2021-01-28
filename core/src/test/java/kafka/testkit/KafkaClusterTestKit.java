@@ -218,8 +218,8 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
                     String threadNamePrefix = String.format("broker%d_", node.id());
                     MetaProperties metaProperties = MetaProperties.apply(nodes.clusterId(),
-                            OptionConverters.toScala(Optional.empty()),
-                            OptionConverters.toScala(Optional.of(node.id())));
+                        OptionConverters.toScala(Optional.of(node.id())),
+                        OptionConverters.toScala(Optional.empty()));
                     TopicPartition metadataPartition = new TopicPartition(Server.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
                             Time.SYSTEM, new Metrics(), connectFutureManager.future, 0);

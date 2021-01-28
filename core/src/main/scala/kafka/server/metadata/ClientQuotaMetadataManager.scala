@@ -47,9 +47,9 @@ case object DefaultUserDefaultClientIdEntity extends QuotaEntity
 /**
  * Watch for changes to quotas in the metadata log and update quota managers and cache as necessary
  */
-class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
-                             private[metadata] val connectionQuotas: ConnectionQuotas,
-                             private[metadata] val quotaCache: QuotaCache) extends Logging {
+class ClientQuotaMetadataManager(private[metadata] val quotaManagers: QuotaManagers,
+                                 private[metadata] val connectionQuotas: ConnectionQuotas,
+                                 private[metadata] val quotaCache: ClientQuotaCache) extends Logging {
 
   def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
     val entityMap = mutable.Map[String, String]()

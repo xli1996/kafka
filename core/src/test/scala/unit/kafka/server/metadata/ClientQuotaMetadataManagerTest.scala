@@ -36,10 +36,10 @@ import java.util.Properties
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
-class QuotaMetadataProcessorTest {
+class ClientQuotaMetadataManagerTest {
 
-  var processor: QuotaMetadataProcessor = _
-  var cache: QuotaCache = _
+  var manager: ClientQuotaMetadataManager = _
+  var cache: ClientQuotaCache = _
 
   @Before
   def setup(): Unit = {
@@ -60,13 +60,13 @@ class QuotaMetadataProcessorTest {
       clientQuotaCallback = quotaManagers.clientQuotaCallback
     )
     val connectionQuotas = mock(classOf[ConnectionQuotas])
-    cache = new QuotaCache()
-    processor = new QuotaMetadataProcessor(spiedQuotaManagers, connectionQuotas, cache)
+    cache = new ClientQuotaCache()
+    manager = new ClientQuotaMetadataManager(spiedQuotaManagers, connectionQuotas, cache)
   }
 
   @Test
   def testDescribeStrictMatch(): Unit = {
-    setupAndVerify(processor, { case (entity, _) =>
+    setupAndVerify(manager, { case (entity, _) =>
       val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
       entityToFilter(entity, components)
       val results = cache.describeClientQuotas(components.toSeq, strict=true)
@@ -93,7 +93,7 @@ class QuotaMetadataProcessorTest {
 
   @Test
   def testDescribeNonStrictMatch(): Unit = {
-    setupAndVerify(processor, { case (_, _) => })
+    setupAndVerify(manager, { case (_, _) => })
 
     // Match open-ended existing user.
     val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
@@ -149,7 +149,7 @@ class QuotaMetadataProcessorTest {
 
   @Test
   def testDescribeFilterOnTypes(): Unit = {
-    setupAndVerify(processor, { case (_, _) => })
+    setupAndVerify(manager, { case (_, _) => })
 
     var results = cache.describeClientQuotasInternal(
       Seq(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.USER)), strict=false)
@@ -184,8 +184,8 @@ class QuotaMetadataProcessorTest {
 
   @Test
   def testEntityWithDefaultName(): Unit = {
-    addQuotaRecord(processor, clientEntity(ConfigEntityName.Default), (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 20000.0))
-    addQuotaRecord(processor, clientEntity(null), (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 30000.0))
+    addQuotaRecord(manager, clientEntity(ConfigEntityName.Default), (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 20000.0))
+    addQuotaRecord(manager, clientEntity(null), (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 30000.0))
 
     val components = mutable.ListBuffer[ClientQuotaFilterComponent]()
     entityToFilter(clientEntity(ConfigEntityName.Default), components)
@@ -201,28 +201,28 @@ class QuotaMetadataProcessorTest {
   @Test
   def testQuotaRemoval(): Unit = {
     val entity = userClientEntity("user", "client-id")
-    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10000.0))
-    addQuotaRecord(processor, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 20000.0))
+    addQuotaRecord(manager, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10000.0))
+    addQuotaRecord(manager, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 20000.0))
     var quotas = describeEntity(entity)
     assertEquals(2, quotas.size)
     assertEquals(10000.0, quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG), 1e-6)
 
-    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10001.0))
+    addQuotaRecord(manager, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 10001.0))
     quotas = describeEntity(entity)
     assertEquals(2, quotas.size)
     assertEquals(10001.0, quotas(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG), 1e-6)
 
-    addQuotaRemovalRecord(processor, entity, QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG)
+    addQuotaRemovalRecord(manager, entity, QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG)
     quotas = describeEntity(entity)
     assertEquals(1, quotas.size)
     assertFalse(quotas.contains(QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG))
 
-    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
+    addQuotaRemovalRecord(manager, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
     quotas = describeEntity(entity)
     assertEquals(0, quotas.size)
 
     // Removing non-existent quota should not do anything
-    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
+    addQuotaRemovalRecord(manager, entity, QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG)
     quotas = describeEntity(entity)
     assertEquals(0, quotas.size)
   }
@@ -267,40 +267,40 @@ class QuotaMetadataProcessorTest {
   @Test
   def testQuotaManagers(): Unit = {
     val entity = userClientEntity("user", "client")
-    addQuotaRecord(processor, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
-    verify(processor.quotaManagers.fetch, times(1)).updateQuota(
+    addQuotaRecord(manager, entity, (QuotaConfigs.CONSUMER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(manager.quotaManagers.fetch, times(1)).updateQuota(
       _eq(Some("user")),
       _eq(Some("client")),
       _eq(Some("client")),
       any(classOf[Option[Quota]])
     )
 
-    addQuotaRecord(processor, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
-    verify(processor.quotaManagers.produce, times(1)).updateQuota(
+    addQuotaRecord(manager, entity, (QuotaConfigs.PRODUCER_BYTE_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(manager.quotaManagers.produce, times(1)).updateQuota(
       _eq(Some("user")),
       _eq(Some("client")),
       _eq(Some("client")),
       any(classOf[Option[Quota]])
     )
 
-    addQuotaRecord(processor, entity, (QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG, 100.0))
-    verify(processor.quotaManagers.request, times(1)).updateQuota(
+    addQuotaRecord(manager, entity, (QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG, 100.0))
+    verify(manager.quotaManagers.request, times(1)).updateQuota(
       _eq(Some("user")),
       _eq(Some("client")),
       _eq(Some("client")),
       any(classOf[Option[Quota]])
     )
 
-    addQuotaRecord(processor, entity, (QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG, 100.0))
-    verify(processor.quotaManagers.controllerMutation, times(1)).updateQuota(
+    addQuotaRecord(manager, entity, (QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG, 100.0))
+    verify(manager.quotaManagers.controllerMutation, times(1)).updateQuota(
       _eq(Some("user")),
       _eq(Some("client")),
       _eq(Some("client")),
       any(classOf[Option[Quota]])
     )
 
-    addQuotaRemovalRecord(processor, entity, QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG)
-    verify(processor.quotaManagers.controllerMutation, times(1)).updateQuota(
+    addQuotaRemovalRecord(manager, entity, QuotaConfigs.CONTROLLER_MUTATION_RATE_OVERRIDE_CONFIG)
+    verify(manager.quotaManagers.controllerMutation, times(1)).updateQuota(
       _eq(Some("user")),
       _eq(Some("client")),
       _eq(Some("client")),
@@ -313,10 +313,10 @@ class QuotaMetadataProcessorTest {
     val defaultIp = ipEntity(null)
     val knownIp = ipEntity("1.2.3.4")
 
-    addQuotaRecord(processor, defaultIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 100.0))
-    addQuotaRecord(processor, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 99.0))
+    addQuotaRecord(manager, defaultIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 100.0))
+    addQuotaRecord(manager, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 99.0))
 
-    verify(processor.connectionQuotas, times(2)).updateIpConnectionRateQuota(
+    verify(manager.connectionQuotas, times(2)).updateIpConnectionRateQuota(
       any(classOf[Option[InetAddress]]),
       any(classOf[Option[Int]])
     )
@@ -330,16 +330,16 @@ class QuotaMetadataProcessorTest {
     val results = cache.describeClientQuotas(Seq(ClientQuotaFilterComponent.ofEntityType(ClientQuotaEntity.IP)), strict=false)
     assertEquals(2, results.size)
 
-    reset(processor.connectionQuotas)
-    addQuotaRecord(processor, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 98.0))
-    verify(processor.connectionQuotas, times(1)).updateIpConnectionRateQuota(
+    reset(manager.connectionQuotas)
+    addQuotaRecord(manager, knownIp, (QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG, 98.0))
+    verify(manager.connectionQuotas, times(1)).updateIpConnectionRateQuota(
       any(classOf[Option[InetAddress]]),
       _eq(Some(98))
     )
 
-    reset(processor.connectionQuotas)
-    addQuotaRemovalRecord(processor, knownIp, QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG)
-    verify(processor.connectionQuotas, times(1)).updateIpConnectionRateQuota(
+    reset(manager.connectionQuotas)
+    addQuotaRemovalRecord(manager, knownIp, QuotaConfigs.IP_CONNECTION_RATE_OVERRIDE_CONFIG)
+    verify(manager.connectionQuotas, times(1)).updateIpConnectionRateQuota(
       any(classOf[Option[InetAddress]]),
       _eq(None)
     )
@@ -348,8 +348,8 @@ class QuotaMetadataProcessorTest {
   @Test
   def testIpQuotaUnknownKey(): Unit = {
     val defaultIp = ipEntity(null)
-    addQuotaRecord(processor, defaultIp, ("not-an-ip-quota-key", 100.0))
-    verify(processor.connectionQuotas, times(0)).updateIpConnectionRateQuota(
+    addQuotaRecord(manager, defaultIp, ("not-an-ip-quota-key", 100.0))
+    verify(manager.connectionQuotas, times(0)).updateIpConnectionRateQuota(
       any(classOf[Option[InetAddress]]),
       _eq(Some(100))
     )
@@ -360,11 +360,11 @@ class QuotaMetadataProcessorTest {
   @Test
   def testUserQuotaUnknownKey(): Unit = {
     val defaultUser = userEntity(null)
-    addQuotaRecord(processor, defaultUser, ("not-a-user-quota-key", 100.0))
+    addQuotaRecord(manager, defaultUser, ("not-a-user-quota-key", 100.0))
     assertEquals(0, describeEntity(defaultUser).size)
   }
 
-  def setupAndVerify(processor: QuotaMetadataProcessor,
+  def setupAndVerify(manager: ClientQuotaMetadataManager,
                      verifier: (List[QuotaRecord.EntityData], (String, Double)) => Unit ): Unit = {
     val toVerify = List(
       (userClientEntity("user-1", "client-id-1"), 50.50),
@@ -382,7 +382,7 @@ class QuotaMetadataProcessorTest {
     )
 
     toVerify.foreach {
-      case (entity, value) => addQuotaRecord(processor, entity, (QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG, value))
+      case (entity, value) => addQuotaRecord(manager, entity, (QuotaConfigs.REQUEST_PERCENTAGE_OVERRIDE_CONFIG, value))
     }
 
     toVerify.foreach {
@@ -403,15 +403,15 @@ class QuotaMetadataProcessorTest {
     }
   }
 
-  def addQuotaRecord(processor: QuotaMetadataProcessor, entity: List[QuotaRecord.EntityData], quota: (String, Double)): Unit = {
-    processor.handleQuotaRecord(new QuotaRecord()
+  def addQuotaRecord(manager: ClientQuotaMetadataManager, entity: List[QuotaRecord.EntityData], quota: (String, Double)): Unit = {
+    manager.handleQuotaRecord(new QuotaRecord()
       .setEntity(entity.asJava)
       .setKey(quota._1)
       .setValue(quota._2))
   }
 
-  def addQuotaRemovalRecord(processor: QuotaMetadataProcessor, entity: List[QuotaRecord.EntityData], quota: String): Unit = {
-    processor.handleQuotaRecord(new QuotaRecord()
+  def addQuotaRemovalRecord(manager: ClientQuotaMetadataManager, entity: List[QuotaRecord.EntityData], quota: String): Unit = {
+    manager.handleQuotaRecord(new QuotaRecord()
       .setEntity(entity.asJava)
       .setKey(quota)
       .setRemove(true))

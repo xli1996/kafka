@@ -46,7 +46,7 @@ class BrokerMetadataListener(val brokerId: Int,
                              val txnCoordinator: TransactionCoordinator,
                              val logManager: LogManager,
                              val threadNamePrefix: Option[String],
-                             val quotaProcessor: QuotaMetadataProcessor
+                             val clientQuotaManager: ClientQuotaMetadataManager
                             ) extends MetaLogListener with KafkaMetricsGroup {
   val logContext = new LogContext(s"[BrokerMetadataListener id=${brokerId}] ")
   val log = logContext.logger(classOf[BrokerMetadataListener])
@@ -229,7 +229,7 @@ class BrokerMetadataListener(val brokerId: Int,
   def handleQuotaRecord(imageBuilder: MetadataImageBuilder,
                         record: QuotaRecord): Unit = {
     // TODO add quotas to MetadataImageBuilder
-    quotaProcessor.handleQuotaRecord(record)
+    clientQuotaManager.handleQuotaRecord(record)
   }
 
   class HandleNewLeaderEvent(leader: MetaLogLeader)

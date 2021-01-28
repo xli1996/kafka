@@ -43,7 +43,7 @@ case object DefaultMatch extends QuotaMatch
 case object TypeMatch extends QuotaMatch
 
 
-class QuotaCache {
+class ClientQuotaCache {
   private type QuotaCacheIndex = mutable.HashMap[CacheIndexKey, mutable.HashSet[QuotaEntity]]
 
   // A mapping of the quota entities to their quotas, for example:

@@ -87,7 +87,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.{Map, Seq, Set, immutable, mutable}
 import scala.util.{Failure, Success, Try}
 import kafka.coordinator.group.GroupOverview
-import kafka.server.metadata.{ConfigRepository, QuotaCache}
+import kafka.server.metadata.{ConfigRepository, ClientQuotaCache}
 import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.message.DescribeConfigsRequestData.DescribeConfigsResource
 import org.apache.kafka.common.quota.ClientQuotaEntity
@@ -120,7 +120,7 @@ class KafkaApis(val requestChannel: RequestChannel,
                 val brokerFeatures: BrokerFeatures,
                 val finalizedFeatureCache: FinalizedFeatureCache,
                 val configRepository: ConfigRepository,
-                val quotaCache: Option[QuotaCache]) extends ApiRequestHandler with Logging {
+                val quotaCache: Option[ClientQuotaCache]) extends ApiRequestHandler with Logging {
 
   type FetchResponseStats = Map[TopicPartition, RecordConversionStats]
   this.logIdent = "[KafkaApi-%d] ".format(brokerId)

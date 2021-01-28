@@ -28,7 +28,7 @@ import kafka.metrics.KafkaYammerMetrics
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
 import kafka.server.KafkaBroker.metricsPrefix
-import kafka.server.metadata.{BrokerMetadataListener, LocalConfigRepository, QuotaCache, QuotaMetadataProcessor}
+import kafka.server.metadata.{BrokerMetadataListener, LocalConfigRepository, ClientQuotaCache, ClientQuotaMetadataManager}
 import kafka.utils.{CoreUtils, KafkaScheduler}
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
@@ -109,7 +109,7 @@ class Kip500Broker(
 
   var quotaManagers: QuotaFactory.QuotaManagers = null
 
-  var quotaCache: QuotaCache = null
+  var quotaCache: ClientQuotaCache = null
 
   private var _brokerTopicStats: BrokerTopicStats = null
 
@@ -161,7 +161,7 @@ class Kip500Broker(
       _brokerTopicStats = new BrokerTopicStats
 
       quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
-      quotaCache = new QuotaCache()
+      quotaCache = new ClientQuotaCache()
 
       logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
@@ -225,7 +225,7 @@ class Kip500Broker(
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
 
-      val quotaProcessor = new QuotaMetadataProcessor(quotaManagers, socketServer.connectionQuotas, quotaCache)
+      val clientQuotaMetadataManager = new ClientQuotaMetadataManager(quotaManagers, socketServer.connectionQuotas, quotaCache)
 
       brokerMetadataListener = new BrokerMetadataListener(
         config.brokerId,
@@ -237,7 +237,7 @@ class Kip500Broker(
         transactionCoordinator,
         logManager,
         threadNamePrefix,
-        quotaProcessor)
+        clientQuotaMetadataManager)
 
       val networkListeners = new ListenerCollection()
       config.advertisedListeners.foreach { ep =>

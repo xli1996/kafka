@@ -187,9 +187,9 @@ public class BrokerHeartbeatManagerTest {
         expected.add(new UsableBroker(2, Optional.of("rack1")));
         expected.add(new UsableBroker(3, Optional.of("rack2")));
         assertEquals(expected, usableBrokersToSet(manager));
-        manager.beginBrokerShutDown(2);
+        manager.beginBrokerShutDown(2, false);
         assertEquals(100L, manager.lowestActiveOffset());
-        manager.beginBrokerShutDown(4);
+        manager.beginBrokerShutDown(4, false);
         expected.remove(new UsableBroker(2, Optional.of("rack1")));
         assertEquals(expected, usableBrokersToSet(manager));
     }
@@ -243,7 +243,7 @@ public class BrokerHeartbeatManagerTest {
         assertTrue(manager.shouldShutDown(4));
         assertFalse(manager.shouldShutDown(5));
         assertEquals(98L, manager.lowestActiveOffset());
-        manager.beginBrokerShutDown(1);
+        manager.beginBrokerShutDown(1, true);
         assertEquals(99L, manager.lowestActiveOffset());
         assertFalse(manager.shouldShutDown(1));
         manager.updateShutdownOffset(1, 98);

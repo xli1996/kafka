@@ -131,7 +131,7 @@ public class ClusterControlManagerTest {
             ControllerResult<BrokerHeartbeatReply> result = clusterControl.
                 processBrokerHeartbeat(new BrokerHeartbeatRequestData().
                     setBrokerId(i).setBrokerEpoch(100).setCurrentMetadataOffset(1).
-                    setWantFence(false).setWantShutDown(false), 0);
+                    setWantFence(false).setWantShutDown(false), 0, false);
             assertEquals(new BrokerHeartbeatReply(true, false, false), result.response());
             ControllerTestUtils.replayAll(clusterControl, result.records());
         }

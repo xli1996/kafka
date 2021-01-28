@@ -42,7 +42,8 @@ import scala.jdk.CollectionConverters._
 
 object KafkaRaftManager {
   class RaftIoThread(
-    client: KafkaRaftClient[_]
+    client: KafkaRaftClient[_],
+    val shutdownTimeoutMs: Int,
   ) extends ShutdownableThread(
     name = "raft-io-thread",
     isInterruptible = false
@@ -53,7 +54,7 @@ object KafkaRaftManager {
 
     override def initiateShutdown(): Boolean = {
       if (super.initiateShutdown()) {
-        client.shutdown(5000).whenComplete { (_, exception) =>
+        client.shutdown(shutdownTimeoutMs).whenComplete { (_, exception) =>
           if (exception != null) {
             error("Graceful shutdown of RaftClient failed", exception)
           } else {
@@ -90,7 +91,8 @@ class KafkaRaftManager(
   config: KafkaConfig,
   time: Time,
   metrics: Metrics,
-  val controllerQuorumVotersFuture: CompletableFuture[util.List[String]]
+  val controllerQuorumVotersFuture: CompletableFuture[util.List[String]],
+  shutdownTimeoutMs: Int = 5000
 ) extends RaftManager with Logging {
 
   private val raftConfig: RaftConfig = new RaftConfig(config)
@@ -111,7 +113,7 @@ class KafkaRaftManager(
   private val metadataLog = buildMetadataLog()
   private val netChannel = buildNetworkChannel()
   private val raftClient = buildRaftClient()
-  private val raftIoThread = new RaftIoThread(raftClient)
+  private val raftIoThread = new RaftIoThread(raftClient, shutdownTimeoutMs)
   private val metaLogShim = new MetaLogRaftShim(raftClient, nodeId)
 
   def currentLeader: Option[Node] = {

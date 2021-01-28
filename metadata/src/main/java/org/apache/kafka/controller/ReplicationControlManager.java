@@ -601,8 +601,8 @@ public class ReplicationControlManager {
         }
     }
 
-
-    void removeLeaderships(int brokerId, List<ApiMessageAndVersion> records) {
+    List<ApiMessageAndVersion> removeLeaderships(int brokerId) {
+        List<ApiMessageAndVersion> records = new ArrayList<>();
         Iterator<TopicPartition> iterator = brokersToIsrs.iterator(brokerId, true);
         while (iterator.hasNext()) {
             TopicPartition topicPartition = iterator.next();
@@ -625,5 +625,6 @@ public class ReplicationControlManager {
                 setLeaderEpoch(partition.leaderEpoch + 1).
                 setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
         }
+        return records;
     }
 }

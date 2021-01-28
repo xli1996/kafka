@@ -201,8 +201,10 @@ public class ClusterControlManager {
         return new ControllerResult<>(records, null);
     }
 
-    public ControllerResult<BrokerHeartbeatReply>
-            processBrokerHeartbeat(BrokerHeartbeatRequestData request, long lastCommittedOffset) {
+    public ControllerResult<BrokerHeartbeatReply> processBrokerHeartbeat(
+            BrokerHeartbeatRequestData request,
+            long lastCommittedOffset,
+            boolean movingLeadersForShutDown) {
         if (heartbeatManager == null) {
             throw new RuntimeException("ClusterControlManager is not active.");
         }
@@ -239,7 +241,7 @@ public class ClusterControlManager {
                 shouldShutdown = request.wantShutDown();
             } else {
                 if (request.wantShutDown()) {
-                    heartbeatManager.beginBrokerShutDown(request.brokerId());
+                    heartbeatManager.beginBrokerShutDown(request.brokerId(), movingLeadersForShutDown);
                 }
                 if (heartbeatManager.shouldShutDown(request.brokerId())) {
                     isFenced = true;
@@ -253,8 +255,14 @@ public class ClusterControlManager {
             }
         }
         heartbeatManager.touch(brokerId, isFenced, request.currentMetadataOffset());
-        return new ControllerResult<>(records, new BrokerHeartbeatReply(
-            isCaughtUp, isFenced, shouldShutdown));
+        ControllerResult<BrokerHeartbeatReply> result = new ControllerResult<>(records,
+            new BrokerHeartbeatReply(isCaughtUp, isFenced, shouldShutdown));
+        if (log.isTraceEnabled()) {
+            log.trace("processed broker heartbeat {}. lastCommittedOffset = {}, " +
+                    "movingLeadersForShutDown = {}, result = {}", request,
+                lastCommittedOffset, movingLeadersForShutDown, result);
+        }
+        return result;
     }
 
     public void replay(RegisterBrokerRecord record) {
@@ -371,6 +379,7 @@ public class ClusterControlManager {
             }
             records.add(new ApiMessageAndVersion(new FenceBrokerRecord().
                 setId(brokerId).setEpoch(registration.epoch()), (short) 0));
+            log.info("Fencing broker {} because its session has timed out.", brokerId);
         }
     }
 

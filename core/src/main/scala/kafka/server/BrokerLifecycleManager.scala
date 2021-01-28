@@ -107,6 +107,12 @@ class BrokerLifecycleManager(val config: KafkaConfig,
   private var readyToUnfence = false
 
   /**
+   * True if we sent a heartbeat to the active controller requesting controlled
+   * shutdown.
+   */
+  private var gotControlledShutdownResponse = false
+
+  /**
    * Whether or not we this broker is registered with the controller quorum.
    * This variable can only be accessed from the event queue thread.
    */
@@ -252,6 +258,9 @@ class BrokerLifecycleManager(val config: KafkaConfig,
         setIncarnationId(incarnationId).
         setListeners(_advertisedListeners).
         setRack(rack)
+    if (isTraceEnabled) {
+      trace(s"Sending broker registration ${data}")
+    }
     _channelManager.sendRequest(new BrokerRegistrationRequest.Builder(data),
       new BrokerRegistrationResponseHandler())
   }
@@ -300,6 +309,9 @@ class BrokerLifecycleManager(val config: KafkaConfig,
       setCurrentMetadataOffset(metadataOffset).
       setWantFence(!readyToUnfence).
       setWantShutDown(_state == BrokerState.PENDING_CONTROLLED_SHUTDOWN)
+    if (isTraceEnabled) {
+      trace(s"Sending broker heartbeat ${data}")
+    }
     _channelManager.sendRequest(new BrokerHeartbeatRequest.Builder(data),
       new BrokerHeartbeatResponseHandler())
   }
@@ -353,10 +365,20 @@ class BrokerLifecycleManager(val config: KafkaConfig,
               if (!message.data().shouldShutDown()) {
                 info(s"The broker is in PENDING_CONTROLLED_SHUTDOWN state, still waiting " +
                   "for the active controller.")
+                if (!gotControlledShutdownResponse) {
+                  // If this is the first pending controlled shutdown response we got,
+                  // schedule our next heartbeat a little bit sooner than we usually would.
+                  // In the case where controlled shutdown completes quickly, this will
+                  // speed things up a little bit.
+                  scheduleNextCommunication(NANOSECONDS.convert(50, MILLISECONDS))
+                } else {
+                  scheduleNextCommunicationAfterSuccess()
+                }
               } else {
-                info(s"Transitioning from PENDING_CONTROLLED_SHUTDOWN to SHUTTING_DOWN.")
+                info(s"The controlled has asked us to exit controlled shutdown.")
                 beginShutdown()
               }
+              gotControlledShutdownResponse = true
             case BrokerState.SHUTTING_DOWN =>
               info(s"The broker is SHUTTING_DOWN. Ignoring heartbeat response.")
             case _ =>

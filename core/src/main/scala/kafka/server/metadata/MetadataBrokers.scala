@@ -18,6 +18,7 @@
 package kafka.server.metadata
 
 import java.util
+import java.util.Collections
 import java.util.concurrent.ThreadLocalRandom
 
 import kafka.cluster.BrokerEndPoint
@@ -77,14 +78,14 @@ class MetadataBrokersBuilder(log: Logger, prevBrokers: MetadataBrokers) {
 
   def build(): MetadataBrokers = {
     val result = MetadataBrokers(log, newBrokerMap)
-    newBrokerMap = null
+    newBrokerMap = Collections.unmodifiableMap(newBrokerMap)
     result
   }
 }
 
 object MetadataBrokers {
   def apply(log: Logger,
-            brokerMap: util.HashMap[Integer, MetadataBroker]): MetadataBrokers = {
+            brokerMap: util.Map[Integer, MetadataBroker]): MetadataBrokers = {
     var listenersIdenticalAcrossBrokers = true
     var prevListeners: collection.Set[String] = null
     val _aliveBrokers = new util.ArrayList[MetadataBroker](brokerMap.size())
@@ -113,7 +114,7 @@ case class MetadataBrokers(private val _aliveBrokers: util.List[MetadataBroker],
 
   def iterator(): Iterator[MetadataBroker] = brokerMap.values().iterator().asScala
 
-  def cloneBrokerMap(): util.HashMap[Integer, MetadataBroker] = {
+  def cloneBrokerMap(): util.Map[Integer, MetadataBroker] = {
     val result = new util.HashMap[Integer, MetadataBroker]
     result.putAll(brokerMap)
     result

@@ -170,7 +170,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                             OptionConverters.toScala(Optional.of(node.id())));
                     TopicPartition metadataPartition = new TopicPartition(Server.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
-                            Time.SYSTEM, new Metrics(), connectFutureManager.future);
+                            Time.SYSTEM, new Metrics(), connectFutureManager.future, 0);
                     Kip500Controller controller = new Kip500Controller(nodes.controllerProperties(node.id()), config,
                         raftManager.metaLogManager(),
                         raftManager,
@@ -218,11 +218,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
                     String threadNamePrefix = String.format("broker%d_", node.id());
                     MetaProperties metaProperties = MetaProperties.apply(nodes.clusterId(),
-                            OptionConverters.toScala(Optional.empty()),
-                            OptionConverters.toScala(Optional.of(node.id())));
+                        OptionConverters.toScala(Optional.of(node.id())),
+                        OptionConverters.toScala(Optional.empty()));
                     TopicPartition metadataPartition = new TopicPartition(Server.metadataTopicName(), 0);
                     KafkaRaftManager raftManager = new KafkaRaftManager(metaProperties, metadataPartition, config,
-                            Time.SYSTEM, new Metrics(), connectFutureManager.future);
+                            Time.SYSTEM, new Metrics(), connectFutureManager.future, 0);
                     Kip500Broker broker = new Kip500Broker(config, nodes.brokerProperties(node.id()),
                         raftManager.metaLogManager(),
                         time,
@@ -454,27 +454,23 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 futureEntries.add(new SimpleImmutableEntry<>("broker" + brokerId,
                     executorService.submit(broker::shutdown)));
             }
-            for (Entry<String, Future<?>> entry : futureEntries) {
-                log.info("waiting for {} to shut down.", entry.getKey());
-                entry.getValue().get();
-            }
+            waitForAllFutures(futureEntries);
             futureEntries.clear();
-            for (Entry<Integer, KafkaRaftManager> entry : raftManagers.entrySet()) {
-                int raftManagerId = entry.getKey();
-                KafkaRaftManager raftManager = entry.getValue();
-                futureEntries.add(new SimpleImmutableEntry<>("raft-manager" + raftManagerId,
-                    executorService.submit(raftManager::shutdown)));
-            }
             for (Entry<Integer, Kip500Controller> entry : controllers.entrySet()) {
                 int controllerId = entry.getKey();
                 Kip500Controller controller = entry.getValue();
                 futureEntries.add(new SimpleImmutableEntry<>("controller" + controllerId,
                     executorService.submit(controller::shutdown)));
             }
-            for (Entry<String, Future<?>> entry : futureEntries) {
-                log.info("waiting for {} to shut down.", entry.getKey());
-                entry.getValue().get();
+            waitForAllFutures(futureEntries);
+            futureEntries.clear();
+            for (Entry<Integer, KafkaRaftManager> entry : raftManagers.entrySet()) {
+                int raftManagerId = entry.getKey();
+                KafkaRaftManager raftManager = entry.getValue();
+                futureEntries.add(new SimpleImmutableEntry<>("raftManager" + raftManagerId,
+                    executorService.submit(raftManager::shutdown)));
             }
+            waitForAllFutures(futureEntries);
             futureEntries.clear();
             Utils.delete(baseDirectory);
         } catch (Exception e) {
@@ -485,6 +481,15 @@ public class KafkaClusterTestKit implements AutoCloseable {
         } finally {
             executorService.shutdownNow();
             executorService.awaitTermination(1, TimeUnit.DAYS);
+        }
+    }
+
+    private void waitForAllFutures(List<Entry<String, Future<?>>> futureEntries)
+            throws Exception {
+        for (Entry<String, Future<?>> entry : futureEntries) {
+            log.debug("waiting for {} to shut down.", entry.getKey());
+            entry.getValue().get();
+            log.debug("{} successfully shut down.", entry.getKey());
         }
     }
 }

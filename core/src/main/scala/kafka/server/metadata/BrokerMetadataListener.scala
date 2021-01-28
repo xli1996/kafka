@@ -22,7 +22,7 @@ import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.LogManager
 import kafka.metrics.KafkaMetricsGroup
-import kafka.server.{MetadataCache, QuotaFactory, ReplicaManager, RequestHandlerHelper}
+import kafka.server.{MetadataCache, ReplicaManager, RequestHandlerHelper}
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.metadata.MetadataRecordType._
 import org.apache.kafka.common.metadata._
@@ -42,7 +42,6 @@ class BrokerMetadataListener(val brokerId: Int,
                              val metadataCache: MetadataCache,
                              val configRepository: LocalConfigRepository,
                              val groupCoordinator: GroupCoordinator,
-                             val quotaManagers: QuotaFactory.QuotaManagers,
                              val replicaManager: ReplicaManager,
                              val txnCoordinator: TransactionCoordinator,
                              val logManager: LogManager,

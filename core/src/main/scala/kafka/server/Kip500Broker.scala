@@ -233,7 +233,6 @@ class Kip500Broker(
         metadataCache,
         configRepository,
         groupCoordinator,
-        quotaManagers,
         replicaManager,
         transactionCoordinator,
         logManager,

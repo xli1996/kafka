@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -36,14 +37,16 @@ public class BrokerRegistration {
     private final Uuid incarnationId;
     private final Map<String, Endpoint> listeners;
     private final Map<String, VersionRange> supportedFeatures;
-    private final String rack;
+    private final Optional<String> rack;
+    private final boolean fenced;
 
     public BrokerRegistration(int id,
                               long epoch,
                               Uuid incarnationId,
                               List<Endpoint> listeners,
                               Map<String, VersionRange> supportedFeatures,
-                              String rack) {
+                              Optional<String> rack,
+                              boolean fenced) {
         this.id = id;
         this.epoch = epoch;
         this.incarnationId = incarnationId;
@@ -54,7 +57,25 @@ public class BrokerRegistration {
         this.listeners = Collections.unmodifiableMap(listenersMap);
         Objects.requireNonNull(supportedFeatures);
         this.supportedFeatures = supportedFeatures;
+        Objects.requireNonNull(rack);
         this.rack = rack;
+        this.fenced = fenced;
+    }
+
+    public BrokerRegistration(int id,
+                              long epoch,
+                              Uuid incarnationId,
+                              Map<String, Endpoint> listeners,
+                              Map<String, VersionRange> supportedFeatures,
+                              Optional<String> rack,
+                              boolean fenced) {
+        this.id = id;
+        this.epoch = epoch;
+        this.incarnationId = incarnationId;
+        this.listeners = listeners;
+        this.supportedFeatures = supportedFeatures;
+        this.rack = rack;
+        this.fenced = fenced;
     }
 
     public int id() {
@@ -77,13 +98,18 @@ public class BrokerRegistration {
         return supportedFeatures;
     }
 
-    public String rack() {
+    public Optional<String> rack() {
         return rack;
+    }
+
+    public boolean fenced() {
+        return fenced;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, epoch, incarnationId, listeners, supportedFeatures, rack);
+        return Objects.hash(id, epoch, incarnationId, listeners, supportedFeatures,
+            rack, fenced);
     }
 
     @Override
@@ -95,7 +121,8 @@ public class BrokerRegistration {
             other.incarnationId.equals(incarnationId) &&
             other.listeners.equals(listeners) &&
             other.supportedFeatures.equals(supportedFeatures) &&
-            Objects.equals(other.rack, rack);
+            other.rack.equals(rack) &&
+            other.fenced == fenced;
     }
 
     @Override
@@ -113,10 +140,14 @@ public class BrokerRegistration {
                 map(e -> e.getKey() + ": " + e.getValue()).
                 collect(Collectors.joining(", ")));
         bld.append("}");
-        if (rack != null) {
-            bld.append(", rack=").append(rack);
-        }
+        bld.append(", rack=").append(rack);
+        bld.append(", fenced=").append(fenced);
         bld.append(")");
         return bld.toString();
+    }
+
+    public BrokerRegistration cloneWithFencing(boolean fencing) {
+        return new BrokerRegistration(id, epoch, incarnationId, listeners,
+            supportedFeatures, rack, fencing);
     }
 }

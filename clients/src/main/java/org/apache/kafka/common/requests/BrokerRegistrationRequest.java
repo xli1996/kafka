@@ -38,6 +38,11 @@ public class BrokerRegistrationRequest extends AbstractRequest {
         public BrokerRegistrationRequest build(short version) {
             return new BrokerRegistrationRequest(data, version);
         }
+
+        @Override
+        public String toString() {
+            return data.toString();
+        }
     }
 
     private final BrokerRegistrationRequestData data;

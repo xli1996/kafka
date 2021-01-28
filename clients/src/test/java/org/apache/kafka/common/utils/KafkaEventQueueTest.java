@@ -24,7 +24,6 @@ import org.junit.rules.Timeout;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +33,7 @@ import java.util.function.Supplier;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 public class KafkaEventQueueTest {
     @Rule
@@ -174,7 +174,7 @@ public class KafkaEventQueueTest {
         CompletableFuture<Integer> future2 = new CompletableFuture<>();
         queue.scheduleDeferred("foo", prev -> prev - ONE_HOUR_NS,
                 new FutureEvent<>(future2, () -> ai.addAndGet(1)));
-        assertThrows(CancellationException.class, () -> future1.get());
+        assertFalse(future1.isDone());
         assertEquals(Integer.valueOf(1), future2.get());
         assertEquals(1, ai.get());
         queue.close();
@@ -214,5 +214,26 @@ public class KafkaEventQueueTest {
         assertThrows(ExecutionException.class, () -> future.get());
         assertEquals(0, count.get());
         queue.close();
+    }
+
+    @Test
+    public void testEventQueueClosedException() throws Exception {
+        KafkaEventQueue queue = new KafkaEventQueue(Time.SYSTEM, new LogContext(),
+            "testEventQueueClosedException");
+        queue.close();
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        queue.append(new EventQueue.Event() {
+                @Override
+                public void run() throws Exception {
+                    future.complete(null);
+                }
+
+                @Override
+                public void handleException(Throwable e) {
+                    future.completeExceptionally(e);
+                }
+            });
+        assertEquals(EventQueueClosedException.class, assertThrows(
+            ExecutionException.class, () -> future.get()).getCause().getClass());
     }
 }

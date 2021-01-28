@@ -46,14 +46,10 @@ trait ControllerNodeProvider {
 class MetadataCacheControllerNodeProvider(val metadataCache: kafka.server.MetadataCache,
                                           val listenerName: ListenerName) extends ControllerNodeProvider {
   override def controllerNode(): Option[Node] = {
-    val snapshot = metadataCache.readState()
-    snapshot.controllerId match {
-      case None => None
-      case Some(id) => {
-          snapshot.aliveNodes.get(id) match {
-          case None => None
-          case Some(listenerMap) => listenerMap.get(listenerName)
-        }
+    val image = metadataCache.currentImage()
+    image.controllerId.flatMap {
+      case id => image.brokers.getAlive(id).flatMap {
+        case broker => broker.endpoints.get(listenerName.value())
       }
     }
   }
@@ -277,8 +273,10 @@ class BrokerToControllerRequestThread(val networkClient: KafkaClient,
               request.request, handleResponse(curController.get, request))
         }
         sendableRequests.clear()
-        debug(s"sending request(s): " +
-          requestsToSend.map(r => r.request.apiKey()).mkString(", ") + ".")
+        if (isDebugEnabled) {
+          debug(s"sending request(s): " +
+            requestsToSend.map(r => r.request).mkString(", ") + ".")
+        }
         (requestsToSend, Long.MaxValue)
       }
     }

@@ -61,14 +61,14 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   @Test
   def testCleanShutdown(): Unit = {
 
-    def createProducer(server: LegacyBroker): KafkaProducer[Integer, String] =
+    def createProducer(server: KafkaServer): KafkaProducer[Integer, String] =
       TestUtils.createProducer(
         TestUtils.getBrokerListStrFromServers(Seq(server)),
         keySerializer = new IntegerSerializer,
         valueSerializer = new StringSerializer
       )
 
-    def createConsumer(server: LegacyBroker): KafkaConsumer[Integer, String] =
+    def createConsumer(server: KafkaServer): KafkaConsumer[Integer, String] =
       TestUtils.createConsumer(
         TestUtils.getBrokerListStrFromServers(Seq(server)),
         securityProtocol = SecurityProtocol.PLAINTEXT,
@@ -76,7 +76,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
         valueDeserializer = new StringDeserializer
       )
 
-    var server = new LegacyBroker(config, threadNamePrefix = Option(this.getClass.getName))
+    var server = new KafkaServer(config, threadNamePrefix = Option(this.getClass.getName))
     server.startup()
     var producer = createProducer(server)
 
@@ -96,7 +96,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
     producer.close()
 
     /* now restart the server and check that the written data is still readable and everything still works */
-    server = new LegacyBroker(config)
+    server = new KafkaServer(config)
     server.startup()
 
     // wait for the broker to receive the update metadata request after startup
@@ -127,7 +127,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
     val newProps = TestUtils.createBrokerConfig(0, zkConnect)
     newProps.setProperty("delete.topic.enable", "true")
     val newConfig = KafkaConfig.fromProps(newProps)
-    val server = new LegacyBroker(newConfig, threadNamePrefix = Option(this.getClass.getName))
+    val server = new KafkaServer(newConfig, threadNamePrefix = Option(this.getClass.getName))
     server.startup()
     server.shutdown()
     server.awaitShutdown()
@@ -146,7 +146,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
 
   @Test
   def testCleanShutdownAfterFailedStartupDueToCorruptLogs(): Unit = {
-    val server = new LegacyBroker(config)
+    val server = new KafkaServer(config)
     server.startup()
     createTopic(zkClient, topic, numPartitions = 1, replicationFactor = 1, servers = Seq(server))
     server.shutdown()
@@ -159,7 +159,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
   }
 
   private def verifyCleanShutdownAfterFailedStartup[E <: Exception](config: KafkaConfig)(implicit exceptionClassTag: ClassTag[E]): Unit = {
-    val server = new LegacyBroker(config, threadNamePrefix = Option(this.getClass.getName))
+    val server = new KafkaServer(config, threadNamePrefix = Option(this.getClass.getName))
     try {
       server.startup()
       fail("Expected LegacyBroker setup to fail and throw exception")
@@ -193,7 +193,7 @@ class ServerShutdownTest extends ZooKeeperTestHarness {
 
   @Test
   def testConsecutiveShutdown(): Unit = {
-    val server = new LegacyBroker(config)
+    val server = new KafkaServer(config)
     server.startup()
     server.shutdown()
     server.awaitShutdown()

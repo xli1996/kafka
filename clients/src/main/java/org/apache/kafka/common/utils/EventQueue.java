@@ -17,6 +17,8 @@
 
 package org.apache.kafka.common.utils;
 
+import org.slf4j.Logger;
+
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -24,6 +26,29 @@ public interface EventQueue extends AutoCloseable {
     interface Event {
         void run() throws Exception;
         default void handleException(Throwable e) {}
+    }
+
+    abstract class FailureLoggingEvent implements Event {
+        private final Logger log;
+
+        public FailureLoggingEvent(Logger log) {
+            this.log = log;
+        }
+
+        @Override
+        public void handleException(Throwable e) {
+            if (e instanceof EventQueueClosedException) {
+                log.info("Not processing {} because the event queue is closed.",
+                    this.toString());
+            } else {
+                log.error("Unexpected error handling {}", this.toString(), e);
+            }
+        }
+
+        @Override
+        public String toString() {
+            return this.getClass().getSimpleName();
+        }
     }
 
     class DeadlineFunction implements Function<Long, Long> {
@@ -36,6 +61,25 @@ public interface EventQueue extends AutoCloseable {
         @Override
         public Long apply(Long t) {
             return deadlineNs;
+        }
+    }
+
+    class EarliestDeadlineFunction implements Function<Long, Long> {
+        private final long newDeadlineNs;
+
+        public EarliestDeadlineFunction(long newDeadlineNs) {
+            this.newDeadlineNs = newDeadlineNs;
+        }
+
+        @Override
+        public Long apply(Long prevDeadlineNs) {
+            if (prevDeadlineNs == null) {
+                return newDeadlineNs;
+            } else if (prevDeadlineNs < newDeadlineNs) {
+                return prevDeadlineNs;
+            } else {
+                return newDeadlineNs;
+            }
         }
     }
 
@@ -95,6 +139,15 @@ public interface EventQueue extends AutoCloseable {
                                   Event event) {
         enqueue(EventInsertionType.DEFERRED, tag, deadlineNsCalculator, event);
     }
+
+    /**
+     * Cancel a deferred event.
+     *
+     * @param tag                   The unique tag for the event to be cancelled.  Must be
+     *                              non-null.  If the event with the tag has not been
+     *                              scheduled, this call will be ignored.
+     */
+    void cancelDeferred(String tag);
 
     enum EventInsertionType {
         PREPEND,

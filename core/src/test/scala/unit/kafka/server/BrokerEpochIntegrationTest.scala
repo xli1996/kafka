@@ -42,7 +42,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
   val brokerId1 = 0
   val brokerId2 = 1
 
-  var servers: Seq[LegacyBroker] = Seq.empty[LegacyBroker]
+  var servers: Seq[KafkaServer] = Seq.empty[KafkaServer]
 
   @Before
   override def setUp(): Unit = {
@@ -240,7 +240,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
     }
   }
 
-  private def getController: LegacyBroker = {
+  private def getController: KafkaServer = {
     val controllerId = TestUtils.waitUntilControllerElected(zkClient)
     servers.filter(s => s.config.brokerId == controllerId).head
   }

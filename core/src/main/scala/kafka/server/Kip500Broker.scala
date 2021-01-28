@@ -18,10 +18,9 @@
 package kafka.server
 
 import java.util
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.{CompletableFuture, TimeUnit, TimeoutException}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
-
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.{ProducerIdGenerator, TransactionCoordinator}
 import kafka.log.LogManager
@@ -29,9 +28,8 @@ import kafka.metrics.KafkaYammerMetrics
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
 import kafka.server.KafkaBroker.metricsPrefix
-import kafka.server.metadata.{BrokerMetadataListener, QuotaCache}
+import kafka.server.metadata.{BrokerMetadataListener, LocalConfigRepository, QuotaCache, QuotaMetadataProcessor}
 import kafka.utils.{CoreUtils, KafkaScheduler}
-import kafka.zk.KafkaZkClient
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
 import org.apache.kafka.common.metrics.Metrics
@@ -43,6 +41,7 @@ import org.apache.kafka.common.utils.{AppInfoParser, LogContext, Time}
 import org.apache.kafka.common.{ClusterResource, Endpoint, KafkaException}
 import org.apache.kafka.metadata.{BrokerState, VersionRange}
 import org.apache.kafka.metalog.MetaLogManager
+import org.apache.kafka.raft.RaftConfig
 import org.apache.kafka.server.authorizer.Authorizer
 
 import scala.collection.{Map, Seq}
@@ -59,11 +58,11 @@ class Kip500Broker(
   val metrics: Metrics,
   val threadNamePrefix: Option[String],
   val initialOfflineDirs: Seq[String],
-  val controllerQuorumVotersFuture: CompletableFuture[String],
+  val controllerQuorumVotersFuture: CompletableFuture[util.List[String]],
   val supportedFeatures: util.Map[String, VersionRange]
 ) extends KafkaBroker {
 
-  import kafka.server.KafkaServer._
+  import kafka.server.Server._
 
   private val logContext: LogContext = new LogContext(s"[Kip500Broker id=${config.brokerId}] ")
 
@@ -120,8 +119,9 @@ class Kip500Broker(
 
   val clusterId: String = metaProps.clusterId.toString
 
+  val configRepository = new LocalConfigRepository()
+
   var brokerMetadataListener: BrokerMetadataListener = null
-  val _brokerMetadataListenerFuture: CompletableFuture[BrokerMetadataListener] = new CompletableFuture[BrokerMetadataListener]()
 
   def kafkaYammerMetrics: kafka.metrics.KafkaYammerMetrics = KafkaYammerMetrics.INSTANCE
 
@@ -180,15 +180,21 @@ class Kip500Broker(
       // Delay starting processors until the end of the initialization sequence to ensure
       // that credentials have been loaded before processing authentications.
       socketServer = new SocketServer(config, metrics, time, credentialProvider, Some(config.brokerId),
-        Some(new LogContext(s"[SocketServer brokerId=${config.controllerId}] ")))
+        Some(new LogContext(s"[SocketServer brokerId=${config.brokerId}] ")), allowDisabledApis = true)
       socketServer.startup(startProcessingRequests = false)
 
-      // Create replica manager, but don't start it until we've started log manager.
-      replicaManager = createReplicaManager(isShuttingDown)
+      // Create replica manager.
+      val alterIsrManager = new AlterIsrManagerImpl(alterIsrChannelManager, kafkaScheduler,
+        time, config.brokerId, () => lifecycleManager.brokerEpoch())
+      // explicitly declare to eliminate spotbugs error in Scala 2.12
+      this.replicaManager = new ReplicaManager(config, metrics, time, None,
+        kafkaScheduler, logManager, isShuttingDown, quotaManagers,
+        brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager,
+        configRepository, threadNamePrefix)
 
       /* start broker-to-controller channel managers */
       val controllerNodes =
-        KafkaConfig.controllerQuorumVoterStringsToNodes(controllerQuorumVotersFuture.get())
+        RaftConfig.quorumVoterStringsToNodes(controllerQuorumVotersFuture.get()).asScala
       val controllerNodeProvider = new RaftControllerNodeProvider(metaLogManager, controllerNodes)
       alterIsrChannelManager = BrokerToControllerChannelManager(controllerNodeProvider,
         time, metrics, config, 60000,"alterisr", threadNamePrefix)
@@ -219,12 +225,20 @@ class Kip500Broker(
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
 
+      val quotaProcessor = new QuotaMetadataProcessor(quotaManagers, socketServer.connectionQuotas, quotaCache)
+
       brokerMetadataListener = new BrokerMetadataListener(
-        config, metadataCache, time,
-        BrokerMetadataListener.defaultProcessors(
-          config, clusterId, metadataCache, groupCoordinator, quotaManagers, replicaManager, transactionCoordinator,
-          logManager, socketServer, quotaCache))
-      brokerMetadataListener.start()
+        config.brokerId,
+        time,
+        metadataCache,
+        configRepository,
+        groupCoordinator,
+        quotaManagers,
+        replicaManager,
+        transactionCoordinator,
+        logManager,
+        threadNamePrefix,
+        quotaProcessor)
 
       val networkListeners = new ListenerCollection()
       config.advertisedListeners.foreach { ep =>
@@ -234,7 +248,7 @@ class Kip500Broker(
           setPort(socketServer.boundPort(ep.listenerName)).
           setSecurityProtocol(ep.securityProtocol.id))
       }
-      lifecycleManager.start(() => brokerMetadataListener.currentMetadataOffset(),
+      lifecycleManager.start(() => brokerMetadataListener.highestMetadataOffset(),
         BrokerToControllerChannelManager(controllerNodeProvider, time, metrics, config,
           config.brokerSessionTimeoutMs.toLong, "heartbeat", threadNamePrefix),
         metaProps.clusterId, networkListeners, supportedFeatures)
@@ -284,7 +298,7 @@ class Kip500Broker(
       dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
         replicaManager, null, groupCoordinator, transactionCoordinator,
         null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener, Some(quotaCache))
+        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository, Some(quotaCache))
 
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
         config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
@@ -293,7 +307,7 @@ class Kip500Broker(
         controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
           replicaManager, null, groupCoordinator, transactionCoordinator,
           null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, brokerMetadataListener, Some(quotaCache))
+          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository, Some(quotaCache))
 
         controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
           1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)
@@ -301,11 +315,11 @@ class Kip500Broker(
 
       // Block until we've caught up on the metadata log
       lifecycleManager.initialCatchUpFuture.get()
-      _brokerMetadataListenerFuture.complete(brokerMetadataListener)
       // Start log manager, which will perform (potentially lengthy) recovery-from-unclean-shutdown if required.
       logManager.startup()
       // Start other services that we've delayed starting, in the appropriate order.
       replicaManager.startup()
+      replicaManager.startHighWatermarkCheckPointThread()
       groupCoordinator.startup(metadataCache.numPartitions(Topic.GROUP_METADATA_TOPIC_NAME).
         getOrElse(config.offsetsTopicPartitions))
       transactionCoordinator.startup(metadataCache.numPartitions(Topic.TRANSACTION_STATE_TOPIC_NAME).
@@ -316,7 +330,6 @@ class Kip500Broker(
       // We're now ready to unfence the broker.
       lifecycleManager.setReadyToUnfence()
 
-      info(KafkaBroker.STARTED_MESSAGE)
       maybeChangeStatus(STARTING, STARTED)
     } catch {
       case e: Throwable =>
@@ -345,36 +358,23 @@ class Kip500Broker(
     new TemporaryProducerIdManager()
   }
 
-  protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager = {
-    val alterIsrManager = new AlterIsrManagerImpl(alterIsrChannelManager, kafkaScheduler,
-      time, config.brokerId, () => lifecycleManager.brokerEpoch())
-    // explicitly declare to eliminate spotbugs error in Scala 2.12
-    val zkClient: Option[KafkaZkClient] = None
-    new ReplicaManager(config, metrics, time, zkClient, kafkaScheduler, logManager, isShuttingDown, quotaManagers,
-      brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager, None, Some(_brokerMetadataListenerFuture))
-  }
-
-  /**
-   * Performs controlled shutdown
-   */
-  private def controlledShutdown(): Unit = {
-
-    if (config.controlledShutdownEnable) {
-      // We request the heartbeat to initiate a controlled shutdown.
-      info("Controlled shutdown requested")
-
-      // TODO: request controlled shutdown from broker lifecycle manager
-      // TODO: wait for controlled shutdown to complete
-    }
-    lifecycleManager.beginShutdown()
-  }
-
   def shutdown(): Unit = {
     if (!maybeChangeStatus(STARTED, SHUTTING_DOWN)) return
     try {
       info("shutting down")
 
-      CoreUtils.swallow(controlledShutdown(), this)
+      if (config.controlledShutdownEnable) {
+        lifecycleManager.beginControlledShutdown()
+        try {
+          lifecycleManager.controlledShutdownFuture.get(5L, TimeUnit.MINUTES)
+        } catch {
+          case _: TimeoutException =>
+            error("Timed out waiting for the controller to approve controlled shutdown")
+          case e: Throwable =>
+            error("Got unexpected exception waiting for controlled shutdown future", e)
+        }
+      }
+      lifecycleManager.beginShutdown()
 
       // Stop socket server to stop accepting any more connections and requests.
       // Socket server will be shutdown towards the end of the sequence.
@@ -397,8 +397,6 @@ class Kip500Broker(
       if (brokerMetadataListener !=  null) {
         CoreUtils.swallow(brokerMetadataListener.close(), this)
       }
-      _brokerMetadataListenerFuture.cancel(true)
-
       if (transactionCoordinator != null)
         CoreUtils.swallow(transactionCoordinator.shutdown(), this)
       if (groupCoordinator != null)

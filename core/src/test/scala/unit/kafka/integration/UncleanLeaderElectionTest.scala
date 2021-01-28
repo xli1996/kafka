@@ -27,7 +27,7 @@ import org.apache.log4j.{Level, Logger}
 import java.util.Properties
 import java.util.concurrent.ExecutionException
 
-import kafka.server.{KafkaConfig, LegacyBroker}
+import kafka.server.{KafkaConfig, KafkaServer}
 import kafka.utils.{CoreUtils, TestUtils}
 import kafka.utils.TestUtils._
 import kafka.zk.ZooKeeperTestHarness
@@ -54,7 +54,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
   var configProps2: Properties = null
 
   var configs: Seq[KafkaConfig] = Seq.empty[KafkaConfig]
-  var servers: Seq[LegacyBroker] = Seq.empty[LegacyBroker]
+  var servers: Seq[KafkaServer] = Seq.empty[KafkaServer]
 
   val random = new Random()
   val topic = "topic" + random.nextLong()
@@ -268,7 +268,7 @@ class UncleanLeaderElectionTest extends ZooKeeperTestHarness {
     assertEquals(List("first", "second", "third"), consumeAllMessages(topic, 3))
   }
 
-  private def shutdownServer(server: LegacyBroker) = {
+  private def shutdownServer(server: KafkaServer) = {
     server.shutdown()
     server.awaitShutdown()
   }

@@ -20,7 +20,7 @@ package org.apache.kafka.shell;
 import kafka.raft.KafkaRaftManager;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
-import kafka.server.KafkaServer;
+import kafka.server.Server;
 import kafka.server.MetaProperties;
 import kafka.tools.TerseFailure;
 import net.sourceforge.argparse4j.ArgumentParsers;
@@ -32,6 +32,7 @@ import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.raft.RaftConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scala.compat.java8.OptionConverters;
@@ -46,6 +47,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The Kafka metadata tool.
@@ -99,10 +101,10 @@ public final class MetadataShell {
                 properties = new Properties();
             }
             if (controllers != null) {
-                properties.setProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp(),
+                properties.setProperty(RaftConfig.QUORUM_VOTERS_CONFIG,
                     controllers);
             }
-            if (properties.getProperty(KafkaConfig$.MODULE$.ControllerQuorumVotersProp()) == null) {
+            if (properties.getProperty(RaftConfig.QUORUM_VOTERS_CONFIG) == null) {
                 throw new TerseFailure("Please use --controllers to specify the quorum voters.");
             }
             // TODO: we really shouldn't have to set up a fake broker config like this.
@@ -122,7 +124,7 @@ public final class MetadataShell {
                 OptionConverters.toScala(Optional.of(fakeId)),
                 OptionConverters.toScala(Optional.empty()));
             TopicPartition metadataPartition =
-                new TopicPartition(KafkaServer.metadataTopicName(), 0);
+                new TopicPartition(Server.metadataTopicName(), 0);
             KafkaRaftManager raftManager = null;
             MetadataNodeManager nodeManager = null;
             try {
@@ -130,7 +132,9 @@ public final class MetadataShell {
                     metadataPartition,
                     config,
                     Time.SYSTEM,
-                    new Metrics());
+                    new Metrics(),
+                    CompletableFuture.completedFuture(config.quorumVoters()),
+                    5000);
                 nodeManager = new MetadataNodeManager();
             } catch (Throwable e) {
                 log.error("Initialization error", e);

@@ -40,7 +40,7 @@ class LeaderElectionTest extends ZooKeeperTestHarness {
   val brokerId1 = 0
   val brokerId2 = 1
 
-  var servers: Seq[LegacyBroker] = Seq.empty[LegacyBroker]
+  var servers: Seq[KafkaServer] = Seq.empty[KafkaServer]
 
   var staleControllerEpochDetected = false
 

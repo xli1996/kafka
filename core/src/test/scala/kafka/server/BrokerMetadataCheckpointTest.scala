@@ -16,7 +16,7 @@ package kafka.server
 import org.apache.kafka.common.Uuid
 import java.io.File
 
-import kafka.server.KafkaServer.BrokerRole
+import kafka.server.Server.BrokerRole
 import org.apache.kafka.common.utils.Utils
 import org.apache.kafka.test.TestUtils
 import org.junit.Assert.assertEquals

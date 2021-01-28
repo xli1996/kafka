@@ -20,16 +20,17 @@ package org.apache.kafka.controller;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.message.AlterIsrRequestData;
+import org.apache.kafka.common.message.AlterIsrResponseData;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
-import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
-import org.apache.kafka.controller.ClusterControlManager.HeartbeatReply;
-import org.apache.kafka.controller.ClusterControlManager.RegistrationReply;
+import org.apache.kafka.metadata.BrokerHeartbeatReply;
+import org.apache.kafka.metadata.BrokerRegistrationReply;
 import org.apache.kafka.metadata.FeatureManager;
 
 import java.util.Collection;
@@ -41,14 +42,11 @@ public interface Controller extends AutoCloseable {
     /**
      * Change partition ISRs.
      *
-     * @param brokerId      The ID of the broker making the change.
-     * @param brokerEpoch   The epoch of the broker making the change.
-     * @param changes       The changes to make.
+     * @param request       The AlterIsrRequest data.
      *
-     * @return              A future yielding a map from partitions to error results.
+     * @return              A future yielding the response.
      */
-    CompletableFuture<Map<TopicPartition, Errors>>
-        alterIsr(int brokerId, long brokerEpoch, Map<TopicPartition, LeaderAndIsr> changes);
+    CompletableFuture<AlterIsrResponseData> alterIsr(AlterIsrRequestData request);
 
     /**
      * Create a batch of topics.
@@ -132,7 +130,7 @@ public interface Controller extends AutoCloseable {
      *
      * @return              A future yielding a heartbeat reply.
      */
-    CompletableFuture<HeartbeatReply> processBrokerHeartbeat(
+    CompletableFuture<BrokerHeartbeatReply> processBrokerHeartbeat(
         BrokerHeartbeatRequestData request);
 
     /**
@@ -142,7 +140,7 @@ public interface Controller extends AutoCloseable {
      *
      * @return              A future yielding a registration reply.
      */
-    CompletableFuture<RegistrationReply> registerBroker(
+    CompletableFuture<BrokerRegistrationReply> registerBroker(
         BrokerRegistrationRequestData request);
 
     /**

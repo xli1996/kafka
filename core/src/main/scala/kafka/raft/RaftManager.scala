@@ -16,14 +16,9 @@
  */
 package kafka.raft
 
-import java.io.File
-import java.nio.file.Files
-import java.util.Random
-import java.util.concurrent.CompletableFuture
-
 import kafka.log.{Log, LogConfig, LogManager}
 import kafka.raft.KafkaRaftManager.RaftIoThread
-import kafka.server.KafkaServer.ControllerRole
+import kafka.server.Server.ControllerRole
 import kafka.server.{BrokerTopicStats, KafkaBroker, KafkaConfig, LogDirFailureChannel, MetaProperties}
 import kafka.utils.timer.SystemTimer
 import kafka.utils.{KafkaScheduler, Logging, ShutdownableThread}
@@ -37,13 +32,18 @@ import org.apache.kafka.common.utils.{LogContext, Time}
 import org.apache.kafka.common.{Node, TopicPartition}
 import org.apache.kafka.metalog.{MetaLogListener, MetaLogManager}
 import org.apache.kafka.raft.metadata.{MetaLogRaftShim, MetadataRecordSerde}
-import org.apache.kafka.raft.{FileBasedStateStore, KafkaRaftClient, QuorumState, RaftConfig, RaftRequest}
+import org.apache.kafka.raft.{FileBasedStateStore, KafkaRaftClient, RaftConfig, RaftRequest}
 
+import java.io.File
+import java.nio.file.Files
+import java.util
+import java.util.concurrent.CompletableFuture
 import scala.jdk.CollectionConverters._
 
 object KafkaRaftManager {
   class RaftIoThread(
-    client: KafkaRaftClient[_]
+    client: KafkaRaftClient[_],
+    val shutdownTimeoutMs: Int,
   ) extends ShutdownableThread(
     name = "raft-io-thread",
     isInterruptible = false
@@ -54,7 +54,7 @@ object KafkaRaftManager {
 
     override def initiateShutdown(): Boolean = {
       if (super.initiateShutdown()) {
-        client.shutdown(5000).whenComplete { (_, exception) =>
+        client.shutdown(shutdownTimeoutMs).whenComplete { (_, exception) =>
           if (exception != null) {
             error("Graceful shutdown of RaftClient failed", exception)
           } else {
@@ -90,10 +90,12 @@ class KafkaRaftManager(
   metadataPartition: TopicPartition,
   config: KafkaConfig,
   time: Time,
-  metrics: Metrics
+  metrics: Metrics,
+  val controllerQuorumVotersFuture: CompletableFuture[util.List[String]],
+  shutdownTimeoutMs: Int = 5000
 ) extends RaftManager with Logging {
 
-  private val raftConfig = new RaftConfig(config.originals)
+  private val raftConfig: RaftConfig = new RaftConfig(config)
   private val nodeId = if (config.processRoles.contains(ControllerRole)) {
     config.controllerId
   } else {
@@ -111,16 +113,15 @@ class KafkaRaftManager(
   private val metadataLog = buildMetadataLog()
   private val netChannel = buildNetworkChannel()
   private val raftClient = buildRaftClient()
-  private val raftIoThread = new RaftIoThread(raftClient)
+  private val raftIoThread = new RaftIoThread(raftClient, shutdownTimeoutMs)
   private val metaLogShim = new MetaLogRaftShim(raftClient, nodeId)
-
-  val voterNodes: Seq[Node] = raftConfig.quorumVoterNodes().asScala.toSeq
 
   def currentLeader: Option[Node] = {
     val leaderAndEpoch = raftClient.leaderAndEpoch()
     if (leaderAndEpoch.leaderId.isPresent) {
       val leaderId = leaderAndEpoch.leaderId.getAsInt
-      voterNodes.find(_.id == leaderId)
+      val leaderAddress = raftConfig.quorumVoterConnections().get(leaderId)
+      Some(new Node(leaderId, leaderAddress.getHostName, leaderAddress.getPort))
     } else {
       None
     }
@@ -129,8 +130,14 @@ class KafkaRaftManager(
   def metaLogManager: MetaLogManager = metaLogShim
 
   def startup(): Unit = {
+    // Wait for the controller quorum voters string to be set
+    val voterAddresses = RaftConfig.parseVoterConnections(controllerQuorumVotersFuture.get())
+
+    // Update RaftClient voter channel endpoints
+    for (voterAddressEntry <- voterAddresses.entrySet.asScala) {
+      netChannel.updateEndpoint(voterAddressEntry.getKey, voterAddressEntry.getValue)
+    }
     netChannel.start()
-    raftClient.initialize()
     raftIoThread.start()
   }
 
@@ -170,37 +177,28 @@ class KafkaRaftManager(
 
   private def buildRaftClient(): KafkaRaftClient[ApiMessageAndVersion] = {
 
-
-    val quorumState = new QuorumState(
-      nodeId,
-      raftConfig.quorumVoterIds,
-      raftConfig.electionTimeoutMs,
-      raftConfig.fetchTimeoutMs,
-      new FileBasedStateStore(new File(dataDir, "quorum-state")),
-      time,
-      logContext,
-      new Random()
-    )
-
     val expirationTimer = new SystemTimer("raft-expiration-executor")
     val expirationService = new TimingWheelExpirationService(expirationTimer)
 
-    new KafkaRaftClient(
-      raftConfig,
+    val client = new KafkaRaftClient(
       new MetadataRecordSerde,
       netChannel,
       metadataLog,
-      quorumState,
+      new FileBasedStateStore(new File(dataDir, "quorum-state")),
       time,
       metrics,
       expirationService,
-      logContext
+      logContext,
+      nodeId,
+      raftConfig
     )
+    client.initialize()
+    client
   }
 
   private def buildNetworkChannel(): KafkaNetworkChannel = {
     val netClient = buildNetworkClient()
-    new KafkaNetworkChannel(time, netClient, raftConfig.requestTimeoutMs)
+    new KafkaNetworkChannel(time, netClient, config.quorumRequestTimeoutMs)
   }
 
   private def createDataDir(): File = {
@@ -272,7 +270,7 @@ class KafkaRaftManager(
       reconnectBackoffMsMs,
       Selectable.USE_DEFAULT_BUFFER_SIZE,
       config.socketReceiveBufferBytes,
-      raftConfig.requestTimeoutMs,
+      config.quorumRequestTimeoutMs,
       config.connectionSetupTimeoutMs,
       config.connectionSetupTimeoutMaxMs,
       ClientDnsLookup.USE_ALL_DNS_IPS,

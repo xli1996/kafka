@@ -19,7 +19,7 @@ package org.apache.kafka.controller;
 
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -29,7 +29,7 @@ class ControllerResult<T> {
     private final T response;
 
     public ControllerResult(T response) {
-        this(Collections.emptyList(), response);
+        this(new ArrayList<>(), response);
     }
 
     public ControllerResult(List<ApiMessageAndVersion> records, T response) {
@@ -69,6 +69,6 @@ class ControllerResult<T> {
     }
 
     public ControllerResult<T> withoutRecords() {
-        return new ControllerResult<>(Collections.emptyList(), response);
+        return new ControllerResult<>(new ArrayList<>(), response);
     }
 }

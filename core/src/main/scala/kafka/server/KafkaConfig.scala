@@ -17,35 +17,34 @@
 
 package kafka.server
 
-import java.util
-import java.util.{Collections, Locale, Properties}
-
 import kafka.api.{ApiVersion, ApiVersionValidator, KAFKA_0_10_0_IV1, KAFKA_2_1_IV0, KAFKA_2_7_IV0}
 import kafka.cluster.EndPoint
 import kafka.coordinator.group.OffsetConfig
 import kafka.coordinator.transaction.{TransactionLog, TransactionStateManager}
 import kafka.message.{BrokerCompressionCodec, CompressionCodec, ZStdCompressionCodec}
 import kafka.security.authorizer.AuthorizerUtils
-import kafka.server.KafkaServer.{BrokerRole, ControllerRole, ProcessRole}
+import kafka.server.Server.{BrokerRole, ControllerRole, ProcessRole}
 import kafka.utils.CoreUtils
 import kafka.utils.Implicits._
 import org.apache.kafka.clients.CommonClientConfigs
-import org.apache.kafka.common.{Node, Reconfigurable}
-import org.apache.kafka.common.config.SecurityConfig
+import org.apache.kafka.common.Reconfigurable
 import org.apache.kafka.common.config.ConfigDef.{ConfigKey, ValidList}
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.config.types.Password
-import org.apache.kafka.common.config.{AbstractConfig, ConfigDef, ConfigException, SaslConfigs, SslClientAuth, SslConfigs, TopicConfig}
+import org.apache.kafka.common.config.{AbstractConfig, ConfigDef, ConfigException, SaslConfigs, SecurityConfig, SslClientAuth, SslConfigs, TopicConfig}
 import org.apache.kafka.common.metrics.Sensor
 import org.apache.kafka.common.network.ListenerName
 import org.apache.kafka.common.record.{LegacyRecord, Records, TimestampType}
 import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Utils
+import org.apache.kafka.raft.RaftConfig
 import org.apache.kafka.server.authorizer.Authorizer
 import org.apache.zookeeper.client.ZKClientConfig
 
-import scala.jdk.CollectionConverters._
+import java.util
+import java.util.{Collections, Locale, Properties}
 import scala.collection.{Map, Seq}
+import scala.jdk.CollectionConverters._
 
 object Defaults {
   /** ********* Zookeeper Configuration ***********/
@@ -269,6 +268,15 @@ object Defaults {
   val PasswordEncoderCipherAlgorithm = "AES/CBC/PKCS5Padding"
   val PasswordEncoderKeyLength = 128
   val PasswordEncoderIterations = 4096
+
+  /** ********* Raft Quorum Configuration *********/
+  val QuorumVoters = RaftConfig.DEFAULT_QUORUM_VOTERS
+  val QuorumElectionTimeoutMs = RaftConfig.DEFAULT_QUORUM_ELECTION_TIMEOUT_MS
+  val QuorumFetchTimeoutMs = RaftConfig.DEFAULT_QUORUM_FETCH_TIMEOUT_MS
+  val QuorumElectionBackoffMs = RaftConfig.DEFAULT_QUORUM_ELECTION_BACKOFF_MAX_MS
+  val QuorumLingerMs = RaftConfig.DEFAULT_QUORUM_LINGER_MS
+  val QuorumRequestTimeoutMs = RaftConfig.DEFAULT_QUORUM_REQUEST_TIMEOUT_MS
+  val QuorumRetryBackoffMs = RaftConfig.DEFAULT_QUORUM_RETRY_BACKOFF_MS
 }
 
 object KafkaConfig {
@@ -358,9 +366,7 @@ object KafkaConfig {
   val RequestTimeoutMsProp = CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG
   val ConnectionSetupTimeoutMsProp = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG
   val ConnectionSetupTimeoutMaxMsProp = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG
-  val EnableMetadataQuorumProp = "enable.metadata.quorum"
   val ProcessRolesProp = "process.roles"
-  val ControllerQuorumVotersProp = "controller.quorum.voters"
   val InitialBrokerRegistrationTimeoutMs = "initial.broker.registration.timeout.ms"
   val BrokerHeartbeatIntervalMsProp = "broker.heartbeat.interval.ms"
   val BrokerSessionTimeoutMsProp = "broker.session.timeout.ms"
@@ -653,7 +659,6 @@ object KafkaConfig {
   val ConnectionSetupTimeoutMsDoc = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_DOC
   val ConnectionSetupTimeoutMaxMsDoc = CommonClientConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_DOC
   val ProcessRolesDoc = "The roles that this process plays: 'broker', 'controller', or 'broker,controller' if it is both"
-  val ControllerQuorumVotersDoc = "A comma-separated list of controller URIs that KIP-500 brokers should connect to on startup. Required for brokers running in KIP-500 mode."
   var InitialBrokerRegistrationTimeoutMsDoc = "When initially registering with the controller quorum, the number of milliseconds to wait before declaring failure and exiting the broker process."
   val BrokerHeartbeatIntervalMsDoc = "The length of time in milliseconds between broker heartbeats. Used when running in KIP-500 mode."
   val BrokerSessionTimeoutMsDoc = "The length of time in milliseconds that a broker lease lasts if no heartbeats are made. Used when running in KIP-500 mode."
@@ -1056,14 +1061,10 @@ object KafkaConfig {
       .define(ConnectionSetupTimeoutMsProp, LONG, Defaults.ConnectionSetupTimeoutMs, MEDIUM, ConnectionSetupTimeoutMsDoc)
       .define(ConnectionSetupTimeoutMaxMsProp, LONG, Defaults.ConnectionSetupTimeoutMaxMs, MEDIUM, ConnectionSetupTimeoutMaxMsDoc)
       .define(ProcessRolesProp, LIST, Collections.emptyList(), ValidList.in("broker", "controller"), HIGH, ProcessRolesDoc)
-      .define(ControllerQuorumVotersProp, STRING, null, HIGH, ControllerQuorumVotersDoc)
       .define(InitialBrokerRegistrationTimeoutMs, INT, Defaults.InitialBrokerRegistrationTimeoutMs, MEDIUM, InitialBrokerRegistrationTimeoutMsDoc)
       .define(BrokerHeartbeatIntervalMsProp, INT, Defaults.BrokerHeartbeatIntervalMs, MEDIUM, BrokerHeartbeatIntervalMsDoc)
       .define(BrokerSessionTimeoutMsProp, INT, Defaults.BrokerSessionTimeoutMs, MEDIUM, BrokerSessionTimeoutMsDoc)
       .define(MetadataLogDirProp, STRING, null, HIGH, MetadataLogDirDoc)
-
-      // Experimental flag to turn on APIs required for the internal metadata quorum (KIP-500)
-      .defineInternal(EnableMetadataQuorumProp, BOOLEAN, false, LOW)
 
       /************* Authorizer Configuration ***********/
       .define(AuthorizerClassNameProp, STRING, Defaults.AuthorizerClassName, LOW, AuthorizerClassNameDoc)
@@ -1288,6 +1289,15 @@ object KafkaConfig {
       .define(PasswordEncoderCipherAlgorithmProp, STRING, Defaults.PasswordEncoderCipherAlgorithm, LOW, PasswordEncoderCipherAlgorithmDoc)
       .define(PasswordEncoderKeyLengthProp, INT, Defaults.PasswordEncoderKeyLength, atLeast(8), LOW, PasswordEncoderKeyLengthDoc)
       .define(PasswordEncoderIterationsProp, INT, Defaults.PasswordEncoderIterations, atLeast(1024), LOW, PasswordEncoderIterationsDoc)
+
+      /** ********* Raft Quorum Configuration *********/
+      .defineInternal(RaftConfig.QUORUM_VOTERS_CONFIG, LIST, Defaults.QuorumVoters, new RaftConfig.ControllerQuorumVotersValidator(), HIGH, RaftConfig.QUORUM_VOTERS_DOC)
+      .defineInternal(RaftConfig.QUORUM_ELECTION_TIMEOUT_MS_CONFIG, INT, Defaults.QuorumElectionTimeoutMs, null, HIGH, RaftConfig.QUORUM_ELECTION_TIMEOUT_MS_DOC)
+      .defineInternal(RaftConfig.QUORUM_FETCH_TIMEOUT_MS_CONFIG, INT, Defaults.QuorumFetchTimeoutMs, null, HIGH, RaftConfig.QUORUM_FETCH_TIMEOUT_MS_DOC)
+      .defineInternal(RaftConfig.QUORUM_ELECTION_BACKOFF_MAX_MS_CONFIG, INT, Defaults.QuorumElectionBackoffMs, null, HIGH, RaftConfig.QUORUM_ELECTION_BACKOFF_MAX_MS_DOC)
+      .defineInternal(RaftConfig.QUORUM_LINGER_MS_CONFIG, INT, Defaults.QuorumLingerMs, null, MEDIUM, RaftConfig.QUORUM_LINGER_MS_DOC)
+      .defineInternal(RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_CONFIG, INT, Defaults.QuorumRequestTimeoutMs, null, MEDIUM, RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_DOC)
+      .defineInternal(RaftConfig.QUORUM_RETRY_BACKOFF_MS_CONFIG, INT, Defaults.QuorumRetryBackoffMs, null, LOW, RaftConfig.QUORUM_RETRY_BACKOFF_MS_DOC)
   }
 
   def configNames: Seq[String] = configDef.names.asScala.toBuffer.sorted
@@ -1343,38 +1353,6 @@ object KafkaConfig {
   def maybeSensitive(configType: Option[ConfigDef.Type]): Boolean = {
     // If we can't determine the config entry type, treat it as a sensitive config to be safe
     configType.isEmpty || configType.contains(ConfigDef.Type.PASSWORD)
-  }
-
-  def controllerQuorumVoterStringsToNodes(connectString: String): Seq[Node] = {
-    connectString.split(",").filterNot(_.isEmpty()).map { case input =>
-      val atIndex = input.indexOf('@')
-      if (atIndex < 0) {
-        throw new RuntimeException("Invalid controller node specification '" + input +
-          "': failed to find an at sign.")
-      }
-      val idString = input.substring(0, atIndex)
-      val id = try {
-        idString.toInt
-      } catch {
-        case e: NumberFormatException => throw new RuntimeException("Invalid controller " +
-          "node specification '" + input + "': failed to parse id.", e)
-      }
-      val hostPort = input.substring(atIndex + 1)
-      val colonIndex = hostPort.indexOf(':')
-      if (colonIndex < 0) {
-        throw new RuntimeException("Invalid controller node specification '" + input +
-          "': failed to find a colon.")
-      }
-      val host = hostPort.substring(0, colonIndex)
-      val portString = hostPort.substring(colonIndex + 1)
-      val port = try {
-        portString.toInt
-      } catch {
-        case e: NumberFormatException => throw new RuntimeException("Invalid controller " +
-          "node specification '" + input + "': failed to parse numeric port.", e)
-      }
-      new Node(id, host, port, null)
-    }
   }
 }
 
@@ -1520,7 +1498,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   val connectionSetupTimeoutMs = getLong(KafkaConfig.ConnectionSetupTimeoutMsProp)
   val connectionSetupTimeoutMaxMs = getLong(KafkaConfig.ConnectionSetupTimeoutMaxMsProp)
   val processRoles = parseProcessRoles()
-  val controllerQuorumVoters = getString(KafkaConfig.ControllerQuorumVotersProp)
+  val quorumControlPlaneEnabled = processRoles.nonEmpty
   val initialRegistrationTimeoutMs = getInt(KafkaConfig.InitialBrokerRegistrationTimeoutMs)
   val brokerHeartbeatIntervalMs = getInt(KafkaConfig.BrokerHeartbeatIntervalMsProp)
   val brokerSessionTimeoutMs = getInt(KafkaConfig.BrokerSessionTimeoutMsProp)
@@ -1652,9 +1630,6 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   /** ********* Feature configuration ***********/
   def isFeatureVersioningSupported = interBrokerProtocolVersion >= KAFKA_2_7_IV0
 
-  /** ********* Experimental metadata quorum configuration ***********/
-  def metadataQuorumEnabled = getBoolean(KafkaConfig.EnableMetadataQuorumProp)
-
   /** ********* Group coordinator configuration ***********/
   val groupMinSessionTimeoutMs = getInt(KafkaConfig.GroupMinSessionTimeoutMsProp)
   val groupMaxSessionTimeoutMs = getInt(KafkaConfig.GroupMaxSessionTimeoutMsProp)
@@ -1741,6 +1716,15 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
 
   val deleteTopicEnable = getBoolean(KafkaConfig.DeleteTopicEnableProp)
   def compressionType = getString(KafkaConfig.CompressionTypeProp)
+
+  /** ********* Raft Quorum Configuration *********/
+  val quorumVoters = getList(RaftConfig.QUORUM_VOTERS_CONFIG)
+  val quorumElectionTimeoutMs = getInt(RaftConfig.QUORUM_ELECTION_TIMEOUT_MS_CONFIG)
+  val quorumFetchTimeoutMs = getInt(RaftConfig.QUORUM_FETCH_TIMEOUT_MS_CONFIG)
+  val quorumElectionBackoffMs = getInt(RaftConfig.QUORUM_ELECTION_BACKOFF_MAX_MS_CONFIG)
+  val quorumLingerMs = getInt(RaftConfig.QUORUM_LINGER_MS_CONFIG)
+  val quorumRequestTimeoutMs = getInt(RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_CONFIG)
+  val quorumRetryBackoffMs = getInt(RaftConfig.QUORUM_RETRY_BACKOFF_MS_CONFIG)
 
   def addReconfigurable(reconfigurable: Reconfigurable): Unit = {
     dynamicConfig.addReconfigurable(reconfigurable)

@@ -32,7 +32,7 @@ import kafka.server.ForwardingManager;
 import kafka.server.KafkaApis;
 import kafka.server.KafkaConfig;
 import kafka.server.KafkaConfig$;
-import kafka.server.LegacyAdminManager;
+import kafka.server.ZkAdminManager;
 import kafka.server.MetadataCache;
 import kafka.server.QuotaFactory;
 import kafka.server.ReplicaManager;
@@ -96,7 +96,7 @@ public class MetadataRequestBenchmark {
     private RequestChannel.Metrics requestChannelMetrics = Mockito.mock(RequestChannel.Metrics.class);
     private ReplicaManager replicaManager = Mockito.mock(ReplicaManager.class);
     private GroupCoordinator groupCoordinator = Mockito.mock(GroupCoordinator.class);
-    private LegacyAdminManager adminManager = Mockito.mock(LegacyAdminManager.class);
+    private ZkAdminManager adminManager = Mockito.mock(ZkAdminManager.class);
     private TransactionCoordinator transactionCoordinator = Mockito.mock(TransactionCoordinator.class);
     private KafkaController kafkaController = Mockito.mock(KafkaController.class);
     private ForwardingManager forwardingManager = Mockito.mock(ForwardingManager.class);

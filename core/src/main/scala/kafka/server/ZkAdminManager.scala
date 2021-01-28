@@ -57,10 +57,10 @@ import org.apache.kafka.common.utils.Sanitizer
 import scala.collection.{Map, mutable, _}
 import scala.jdk.CollectionConverters._
 
-class LegacyAdminManager(val config: KafkaConfig,
-                         val metrics: Metrics,
-                         val metadataCache: MetadataCache,
-                         val zkClient: KafkaZkClient) extends Logging with KafkaMetricsGroup {
+class ZkAdminManager(val config: KafkaConfig,
+                     val metrics: Metrics,
+                     val metadataCache: MetadataCache,
+                     val zkClient: KafkaZkClient) extends Logging with KafkaMetricsGroup {
 
   this.logIdent = "[Admin Manager on Broker " + config.brokerId + "]: "
 
@@ -145,7 +145,7 @@ class LegacyAdminManager(val config: KafkaConfig,
                    responseCallback: Map[String, ApiError] => Unit): Unit = {
 
     // 1. map over topics creating assignment and calling zookeeper
-    val brokers = metadataCache.getAliveBrokers.map { b => kafka.admin.BrokerMetadata(b.id, b.rack) }
+    val brokers = metadataCache.getAliveBrokers.map { b => kafka.admin.BrokerMetadata(b.id, Option(b.rack)) }
     val metadata = toCreate.values.map(topic =>
       try {
         if (metadataCache.contains(topic.name))

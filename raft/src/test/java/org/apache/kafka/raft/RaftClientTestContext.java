@@ -73,7 +73,6 @@ import java.util.OptionalLong;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.kafka.raft.RaftUtil.hasValidTopicPartition;
@@ -92,7 +91,6 @@ public final class RaftClientTestContext {
     final int retryBackoffMs = Builder.RETRY_BACKOFF_MS;
 
     private final QuorumStateStore quorumStateStore;
-    private final QuorumState quorum;
     final int localId;
     public final KafkaRaftClient<String> client;
     final Metrics metrics;
@@ -185,35 +183,27 @@ public final class RaftClientTestContext {
             Metrics metrics = new Metrics(time);
             MockNetworkChannel channel = new MockNetworkChannel();
             LogContext logContext = new LogContext();
-            QuorumState quorum = new QuorumState(localId, voters, electionTimeoutMs, FETCH_TIMEOUT_MS,
-                    quorumStateStore, time, logContext, random);
             MockListener listener = new MockListener();
-
-            Map<Integer, InetSocketAddress> voterAddresses = voters
-                .stream()
-                .collect(Collectors.toMap(
-                    Function.identity(),
-                    RaftClientTestContext::mockAddress
-                ));
+            Map<Integer, InetSocketAddress> voterAddressMap = voters.stream()
+                .collect(Collectors.toMap(id -> id, RaftClientTestContext::mockAddress));
+            RaftConfig raftConfig = new RaftConfig(voterAddressMap, requestTimeoutMs, RETRY_BACKOFF_MS, electionTimeoutMs,
+                    ELECTION_BACKOFF_MAX_MS, FETCH_TIMEOUT_MS, appendLingerMs);
 
             KafkaRaftClient<String> client = new KafkaRaftClient<>(
                 STRING_SERDE,
                 channel,
                 messageQueue,
                 log,
-                quorum,
+                quorumStateStore,
                 memoryPool,
                 time,
                 metrics,
                 new MockExpirationService(time),
-                voterAddresses,
-                ELECTION_BACKOFF_MAX_MS,
-                RETRY_BACKOFF_MS,
-                requestTimeoutMs,
                 FETCH_MAX_WAIT_MS,
-                appendLingerMs,
+                localId,
                 logContext,
-                random
+                random,
+                raftConfig
             );
 
             client.register(listener);
@@ -227,7 +217,6 @@ public final class RaftClientTestContext {
                 messageQueue,
                 time,
                 quorumStateStore,
-                quorum,
                 voters,
                 metrics,
                 listener
@@ -243,7 +232,6 @@ public final class RaftClientTestContext {
         MockMessageQueue messageQueue,
         MockTime time,
         QuorumStateStore quorumStateStore,
-        QuorumState quorum,
         Set<Integer> voters,
         Metrics metrics,
         MockListener listener
@@ -255,7 +243,6 @@ public final class RaftClientTestContext {
         this.messageQueue = messageQueue;
         this.time = time;
         this.quorumStateStore = quorumStateStore;
-        this.quorum = quorum;
         this.voters = voters;
         this.metrics = metrics;
         this.listener = listener;
@@ -388,7 +375,7 @@ public final class RaftClientTestContext {
     }
 
     void assertResignedLeader(int epoch, int leaderId) throws IOException {
-        assertTrue(quorum.isResigned());
+        assertTrue(client.quorum().isResigned());
         assertEquals(ElectionState.withElectedLeader(epoch, leaderId, voters), quorumStateStore.readElectionState());
     }
 

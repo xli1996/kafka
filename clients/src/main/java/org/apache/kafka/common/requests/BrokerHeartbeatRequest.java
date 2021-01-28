@@ -38,6 +38,11 @@ public class BrokerHeartbeatRequest extends AbstractRequest {
         public BrokerHeartbeatRequest build(short version) {
             return new BrokerHeartbeatRequest(data, version);
         }
+
+        @Override
+        public String toString() {
+            return data.toString();
+        }
     }
 
     private final BrokerHeartbeatRequestData data;

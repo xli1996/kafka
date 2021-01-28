@@ -49,18 +49,7 @@ case object DefaultUserDefaultClientIdEntity extends QuotaEntity
  */
 class QuotaMetadataProcessor(private[metadata] val quotaManagers: QuotaManagers,
                              private[metadata] val connectionQuotas: ConnectionQuotas,
-                             private[metadata] val quotaCache: QuotaCache) extends BrokerMetadataProcessor with Logging {
-
-  override def process(event: BrokerMetadataEvent): Unit = {
-    event match {
-      case MetadataLogEvent(apiMessages, _) =>
-        apiMessages.forEach {
-          case record: QuotaRecord => handleQuotaRecord(record)
-          case _ => // We only care about quota records
-        }
-      case _ => // We only care about metadata events
-    }
-  }
+                             private[metadata] val quotaCache: QuotaCache) extends Logging {
 
   def handleQuotaRecord(quotaRecord: QuotaRecord): Unit = {
     val entityMap = mutable.Map[String, String]()

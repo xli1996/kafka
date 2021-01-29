@@ -18,6 +18,7 @@
 package org.apache.kafka.controller;
 
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.controller.BrokersToIsrs.PartitionsOnReplicaIterator;
 import org.apache.kafka.controller.BrokersToIsrs.TopicPartition;
 import org.apache.kafka.timeline.SnapshotRegistry;
@@ -55,7 +56,7 @@ public class BrokersToIsrsTest {
 
     @Test
     public void testIterator() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         BrokersToIsrs brokersToIsrs = new BrokersToIsrs(snapshotRegistry);
         assertEquals(toSet(), toSet(brokersToIsrs.iterator(1, false)));
         brokersToIsrs.update(UUIDS[0], 0, null, new int[] {1, 2, 3}, -1, 1);
@@ -77,7 +78,7 @@ public class BrokersToIsrsTest {
 
     @Test
     public void testLeadersOnlyIterator() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         BrokersToIsrs brokersToIsrs = new BrokersToIsrs(snapshotRegistry);
         brokersToIsrs.update(UUIDS[0], 0, null, new int[]{1, 2, 3}, -1, 1);
         brokersToIsrs.update(UUIDS[1], 1, null, new int[]{2, 3, 4}, -1, 4);
@@ -94,7 +95,7 @@ public class BrokersToIsrsTest {
 
     @Test
     public void testNoLeader() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         BrokersToIsrs brokersToIsrs = new BrokersToIsrs(snapshotRegistry);
         brokersToIsrs.update(UUIDS[0], 2, null, new int[]{1, 2, 3}, -1, 3);
         assertEquals(toSet(new TopicPartition(UUIDS[0], 2)),

@@ -21,6 +21,7 @@ import org.apache.kafka.common.metadata.FeatureLevelRecord;
 import org.apache.kafka.common.protocol.ApiMessageAndVersion;
 import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.requests.ApiError;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.metadata.FeatureManager.FinalizedFeaturesAndEpoch;
 import org.apache.kafka.metadata.VersionRange;
 import org.apache.kafka.timeline.SnapshotRegistry;
@@ -53,7 +54,7 @@ public class FeatureControlManagerTest {
 
     @Test
     public void testUpdateFeatures() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         snapshotRegistry.createSnapshot(-1);
         FeatureControlManager manager = new FeatureControlManager(
             rangeMap("foo", 1, 2), snapshotRegistry);
@@ -84,7 +85,7 @@ public class FeatureControlManagerTest {
     public void testReplay() {
         FeatureLevelRecord record = new FeatureLevelRecord().
             setName("foo").setMinFeatureLevel((short) 1).setMaxFeatureLevel((short) 2);
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         snapshotRegistry.createSnapshot(-1);
         FeatureControlManager manager = new FeatureControlManager(
             rangeMap("foo", 1, 2), snapshotRegistry);
@@ -96,7 +97,7 @@ public class FeatureControlManagerTest {
 
     @Test
     public void testUpdateFeaturesErrorCases() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         FeatureControlManager manager = new FeatureControlManager(
             rangeMap("foo", 1, 5, "bar", 1, 2), snapshotRegistry);
         assertEquals(new ControllerResult<>(Collections.

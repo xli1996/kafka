@@ -71,7 +71,7 @@ import java.util.NoSuchElementException;
  * respectively.  There's a fair amount of boilerplate for this, but it's necessary so
  * that timeline data structures can be used while writing idiomatic Java code.
  * The accessor APIs have two versions -- one that looks at the current state, and one
- * that looks at a historical snapshotted state.  Mutation APIs only ever mutate thte
+ * that looks at a historical snapshotted state.  Mutation APIs only ever mutate the
  * current state.
  *
  * One very important feature of SnapshottableHashTable is that we support iterating
@@ -83,6 +83,12 @@ import java.util.NoSuchElementException;
  */
 class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEpoch>
         extends BaseHashTable<T> implements Revertable {
+
+    /**
+     * A special epoch value that represents the latest data.
+     */
+    final static long LATEST_EPOCH = Long.MAX_VALUE;
+
     interface ElementWithStartEpoch {
         void setStartEpoch(long startEpoch);
         long startEpoch();
@@ -251,7 +257,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     }
 
     int snapshottableSize(long epoch) {
-        if (epoch == Long.MAX_VALUE) {
+        if (epoch == LATEST_EPOCH) {
             return baseSize();
         } else {
             Snapshot snapshot = snapshotRegistry.get(epoch);
@@ -269,7 +275,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
         if (result != null && result.startEpoch() <= epoch) {
             return result;
         }
-        if (epoch == Long.MAX_VALUE) {
+        if (epoch == LATEST_EPOCH) {
             return null;
         }
         Snapshot snapshot = snapshotRegistry.get(epoch);
@@ -286,7 +292,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
         if (prev != null) {
             return false;
         }
-        object.setStartEpoch(snapshotRegistry.curEpoch());
+        object.setStartEpoch(snapshotRegistry.latestEpoch() + 1);
         int prevSize = baseSize();
         baseAddOrReplace(object);
         updateTierData(prevSize);
@@ -294,7 +300,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     }
 
     T snapshottableAddOrReplace(T object) {
-        object.setStartEpoch(snapshotRegistry.curEpoch());
+        object.setStartEpoch(snapshotRegistry.latestEpoch() + 1);
         int prevSize = baseSize();
         T prev = baseAddOrReplace(object);
         if (prev == null) {
@@ -316,7 +322,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     }
 
     private void updateTierData(int prevSize) {
-        Iterator<Snapshot> iter = snapshotRegistry.snapshots();
+        Iterator<Snapshot> iter = snapshotRegistry.iterator();
         while (iter.hasNext()) {
             Snapshot snapshot = iter.next();
             HashTier<T> tier = snapshot.data(SnapshottableHashTable.this);
@@ -328,7 +334,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     }
 
     private void updateTierData(T prev, int prevSize) {
-        Iterator<Snapshot> iter = snapshotRegistry.snapshots();
+        Iterator<Snapshot> iter = snapshotRegistry.iterator();
         while (iter.hasNext()) {
             Snapshot snapshot = iter.next();
             HashTier<T> tier = snapshot.data(SnapshottableHashTable.this);
@@ -346,7 +352,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     }
 
     Iterator<T> snapshottableIterator(long epoch) {
-        if (epoch == Long.MAX_VALUE) {
+        if (epoch == LATEST_EPOCH) {
             return new CurrentIterator(baseElements());
         } else {
             return new HistoricalIterator(baseElements(), snapshotRegistry.get(epoch));
@@ -360,7 +366,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
         bld.append(baseToDebugString());
         bld.append(String.format(",%nsnapshot tiers: [%n"));
         String prefix = "";
-        for (Iterator<Snapshot> iter = snapshotRegistry.snapshots(); iter.hasNext(); ) {
+        for (Iterator<Snapshot> iter = snapshotRegistry.iterator(); iter.hasNext(); ) {
             Snapshot snapshot = iter.next();
             bld.append(prefix);
             bld.append("epoch ").append(snapshot.epoch()).append(": ");
@@ -388,7 +394,7 @@ class SnapshottableHashTable<T extends SnapshottableHashTable.ElementWithStartEp
     @Override
     public void executeRevert(long targetEpoch, Object data) {
         HashTier<T> tier = (HashTier<T>) data;
-        Iterator<T> iter = snapshottableIterator(Long.MAX_VALUE);
+        Iterator<T> iter = snapshottableIterator(LATEST_EPOCH);
         while (iter.hasNext()) {
             T element = iter.next();
             if (element.startEpoch() > targetEpoch) {

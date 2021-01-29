@@ -81,7 +81,7 @@ public class ConfigurationControlManagerTest {
 
     @Test
     public void testReplay() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ConfigurationControlManager manager =
             new ConfigurationControlManager(new LogContext(), snapshotRegistry, CONFIGS);
         assertEquals(Collections.emptyMap(), manager.getConfigs(BROKER0));
@@ -131,7 +131,7 @@ public class ConfigurationControlManagerTest {
 
     @Test
     public void testIncrementalAlterConfigs() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ConfigurationControlManager manager =
             new ConfigurationControlManager(new LogContext(), snapshotRegistry, CONFIGS);
         assertEquals(new ControllerResult<Map<ConfigResource, ApiError>>(Collections.singletonList(
@@ -150,7 +150,7 @@ public class ConfigurationControlManagerTest {
 
     @Test
     public void testIsSplittable() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ConfigurationControlManager manager =
             new ConfigurationControlManager(new LogContext(), snapshotRegistry, CONFIGS);
         assertTrue(manager.isSplittable(BROKER, "foo.bar"));
@@ -162,7 +162,7 @@ public class ConfigurationControlManagerTest {
 
     @Test
     public void testGetConfigValueDefault() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ConfigurationControlManager manager =
             new ConfigurationControlManager(new LogContext(), snapshotRegistry, CONFIGS);
         assertEquals("1", manager.getConfigValueDefault(BROKER, "foo.bar"));
@@ -173,7 +173,7 @@ public class ConfigurationControlManagerTest {
 
     @Test
     public void testLegacyAlterConfigs() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ConfigurationControlManager manager =
             new ConfigurationControlManager(new LogContext(), snapshotRegistry, CONFIGS);
         List<ApiMessageAndVersion> expectedRecords1 = Arrays.asList(

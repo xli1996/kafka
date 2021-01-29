@@ -52,7 +52,7 @@ public class ClusterControlManagerTest {
     public void testReplay() {
         MockTime time = new MockTime(0, 0, 0);
 
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ClusterControlManager clusterControl = new ClusterControlManager(
             new LogContext(), time, snapshotRegistry, 1000,
                 new SimpleReplicaPlacementPolicy(new Random()));
@@ -93,7 +93,7 @@ public class ClusterControlManagerTest {
             setPort((short) 9092).
             setName("PLAINTEXT").
             setHost("example.com"));
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ClusterControlManager clusterControl = new ClusterControlManager(
             new LogContext(), new MockTime(0, 0, 0), snapshotRegistry, 1000,
             new SimpleReplicaPlacementPolicy(new Random()));
@@ -113,7 +113,7 @@ public class ClusterControlManagerTest {
     @ValueSource(ints = {3, 10})
     public void testChooseRandomRegistered(int numUsableBrokers) throws Exception {
         MockTime time = new MockTime(0, 0, 0);
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         MockRandom random = new MockRandom();
         ClusterControlManager clusterControl = new ClusterControlManager(
             new LogContext(), time, snapshotRegistry, 1000,

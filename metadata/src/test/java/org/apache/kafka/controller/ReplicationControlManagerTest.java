@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 @Timeout(40)
 public class ReplicationControlManagerTest {
     private static ReplicationControlManager newReplicationControlManager() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(-1);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         LogContext logContext = new LogContext();
         MockTime time = new MockTime();
         MockRandom random = new MockRandom();

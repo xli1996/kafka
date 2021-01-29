@@ -23,6 +23,7 @@ import org.apache.kafka.common.protocol.Errors;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
+import org.apache.kafka.common.utils.LogContext;
 import org.apache.kafka.timeline.SnapshotRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -45,7 +46,7 @@ public class ClientQuotaControlManagerTest {
 
     @Test
     public void testInvalidEntityTypes() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
         // Unknown type "foo"
@@ -76,7 +77,7 @@ public class ClientQuotaControlManagerTest {
 
     @Test
     public void testAlterAndRemove() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
         ClientQuotaEntity userEntity = userEntity("user-1");
@@ -151,7 +152,7 @@ public class ClientQuotaControlManagerTest {
 
     @Test
     public void testEntityTypes() {
-        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(0);
+        SnapshotRegistry snapshotRegistry = new SnapshotRegistry(new LogContext());
         ClientQuotaControlManager manager = new ClientQuotaControlManager(snapshotRegistry);
 
         Map<ClientQuotaEntity, Map<String, Double>> quotasToTest = new HashMap<>();

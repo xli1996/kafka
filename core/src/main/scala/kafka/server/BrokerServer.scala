@@ -21,7 +21,6 @@ import java.util
 import java.util.concurrent.{CompletableFuture, TimeUnit, TimeoutException}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
-
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.{ProducerIdGenerator, TransactionCoordinator}
 import kafka.log.LogManager
@@ -29,7 +28,7 @@ import kafka.metrics.KafkaYammerMetrics
 import kafka.network.SocketServer
 import kafka.security.CredentialProvider
 import kafka.server.KafkaBroker.metricsPrefix
-import kafka.server.metadata.{BrokerMetadataListener, LocalConfigRepository}
+import kafka.server.metadata.{BrokerMetadataListener, LocalConfigRepository, ClientQuotaCache, ClientQuotaMetadataManager}
 import kafka.utils.{CoreUtils, KafkaScheduler}
 import org.apache.kafka.common.internals.Topic
 import org.apache.kafka.common.message.BrokerRegistrationRequestData.{Listener, ListenerCollection}
@@ -107,7 +106,10 @@ class BrokerServer(
   var kafkaScheduler: KafkaScheduler = null
 
   var metadataCache: MetadataCache = null
+
   var quotaManagers: QuotaFactory.QuotaManagers = null
+
+  var quotaCache: ClientQuotaCache = null
 
   private var _brokerTopicStats: BrokerTopicStats = null
 
@@ -159,6 +161,7 @@ class BrokerServer(
       _brokerTopicStats = new BrokerTopicStats
 
       quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
+      quotaCache = new ClientQuotaCache()
 
       logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
@@ -222,17 +225,19 @@ class BrokerServer(
       /* Add all reconfigurables for config change notification before starting the metadata listener */
       config.dynamicConfig.addReconfigurables(this)
 
+      val clientQuotaMetadataManager = new ClientQuotaMetadataManager(quotaManagers, socketServer.connectionQuotas, quotaCache)
+
       brokerMetadataListener = new BrokerMetadataListener(
         config.brokerId,
         time,
         metadataCache,
         configRepository,
         groupCoordinator,
-        quotaManagers,
         replicaManager,
         transactionCoordinator,
         logManager,
-        threadNamePrefix)
+        threadNamePrefix,
+        clientQuotaMetadataManager)
 
       val networkListeners = new ListenerCollection()
       config.advertisedListeners.foreach { ep =>
@@ -292,7 +297,7 @@ class BrokerServer(
       dataPlaneRequestProcessor = new KafkaApis(socketServer.dataPlaneRequestChannel,
         replicaManager, null, groupCoordinator, transactionCoordinator,
         null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository)
+        fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository, Some(quotaCache))
 
       dataPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.dataPlaneRequestChannel, dataPlaneRequestProcessor, time,
         config.numIoThreads, s"${SocketServer.DataPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.DataPlaneThreadPrefix)
@@ -301,7 +306,7 @@ class BrokerServer(
         controlPlaneRequestProcessor = new KafkaApis(controlPlaneRequestChannel,
           replicaManager, null, groupCoordinator, transactionCoordinator,
           null, forwardingManager, null, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
-          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository)
+          fetchManager, brokerTopicStats, clusterId, time, tokenManager, brokerFeatures, featureCache, configRepository, Some(quotaCache))
 
         controlPlaneRequestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.controlPlaneRequestChannelOpt.get, controlPlaneRequestProcessor, time,
           1, s"${SocketServer.ControlPlaneMetricPrefix}RequestHandlerAvgIdlePercent", SocketServer.ControlPlaneThreadPrefix)

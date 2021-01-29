@@ -87,9 +87,10 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.{Map, Seq, Set, immutable, mutable}
 import scala.util.{Failure, Success, Try}
 import kafka.coordinator.group.GroupOverview
-import kafka.server.metadata.ConfigRepository
+import kafka.server.metadata.{ConfigRepository, ClientQuotaCache}
 import org.apache.kafka.clients.ClientResponse
 import org.apache.kafka.common.message.DescribeConfigsRequestData.DescribeConfigsResource
+import org.apache.kafka.common.quota.ClientQuotaEntity
 import org.apache.kafka.common.requests.DescribeConfigsResponse.ConfigSource
 
 import scala.annotation.nowarn
@@ -118,7 +119,8 @@ class KafkaApis(val requestChannel: RequestChannel,
                 val tokenManager: DelegationTokenManager,
                 val brokerFeatures: BrokerFeatures,
                 val finalizedFeatureCache: FinalizedFeatureCache,
-                val configRepository: ConfigRepository) extends ApiRequestHandler with Logging {
+                val configRepository: ConfigRepository,
+                val quotaCache: Option[ClientQuotaCache]) extends ApiRequestHandler with Logging {
 
   type FetchResponseStats = Map[TopicPartition, RecordConversionStats]
   this.logIdent = "[KafkaApi-%d] ".format(brokerId)
@@ -247,7 +249,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         case ApiKeys.ALTER_PARTITION_REASSIGNMENTS => maybeForward(request, handleAlterPartitionReassignmentsRequest)
         case ApiKeys.LIST_PARTITION_REASSIGNMENTS => handleListPartitionReassignmentsRequest(request)
         case ApiKeys.OFFSET_DELETE => handleOffsetDeleteRequest(request)
-        case ApiKeys.DESCRIBE_CLIENT_QUOTAS => maybeForward(request, handleDescribeClientQuotasRequest)
+        case ApiKeys.DESCRIBE_CLIENT_QUOTAS => handleDescribeClientQuotasRequest(request)
         case ApiKeys.ALTER_CLIENT_QUOTAS => maybeForward(request, handleAlterClientQuotasRequest)
         case ApiKeys.DESCRIBE_USER_SCRAM_CREDENTIALS => handleDescribeUserScramCredentialsRequest(request)
         case ApiKeys.ALTER_USER_SCRAM_CREDENTIALS => maybeForward(request, handleAlterUserScramCredentialsRequest)
@@ -3201,7 +3203,10 @@ class KafkaApis(val requestChannel: RequestChannel,
   def handleDescribeClientQuotasRequest(request: RequestChannel.Request): Unit = {
     val describeClientQuotasRequest = request.body[DescribeClientQuotasRequest]
 
-    if (adminManager != null && authHelper.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)) {
+        if (!authHelper.authorize(request.context, DESCRIBE_CONFIGS, CLUSTER, CLUSTER_NAME)) {
+      requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        describeClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+    } else if (adminManager != null) {
       val result = adminManager.describeClientQuotas(describeClientQuotasRequest.filter)
 
       val entriesData = result.iterator.map { case (quotaEntity, quotaValues) =>
@@ -3226,9 +3231,23 @@ class KafkaApis(val requestChannel: RequestChannel,
         new DescribeClientQuotasResponse(new DescribeClientQuotasResponseData()
           .setThrottleTimeMs(requestThrottleMs)
           .setEntries(entriesData.asJava)))
+    } else if (quotaCache.isDefined) {
+      val result = quotaCache.get.describeClientQuotas(
+        describeClientQuotasRequest.filter().components().asScala.toSeq,
+        describeClientQuotasRequest.filter().strict())
+      val resultAsJava = new util.HashMap[ClientQuotaEntity, util.Map[String, java.lang.Double]](result.size)
+      result.foreach { case (entity, quotas) =>
+        resultAsJava.put(entity, quotas.map { case (key, quota) => key -> Double.box(quota)}.asJava)
+      }
+      requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        DescribeClientQuotasResponse.fromQuotaEntities(resultAsJava, requestThrottleMs)
+      )
     } else {
       requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
         describeClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.CLUSTER_AUTHORIZATION_FAILED.exception))
+      warn("Neither LegacyAdminManager nor QuotaCache were defined")
+      requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
+        describeClientQuotasRequest.getErrorResponse(requestThrottleMs, Errors.UNKNOWN_SERVER_ERROR.exception))
     }
   }
 

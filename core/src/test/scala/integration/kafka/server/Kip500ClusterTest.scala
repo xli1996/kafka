@@ -20,6 +20,7 @@ package kafka.server
 import kafka.testkit.{KafkaClusterTestKit, TestKitNodes}
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.{Admin, NewTopic}
+import org.apache.kafka.common.quota.{ClientQuotaAlteration, ClientQuotaEntity, ClientQuotaFilter, ClientQuotaFilterComponent}
 import org.apache.kafka.metadata.BrokerState
 import org.junit.rules.Timeout
 import org.junit.{Assert, Rule, Test}
@@ -28,6 +29,7 @@ import java.util
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 import scala.compat.java8.OptionConverters
+import scala.jdk.CollectionConverters._
 
 class Kip500ClusterTest {
   @Rule
@@ -190,6 +192,92 @@ class Kip500ClusterTest {
           }
           result
         }, "Topics created were not listed.")
+      } finally {
+        admin.close()
+      }
+    } finally {
+      cluster.close()
+    }
+  }
+
+  @Test
+  def testClientQuotas(): Unit = {
+    val cluster = new KafkaClusterTestKit.Builder(
+      new TestKitNodes.Builder().
+        setNumKip500BrokerNodes(1).
+        setNumControllerNodes(1).build()).build()
+    try {
+      cluster.format()
+      cluster.startup()
+      TestUtils.waitUntilTrue(() => cluster.kip500Brokers().get(0).currentState() == BrokerState.RUNNING,
+        "Broker never made it to RUNNING state.")
+      val admin = Admin.create(cluster.clientProperties())
+      try {
+        val entity = new ClientQuotaEntity(Map("user" -> "testkit").asJava)
+        var filter = ClientQuotaFilter.containsOnly(
+          List(ClientQuotaFilterComponent.ofEntity("user", "testkit")).asJava)
+
+        def alterThenDescribe(entity: ClientQuotaEntity,
+                              quotas: Seq[ClientQuotaAlteration.Op],
+                              filter: ClientQuotaFilter,
+                              expectCount: Int): java.util.Map[ClientQuotaEntity, java.util.Map[String, java.lang.Double]] = {
+          admin.alterClientQuotas(Seq(new ClientQuotaAlteration(entity, quotas.asJava)).asJava)
+          val (describeResult, ok) = TestUtils.computeUntilTrue(admin.describeClientQuotas(filter).entities().get()) {
+            results => results.getOrDefault(entity, java.util.Collections.emptyMap[String, java.lang.Double]()).size() == expectCount
+          }
+          Assert.assertTrue("Broker never saw new client quotas", ok)
+          describeResult
+        }
+
+        var describeResult = alterThenDescribe(entity,
+          Seq(new ClientQuotaAlteration.Op("request_percentage", 0.99)), filter, 1)
+        Assert.assertEquals(0.99, describeResult.get(entity).get("request_percentage"), 1e-6)
+
+        describeResult = alterThenDescribe(entity, Seq(
+          new ClientQuotaAlteration.Op("request_percentage", 0.97),
+          new ClientQuotaAlteration.Op("unknown_quota", 100),
+          new ClientQuotaAlteration.Op("producer_byte_rate", 10000),
+          new ClientQuotaAlteration.Op("consumer_byte_rate", 10001)
+        ), filter, 3)
+        Assert.assertEquals(0.97, describeResult.get(entity).get("request_percentage"), 1e-6)
+        Assert.assertEquals(10000.0, describeResult.get(entity).get("producer_byte_rate"), 1e-6)
+        Assert.assertEquals(10001.0, describeResult.get(entity).get("consumer_byte_rate"), 1e-6)
+
+        describeResult = alterThenDescribe(entity, Seq(
+          new ClientQuotaAlteration.Op("request_percentage", 0.95),
+          new ClientQuotaAlteration.Op("producer_byte_rate", null),
+          new ClientQuotaAlteration.Op("consumer_byte_rate", null)
+        ), filter, 1)
+        Assert.assertEquals(0.95, describeResult.get(entity).get("request_percentage"), 1e-6)
+
+        describeResult = alterThenDescribe(entity, Seq(
+          new ClientQuotaAlteration.Op("request_percentage", null)), filter, 0)
+
+        describeResult = alterThenDescribe(entity,
+          Seq(new ClientQuotaAlteration.Op("producer_byte_rate", 9999)), filter, 1)
+        Assert.assertEquals(9999.0, describeResult.get(entity).get("producer_byte_rate"), 1e-6)
+
+        // Add another quota for a different entity with same user part
+        val entity2 = new ClientQuotaEntity(Map("user" -> "testkit", "client-id" -> "some-client").asJava)
+        filter = ClientQuotaFilter.containsOnly(
+          List(
+            ClientQuotaFilterComponent.ofEntity("user", "testkit"),
+            ClientQuotaFilterComponent.ofEntity("client-id", "some-client"),
+          ).asJava)
+        describeResult = alterThenDescribe(entity2,
+          Seq(new ClientQuotaAlteration.Op("producer_byte_rate", 9998)), filter, 1)
+        Assert.assertEquals(9998.0, describeResult.get(entity2).get("producer_byte_rate"), 1e-6)
+
+        // non-strict match
+        filter = ClientQuotaFilter.contains(
+          List(ClientQuotaFilterComponent.ofEntity("user", "testkit")).asJava)
+
+        val (describeResult2, ok) = TestUtils.computeUntilTrue(admin.describeClientQuotas(filter).entities().get()) {
+          results => results.size() == 2
+        }
+        Assert.assertTrue("Broker never saw two client quotas", ok)
+        Assert.assertEquals(9999.0, describeResult2.get(entity).get("producer_byte_rate"), 1e-6)
+        Assert.assertEquals(9998.0, describeResult2.get(entity2).get("producer_byte_rate"), 1e-6)
       } finally {
         admin.close()
       }

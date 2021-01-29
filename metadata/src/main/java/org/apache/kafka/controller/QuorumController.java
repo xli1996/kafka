@@ -870,6 +870,15 @@ public final class QuorumController implements Controller {
     }
 
     @Override
+    public CompletableFuture<Void> waitForReadyBrokers(int minBrokers) {
+        final CompletableFuture<Void> future = new CompletableFuture<>();
+        appendControlEvent("waitForReadyBrokers", () -> {
+            clusterControl.addReadyBrokersFuture(future, minBrokers);
+        });
+        return future;
+    }
+
+    @Override
     public void beginShutdown() {
         queue.beginShutdown("QuorumController#beginShutdown");
     }

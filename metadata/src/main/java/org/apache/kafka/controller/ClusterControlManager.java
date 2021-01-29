@@ -47,9 +47,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 
 public class ClusterControlManager {
+    class ReadyBrokersFuture {
+        private final CompletableFuture<Void> future;
+        private final int minBrokers;
+
+        ReadyBrokersFuture(CompletableFuture<Void> future, int minBrokers) {
+            this.future = future;
+            this.minBrokers = minBrokers;
+        }
+
+        boolean check() {
+            int numUnfenced = 0;
+            for (BrokerRegistration registration : brokerRegistrations.values()) {
+                if (!registration.fenced()) {
+                    numUnfenced++;
+                }
+                if (numUnfenced >= minBrokers) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     /**
      * The SLF4J log context.
      */
@@ -85,6 +109,12 @@ public class ClusterControlManager {
      */
     private BrokerHeartbeatManager heartbeatManager;
 
+    /**
+     * A future which is completed as soon as we have the given number of brokers
+     * ready.
+     */
+    private Optional<ReadyBrokersFuture> readyBrokersFuture;
+
     ClusterControlManager(LogContext logContext,
                           Time time,
                           SnapshotRegistry snapshotRegistry,
@@ -97,6 +127,7 @@ public class ClusterControlManager {
         this.placementPolicy = placementPolicy;
         this.brokerRegistrations = new TimelineHashMap<>(snapshotRegistry, 0);
         this.heartbeatManager = null;
+        this.readyBrokersFuture = Optional.empty();
     }
 
     /**
@@ -344,6 +375,12 @@ public class ClusterControlManager {
             brokerRegistrations.put(brokerId, registration.cloneWithFencing(false));
             log.info("Unfenced broker: {}", record);
         }
+        if (readyBrokersFuture.isPresent()) {
+            if (readyBrokersFuture.get().check()) {
+                readyBrokersFuture.get().future.complete(null);
+                readyBrokersFuture = Optional.empty();
+            }
+        }
     }
 
     public List<List<Integer>> placeReplicas(int numPartitions, short numReplicas) {
@@ -407,5 +444,13 @@ public class ClusterControlManager {
             throw new RuntimeException("ClusterControlManager is not active.");
         }
         heartbeatManager.updateShutdownOffset(brokerId, offset);
+    }
+
+    public void addReadyBrokersFuture(CompletableFuture<Void> future, int minBrokers) {
+        readyBrokersFuture = Optional.of(new ReadyBrokersFuture(future, minBrokers));
+        if (readyBrokersFuture.get().check()) {
+            readyBrokersFuture.get().future.complete(null);
+            readyBrokersFuture = Optional.empty();
+        }
     }
 }

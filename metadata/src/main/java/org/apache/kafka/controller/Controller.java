@@ -144,6 +144,16 @@ public interface Controller extends AutoCloseable {
         BrokerRegistrationRequestData request);
 
     /**
+     * Wait for the given number of brokers to be registered and unfenced.
+     * This is for testing.
+     *
+     * @param minBrokers    The minimum number of brokers to wait for.
+     * @return              A future which is completed when the given number of brokers
+     *                      is reached.
+     */
+    CompletableFuture<Void> waitForReadyBrokers(int minBrokers);
+
+    /**
      * Perform some client quota changes
      *
      * @param quotaAlterations The list of quotas to alter

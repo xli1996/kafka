@@ -24,7 +24,7 @@ import org.junit.{Rule, Test}
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
-class Kip500ControllerTest {
+class ControllerServerTest {
   @Rule
   def globalTimeout = Timeout.millis(120000)
 

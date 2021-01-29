@@ -67,7 +67,7 @@ class HighwatermarkPersistenceTest {
     val time = new MockTime
     val quotaManager = QuotaFactory.instantiate(configs.head, metrics, time, "")
     // create replica manager
-    val replicaManager = new ReplicaManager(configs.head, metrics, time, zkClient, scheduler,
+    val replicaManager = new ReplicaManagerZk(configs.head, metrics, time, zkClient, scheduler,
       logManagers.head, new AtomicBoolean(false), quotaManager,
       new BrokerTopicStats, new MetadataCache(configs.head.brokerId), logDirFailureChannels.head, alterIsrManager)
     replicaManager.startup()
@@ -119,7 +119,7 @@ class HighwatermarkPersistenceTest {
     val time = new MockTime
     val quotaManager = QuotaFactory.instantiate(configs.head, metrics, time, "")
     // create replica manager
-    val replicaManager = new ReplicaManager(configs.head, metrics, time, zkClient,
+    val replicaManager = new ReplicaManagerZk(configs.head, metrics, time, zkClient,
       scheduler, logManagers.head, new AtomicBoolean(false), quotaManager,
       new BrokerTopicStats, new MetadataCache(configs.head.brokerId), logDirFailureChannels.head, alterIsrManager)
     replicaManager.startup()
@@ -183,7 +183,7 @@ class HighwatermarkPersistenceTest {
     partition.localLogOrException.appendAsLeader(records, leaderEpoch = 0)
   }
 
-  private def hwmFor(replicaManager: ReplicaManager, topic: String, partition: Int): Long = {
+  private def hwmFor(replicaManager: ReplicaManagerZk, topic: String, partition: Int): Long = {
     replicaManager.highWatermarkCheckpoints(new File(replicaManager.config.logDirs.head).getAbsolutePath).read().getOrElse(
       new TopicPartition(topic, partition), 0L)
   }

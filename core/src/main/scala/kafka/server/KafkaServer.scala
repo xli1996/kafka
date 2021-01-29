@@ -115,7 +115,7 @@ class KafkaServer(
   var logDirFailureChannel: LogDirFailureChannel = null
   var logManager: LogManager = null
 
-  var replicaManager: ReplicaManager = null
+  var replicaManager: ReplicaManagerZk = null
   var adminManager: ZkAdminManager = null
   var tokenManager: DelegationTokenManager = null
 
@@ -383,12 +383,12 @@ class KafkaServer(
     }
   }
 
-  protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManager = {
+  protected def createReplicaManager(isShuttingDown: AtomicBoolean): ReplicaManagerZk = {
     val alterIsrManager = new AlterIsrManagerImpl(alterIsrChannelManager, kafkaScheduler,
       time, config.brokerId, () => kafkaController.brokerEpoch)
-    new ReplicaManager(config, metrics, time, Some(zkClient), kafkaScheduler, logManager,
+    new ReplicaManagerZk(config, metrics, time, Some(zkClient), kafkaScheduler, logManager,
       isShuttingDown, quotaManagers, brokerTopicStats, metadataCache, logDirFailureChannel,
-      alterIsrManager, new ZkConfigRepository(new AdminZkClient(zkClient)), None, false)
+      alterIsrManager, new ZkConfigRepository(new AdminZkClient(zkClient)), None, new ReplicaManagerHelper())
   }
 
   private def initZkClient(time: Time): Unit = {

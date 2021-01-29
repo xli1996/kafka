@@ -53,7 +53,7 @@ class IsrExpirationTest {
   val metrics = new Metrics
 
   var quotaManager: QuotaManagers = null
-  var replicaManager: ReplicaManager = null
+  var replicaManager: ReplicaManagerZk = null
 
   var alterIsrManager: MockAlterIsrManager = _
 
@@ -65,7 +65,7 @@ class IsrExpirationTest {
 
     alterIsrManager = TestUtils.createAlterIsrManager()
     quotaManager = QuotaFactory.instantiate(configs.head, metrics, time, "")
-    replicaManager = new ReplicaManager(configs.head, metrics, time, null, null, logManager, new AtomicBoolean(false),
+    replicaManager = new ReplicaManagerZk(configs.head, metrics, time, null, null, logManager, new AtomicBoolean(false),
       quotaManager, new BrokerTopicStats, new MetadataCache(configs.head.brokerId),
       new LogDirFailureChannel(configs.head.logDirs.size), alterIsrManager)
   }

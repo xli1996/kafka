@@ -47,7 +47,7 @@ class ReplicaManagerQuotasTest {
     topicPartition1 -> new PartitionData(0, 0, 100, Optional.empty()),
     topicPartition2 -> new PartitionData(0, 0, 100, Optional.empty()))
   var quotaManager: QuotaManagers = _
-  var replicaManager: ReplicaManager = _
+  var replicaManager: ReplicaManagerZk = _
 
   @Test
   def shouldExcludeSubsequentThrottledPartitions(): Unit = {
@@ -243,7 +243,7 @@ class ReplicaManagerQuotasTest {
 
     val leaderBrokerId = configs.head.brokerId
     quotaManager = QuotaFactory.instantiate(configs.head, metrics, time, "")
-    replicaManager = new ReplicaManager(configs.head, metrics, time, zkClient, scheduler, logManager,
+    replicaManager = new ReplicaManagerZk(configs.head, metrics, time, zkClient, scheduler, logManager,
       new AtomicBoolean(false), quotaManager,
       new BrokerTopicStats, new MetadataCache(leaderBrokerId), new LogDirFailureChannel(configs.head.logDirs.size), alterIsrManager)
 

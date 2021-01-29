@@ -91,7 +91,7 @@ class BrokerServer(
 
   var tokenManager: DelegationTokenManager = null
 
-  var replicaManager: ReplicaManager = null
+  var replicaManager: ReplicaManagerRaft = null
 
   var credentialProvider: CredentialProvider = null
   var tokenCache: DelegationTokenCache = null
@@ -184,10 +184,10 @@ class BrokerServer(
       val alterIsrManager = new AlterIsrManagerImpl(alterIsrChannelManager, kafkaScheduler,
         time, config.brokerId, () => lifecycleManager.brokerEpoch())
       // explicitly declare to eliminate spotbugs error in Scala 2.12
-      this.replicaManager = new ReplicaManager(config, metrics, time, None,
+      this.replicaManager = new ReplicaManagerRaft(config, metrics, time,
         kafkaScheduler, logManager, isShuttingDown, quotaManagers,
         brokerTopicStats, metadataCache, logDirFailureChannel, alterIsrManager,
-        configRepository, threadNamePrefix, true)
+        configRepository, threadNamePrefix)
 
       /* start broker-to-controller channel managers */
       val controllerNodes =

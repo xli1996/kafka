@@ -231,7 +231,7 @@ class BrokerEpochIntegrationTest extends ZooKeeperTestHarness {
         } else {
           // broker epoch in STOP_REPLICA >= current broker epoch
           sendAndVerifySuccessfulResponse(controllerChannelManager, requestBuilder)
-          assertEquals(HostedPartition.None, broker2.replicaManager.getPartition(tp))
+          assertTrue(broker2.replicaManager.onlinePartition(tp).isEmpty)
         }
       }
     } finally {

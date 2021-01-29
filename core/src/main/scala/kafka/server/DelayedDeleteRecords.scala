@@ -25,7 +25,6 @@ import kafka.utils.Implicits._
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.message.DeleteRecordsResponseData
 import org.apache.kafka.common.protocol.Errors
-import org.apache.kafka.common.requests.DeleteRecordsResponse
 
 import scala.collection._
 
@@ -74,24 +73,8 @@ class DelayedDeleteRecords(delayMs: Long,
       trace(s"Checking delete records satisfaction for $topicPartition, current status $status")
       // skip those partitions that have already been satisfied
       if (status.acksPending) {
-        val (lowWatermarkReached, error, lw) = replicaManager.getPartition(topicPartition) match {
-          case HostedPartition.Online(partition) =>
-            partition.leaderLogIfLocal match {
-              case Some(_) =>
-                val leaderLW = partition.lowWatermarkIfLeader
-                (leaderLW >= status.requiredOffset, Errors.NONE, leaderLW)
-              case None =>
-                (false, Errors.NOT_LEADER_OR_FOLLOWER, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
-            }
-          case HostedPartition.Deferred(_, _, _, _, _) =>
-            (false, Errors.NOT_LEADER_OR_FOLLOWER, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
-
-          case HostedPartition.Offline =>
-            (false, Errors.KAFKA_STORAGE_ERROR, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
-
-          case HostedPartition.None =>
-            (false, Errors.UNKNOWN_TOPIC_OR_PARTITION, DeleteRecordsResponse.INVALID_LOW_WATERMARK)
-        }
+        val (lowWatermarkReached, error: Errors, lw) = replicaManager.lowWatermarkReached(
+          topicPartition, status.requiredOffset)
         if (error != Errors.NONE || lowWatermarkReached) {
           status.acksPending = false
           status.responseStatus.setErrorCode(error.code)

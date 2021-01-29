@@ -157,8 +157,9 @@ object AbstractCoordinatorConcurrencyTest {
   trait CoordinatorMember {
   }
 
-  class TestReplicaManager extends ReplicaManager(
-    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, None, null, null, false) {
+  class TestReplicaManager extends ReplicaManagerZk(
+    null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, None, null, null,
+    new ReplicaManagerHelper()) {
 
     var producePurgatory: DelayedOperationPurgatory[DelayedProduce] = _
     var watchKeys: mutable.Set[TopicPartitionOperationKey] = _

@@ -18,11 +18,12 @@ package kafka.server.metadata
 
 import java.util
 import java.util.concurrent.TimeUnit
+
 import kafka.coordinator.group.GroupCoordinator
 import kafka.coordinator.transaction.TransactionCoordinator
 import kafka.log.LogManager
 import kafka.metrics.KafkaMetricsGroup
-import kafka.server.{MetadataCache, QuotaFactory, ReplicaManager, RequestHandlerHelper}
+import kafka.server.{MetadataCache, QuotaFactory, ReplicaManagerRaft, RequestHandlerHelper}
 import org.apache.kafka.common.config.ConfigResource
 import org.apache.kafka.common.metadata.MetadataRecordType._
 import org.apache.kafka.common.metadata._
@@ -43,7 +44,7 @@ class BrokerMetadataListener(val brokerId: Int,
                              val configRepository: LocalConfigRepository,
                              val groupCoordinator: GroupCoordinator,
                              val quotaManagers: QuotaFactory.QuotaManagers,
-                             val replicaManager: ReplicaManager,
+                             val replicaManager: ReplicaManagerRaft,
                              val txnCoordinator: TransactionCoordinator,
                              val logManager: LogManager,
                              val threadNamePrefix: Option[String]

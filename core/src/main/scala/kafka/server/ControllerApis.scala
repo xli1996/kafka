@@ -414,7 +414,7 @@ class ControllerApis(val requestChannel: RequestChannel,
 
   def handleAlterClientQuotas(request: RequestChannel.Request): Unit = {
     val quotaRequest = request.body[AlterClientQuotasRequest]
-    authHelper.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
+    authHelper.authorizeClusterOperation(request, ALTER_CONFIGS)
 
     controller.alterClientQuotas(quotaRequest.entries(), quotaRequest.validateOnly())
       .whenComplete((results, exception) => {
@@ -429,7 +429,7 @@ class ControllerApis(val requestChannel: RequestChannel,
 
   def handleIncrementalAlterConfigs(request: RequestChannel.Request): Unit = {
     val alterConfigsRequest = request.body[IncrementalAlterConfigsRequest]
-    authHelper.authorize(request.context, ALTER_CONFIGS, CLUSTER, CLUSTER_NAME)
+    authHelper.authorizeClusterOperation(request, ALTER_CONFIGS)
     val configChanges = new util.HashMap[ConfigResource, util.Map[String, util.Map.Entry[AlterConfigOp.OpType, String]]]()
     alterConfigsRequest.data.resources.forEach { resource =>
       val configResource = new ConfigResource(ConfigResource.Type.forId(resource.resourceType()), resource.resourceName())

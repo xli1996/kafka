@@ -18,9 +18,11 @@
 package org.apache.kafka.controller;
 
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType;
+import org.apache.kafka.common.ElectionType;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.InvalidReplicationFactorException;
+import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.internals.Topic;
 import org.apache.kafka.common.message.AlterIsrRequestData;
@@ -31,6 +33,11 @@ import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopic;
 import org.apache.kafka.common.message.CreateTopicsRequestData.CreatableTopicCollection;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
 import org.apache.kafka.common.message.CreateTopicsResponseData.CreatableTopicResult;
+import org.apache.kafka.common.message.ElectLeadersRequestData;
+import org.apache.kafka.common.message.ElectLeadersRequestData.TopicPartitions;
+import org.apache.kafka.common.message.ElectLeadersResponseData;
+import org.apache.kafka.common.message.ElectLeadersResponseData.PartitionResult;
+import org.apache.kafka.common.message.ElectLeadersResponseData.ReplicaElectionResult;
 import org.apache.kafka.common.metadata.IsrChangeRecord;
 import org.apache.kafka.common.metadata.PartitionRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
@@ -172,12 +179,15 @@ public class ReplicationControlManager {
             return builder.toString();
         }
 
-        int chooseNewLeader(int[] newIsr) {
+        int chooseNewLeader(int[] newIsr, boolean unclean) {
             for (int i = 0; i < replicas.length; i++) {
                 int replica = replicas[i];
                 if (Replicas.contains(newIsr, replica)) {
                     return replica;
                 }
+            }
+            if (unclean && replicas.length > 0) {
+                return replicas[0];
             }
             return -1;
         }
@@ -553,7 +563,7 @@ public class ReplicationControlManager {
                     newLeader = partition.leader;
                     newLeaderEpoch = partition.leaderEpoch;
                 } else {
-                    newLeader = partition.chooseNewLeader(newIsr);
+                    newLeader = partition.chooseNewLeader(newIsr, false);
                     newLeaderEpoch = partition.leaderEpoch + 1;
                 }
                 records.add(new ApiMessageAndVersion(new IsrChangeRecord().
@@ -585,7 +595,7 @@ public class ReplicationControlManager {
             int[] newIsr = Replicas.copyWithout(partition.isr, brokerId);
             int newLeader, newLeaderEpoch;
             if (partition.leader == brokerId) {
-                newLeader = partition.chooseNewLeader(newIsr);
+                newLeader = partition.chooseNewLeader(newIsr, false);
                 newLeaderEpoch = partition.leaderEpoch + 1;
             } else {
                 newLeader = partition.leader;
@@ -616,7 +626,7 @@ public class ReplicationControlManager {
                 throw new RuntimeException("Partition " + topicPartition +
                     " existed in isrMembers, but not in the partitions map.");
             }
-            int newLeader = partition.chooseNewLeader(partition.isr);
+            int newLeader = partition.chooseNewLeader(partition.isr, false);
             records.add(new ApiMessageAndVersion(new IsrChangeRecord().
                 setPartitionId(topicPartition.partitionId()).
                 setTopicId(topic.id).
@@ -626,5 +636,75 @@ public class ReplicationControlManager {
                 setPartitionEpoch(partition.partitionEpoch + 1), (short) 0));
         }
         return records;
+    }
+
+    ControllerResult<ElectLeadersResponseData> electLeaders(ElectLeadersRequestData request) {
+        boolean unclean = electionIsUnclean(request.electionType());
+        List<ApiMessageAndVersion> records = new ArrayList<>();
+        ElectLeadersResponseData response = new ElectLeadersResponseData();
+        for (TopicPartitions topic : request.topicPartitions()) {
+            ReplicaElectionResult topicResults =
+                new ReplicaElectionResult().setTopic(topic.topic());
+            response.replicaElectionResults().add(topicResults);
+            for (int partitionId: topic.partitionId()) {
+                ApiError error = electLeader(topic.topic(), partitionId, unclean, records);
+                topicResults.partitionResult().add(new PartitionResult().
+                    setPartitionId(partitionId).
+                    setErrorCode(error.error().code()).
+                    setErrorMessage(error.message()));
+            }
+        }
+        return new ControllerResult<>(records, response);
+    }
+
+    static boolean electionIsUnclean(byte electionType) {
+        ElectionType type;
+        try {
+            type = ElectionType.valueOf(electionType);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidRequestException("Unknown election type " + (int) electionType);
+        }
+        return type == ElectionType.UNCLEAN;
+    }
+
+    ApiError electLeader(String topic, int partitionId, boolean unclean,
+                         List<ApiMessageAndVersion> records) {
+        Uuid topicId = topicsByName.get(topic);
+        if (topicId == null) {
+            return new ApiError(Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                "No such topic as " + topic);
+        }
+        TopicControlInfo topicInfo = topics.get(topicId);
+        if (topicInfo == null) {
+            return new ApiError(Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                "No such topic id as " + topicId);
+        }
+        PartitionControlInfo partitionInfo = topicInfo.parts.get(partitionId);
+        if (partitionInfo == null) {
+            return new ApiError(Errors.UNKNOWN_TOPIC_OR_PARTITION,
+                "No such partition as " + topic + "-" + partitionId);
+        }
+        int newLeader = partitionInfo.chooseNewLeader(partitionInfo.isr, unclean);
+        if (newLeader == partitionInfo.leader) {
+            if (newLeader < 0) {
+                return new ApiError(Errors.LEADER_NOT_AVAILABLE,
+                    "Unable to find any leader for the partition.");
+            } else {
+                return ApiError.NONE;
+            }
+        } else {
+            int[] newIsr = partitionInfo.isr;
+            if (!Replicas.contains(partitionInfo.isr, newLeader)) {
+                newIsr = new int[] {newLeader};
+            }
+            records.add(new ApiMessageAndVersion(new IsrChangeRecord().
+                setPartitionId(partitionId).
+                setTopicId(topicId).
+                setIsr(Replicas.toList(newIsr)).
+                setLeader(newLeader).
+                setLeaderEpoch(partitionInfo.leaderEpoch + 1).
+                setPartitionEpoch(partitionInfo.partitionEpoch + 1), (short) 0));
+            return ApiError.NONE;
+        }
     }
 }

@@ -18,19 +18,19 @@
 package org.apache.kafka.controller;
 
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.ApiException;
 import org.apache.kafka.common.errors.NotControllerException;
 import org.apache.kafka.common.errors.UnknownServerException;
-import org.apache.kafka.common.errors.UnsupportedVersionException;
 import org.apache.kafka.common.message.AlterIsrRequestData;
 import org.apache.kafka.common.message.AlterIsrResponseData;
 import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
+import org.apache.kafka.common.message.ElectLeadersRequestData;
+import org.apache.kafka.common.message.ElectLeadersResponseData;
 import org.apache.kafka.common.metadata.ConfigRecord;
 import org.apache.kafka.common.metadata.FenceBrokerRecord;
 import org.apache.kafka.common.metadata.IsrChangeRecord;
@@ -441,6 +441,15 @@ public final class QuorumController implements Controller {
     }
 
     private <T> CompletableFuture<T> appendWriteEvent(String name,
+                                                      long timeoutMs,
+                                                      ControllerWriteOperation<T> op) {
+        ControllerWriteEvent<T> event = new ControllerWriteEvent<>(name, op);
+        queue.appendWithDeadline(time.nanoseconds() +
+            TimeUnit.NANOSECONDS.convert(timeoutMs, TimeUnit.MILLISECONDS), event);
+        return event.future();
+    }
+
+    private <T> CompletableFuture<T> appendWriteEvent(String name,
                                                       ControllerWriteOperation<T> op) {
         ControllerWriteEvent<T> event = new ControllerWriteEvent<>(name, op);
         queue.append(event);
@@ -765,11 +774,11 @@ public final class QuorumController implements Controller {
     }
 
     @Override
-    public CompletableFuture<Map<TopicPartition, PartitionLeaderElectionResult>>
-            electLeaders(int timeoutMs, Set<TopicPartition> parts, boolean unclean) {
-        CompletableFuture<Map<TopicPartition, PartitionLeaderElectionResult>> future =
-            new CompletableFuture<>();
-        future.completeExceptionally(new UnsupportedVersionException("unimplemented"));
+    public CompletableFuture<ElectLeadersResponseData>
+            electLeaders(ElectLeadersRequestData request) {
+        CompletableFuture<ElectLeadersResponseData> future = new CompletableFuture<>();
+            appendWriteEvent("electLeaders", request.timeoutMs(), () ->
+                replicationControl.electLeaders(request));
         return future;
     }
 

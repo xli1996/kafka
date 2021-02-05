@@ -86,7 +86,7 @@ class ControllerApis(val requestChannel: RequestChannel,
     //ApiKeys.RENEW_DELEGATION_TOKEN
     //ApiKeys.EXPIRE_DELEGATION_TOKEN
     //ApiKeys.DESCRIBE_DELEGATION_TOKEN
-    //ApiKeys.ELECT_LEADERS
+    ApiKeys.ELECT_LEADERS,
     ApiKeys.INCREMENTAL_ALTER_CONFIGS,
     //ApiKeys.ALTER_PARTITION_REASSIGNMENTS
     //ApiKeys.LIST_PARTITION_REASSIGNMENTS
@@ -147,6 +147,7 @@ class ControllerApis(val requestChannel: RequestChannel,
         case ApiKeys.BROKER_HEARTBEAT => handleBrokerHeartBeatRequest(request)
         case ApiKeys.DECOMMISSION_BROKER => handleDecommissionBroker(request)
         case ApiKeys.ALTER_CLIENT_QUOTAS => handleAlterClientQuotas(request)
+        case ApiKeys.ELECT_LEADERS => handleElectLeaders(request)
         case ApiKeys.INCREMENTAL_ALTER_CONFIGS => handleIncrementalAlterConfigs(request)
         case _ => throw new ApiException(s"Unsupported ApiKey ${request.context.header.apiKey()}")
       }
@@ -423,6 +424,20 @@ class ControllerApis(val requestChannel: RequestChannel,
         } else {
           requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
             AlterClientQuotasResponse.fromQuotaEntities(results, requestThrottleMs))
+        }
+      })
+  }
+
+  def handleElectLeaders(request: RequestChannel.Request): Unit = {
+    val electLeadersRequest = request.body[ElectLeadersRequest]
+    authHelper.authorizeClusterOperation(request, ALTER)
+
+    controller.electLeaders(electLeadersRequest.data()).whenComplete((result, exception) => {
+        if (exception != null) {
+          requestHelper.handleError(request, exception)
+        } else {
+          requestHelper.sendResponseMaybeThrottle(request, requestThrottleMs =>
+            new ElectLeadersResponse(result.setThrottleTimeMs(requestThrottleMs)))
         }
       })
   }

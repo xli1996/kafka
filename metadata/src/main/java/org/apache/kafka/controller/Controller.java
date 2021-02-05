@@ -18,7 +18,6 @@
 package org.apache.kafka.controller;
 
 import org.apache.kafka.clients.admin.AlterConfigOp;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.message.AlterIsrRequestData;
 import org.apache.kafka.common.message.AlterIsrResponseData;
@@ -26,6 +25,8 @@ import org.apache.kafka.common.message.BrokerHeartbeatRequestData;
 import org.apache.kafka.common.message.BrokerRegistrationRequestData;
 import org.apache.kafka.common.message.CreateTopicsRequestData;
 import org.apache.kafka.common.message.CreateTopicsResponseData;
+import org.apache.kafka.common.message.ElectLeadersRequestData;
+import org.apache.kafka.common.message.ElectLeadersResponseData;
 import org.apache.kafka.common.quota.ClientQuotaAlteration;
 import org.apache.kafka.common.quota.ClientQuotaEntity;
 import org.apache.kafka.common.requests.ApiError;
@@ -35,8 +36,8 @@ import org.apache.kafka.metadata.FeatureManager;
 
 import java.util.Collection;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+
 
 public interface Controller extends AutoCloseable {
     /**
@@ -83,15 +84,11 @@ public interface Controller extends AutoCloseable {
     /**
      * Elect new partition leaders.
      *
-     * @param timeoutMs     The timeout to use.
-     * @param parts         The partitions to elect new leaders for.
-     * @param unclean       If this is true, we will elect the first live replic if
-     *                      there are no in-sync replicas.
+     * @param request       The request.
      *
-     * @return              A future yielding a map from partitions to error results.
+     * @return              A future yielding the elect leaders response.
      */
-    CompletableFuture<Map<TopicPartition, PartitionLeaderElectionResult>>
-        electLeaders(int timeoutMs, Set<TopicPartition> parts, boolean unclean);
+    CompletableFuture<ElectLeadersResponseData> electLeaders(ElectLeadersRequestData request);
 
     /**
      * Get the current finalized feature ranges for each feature.

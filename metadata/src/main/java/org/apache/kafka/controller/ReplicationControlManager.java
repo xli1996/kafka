@@ -626,7 +626,8 @@ public class ReplicationControlManager {
                 throw new RuntimeException("Partition " + topicPartition +
                     " existed in isrMembers, but not in the partitions map.");
             }
-            int newLeader = partition.chooseNewLeader(partition.isr, false);
+            int[] isrWithoutCurLeader = Replicas.copyWithout(partition.isr, brokerId);
+            int newLeader = partition.chooseNewLeader(isrWithoutCurLeader, false);
             records.add(new ApiMessageAndVersion(new IsrChangeRecord().
                 setPartitionId(topicPartition.partitionId()).
                 setTopicId(topic.id).

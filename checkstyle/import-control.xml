@@ -256,6 +256,7 @@
   </subpackage>
 
   <subpackage name="shell">
+    <allow pkg="com.fasterxml.jackson" />
     <allow pkg="kafka.raft"/>
     <allow pkg="kafka.server"/>
     <allow pkg="kafka.tools"/>

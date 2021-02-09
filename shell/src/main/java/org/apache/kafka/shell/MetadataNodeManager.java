@@ -17,11 +17,16 @@
 
 package org.apache.kafka.shell;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.metadata.ConfigRecord;
 import org.apache.kafka.common.metadata.FenceBrokerRecord;
+import org.apache.kafka.common.metadata.IsrChangeRecord;
 import org.apache.kafka.common.metadata.MetadataRecordType;
 import org.apache.kafka.common.metadata.PartitionRecord;
+import org.apache.kafka.common.metadata.PartitionRecordJsonConverter;
 import org.apache.kafka.common.metadata.RegisterBrokerRecord;
 import org.apache.kafka.common.metadata.RemoveTopicRecord;
 import org.apache.kafka.common.metadata.TopicRecord;
@@ -103,9 +108,12 @@ public final class MetadataNodeManager implements AutoCloseable {
 
     private final Data data = new Data();
     private final LogListener logListener = new LogListener();
+    private final ObjectMapper objectMapper;
     private final KafkaEventQueue queue;
 
     public MetadataNodeManager() {
+        this.objectMapper = new ObjectMapper();
+        this.objectMapper.registerModule(new Jdk8Module());
         this.queue = new KafkaEventQueue(Time.SYSTEM,
             new LogContext("[node-manager-event-queue] "), "");
     }
@@ -165,7 +173,8 @@ public final class MetadataNodeManager implements AutoCloseable {
         }
     }
 
-    private void handleCommitImpl(MetadataRecordType type, ApiMessage message) {
+    private void handleCommitImpl(MetadataRecordType type, ApiMessage message)
+            throws Exception {
         switch (type) {
             case REGISTER_BROKER_RECORD: {
                 DirectoryNode brokersNode = data.root.mkdirs("brokers");
@@ -198,7 +207,9 @@ public final class MetadataNodeManager implements AutoCloseable {
                     data.root.mkdirs("topicIds").mkdirs(record.topicId().toString());
                 DirectoryNode partitionDirectory =
                     topicDirectory.mkdirs(Integer.toString(record.partitionId()));
-                partitionDirectory.create("data").setContents(record.toString());
+                JsonNode node = PartitionRecordJsonConverter.
+                    write(record, PartitionRecord.HIGHEST_SUPPORTED_VERSION);
+                partitionDirectory.create("data").setContents(node.toPrettyString());
                 break;
             }
             case CONFIG_RECORD: {
@@ -224,8 +235,21 @@ public final class MetadataNodeManager implements AutoCloseable {
                 }
                 break;
             }
-//            case ISR_CHANGE_RECORD:
-//            case ACCESS_CONTROL_RECORD:
+            case ISR_CHANGE_RECORD: {
+                IsrChangeRecord record = (IsrChangeRecord) message;
+                FileNode file = data.root.file("topicIds", record.topicId().toString(),
+                    Integer.toString(record.partitionId()), "data");
+                JsonNode node = objectMapper.readTree(file.contents());
+                PartitionRecord partition = PartitionRecordJsonConverter.
+                    read(node, PartitionRecord.HIGHEST_SUPPORTED_VERSION);
+                partition.setIsr(record.isr());
+                partition.setLeader(record.leader());
+                partition.setLeaderEpoch(record.leaderEpoch());
+                partition.setPartitionEpoch(record.partitionEpoch());
+                file.setContents(PartitionRecordJsonConverter.write(partition,
+                    PartitionRecord.HIGHEST_SUPPORTED_VERSION).toPrettyString());
+                break;
+            }
             case FENCE_BROKER_RECORD: {
                 FenceBrokerRecord record = (FenceBrokerRecord) message;
                 data.root.mkdirs("brokers", Integer.toString(record.id())).
@@ -247,10 +271,6 @@ public final class MetadataNodeManager implements AutoCloseable {
                 data.root.rmrf("topicIds", record.topicId().toString());
                 break;
             }
-//            case DELEGATION_TOKEN_RECORD:
-//            case USER_SCRAM_CREDENTIAL_RECORD:
-            case FEATURE_LEVEL_RECORD:
-                break;
             default:
                 throw new RuntimeException("Unhandled metadata record type");
         }

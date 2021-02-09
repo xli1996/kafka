@@ -1404,14 +1404,17 @@ project(':shell') {
 
   tasks.create(name: "copyDependantLibs", type: Copy) {
     from (configurations.testRuntime) {
-      include('slf4j-log4j12*')
-      include('log4j*jar')
+      include('jline-*jar')
     }
     from (configurations.runtime) {
-      exclude('kafka-clients*')
+      include('jline-*jar')
     }
     into "$buildDir/dependant-libs-${versions.scala}"
     duplicatesStrategy 'exclude'
+  }
+
+  jar {
+    dependsOn 'copyDependantLibs'
   }
 }
 

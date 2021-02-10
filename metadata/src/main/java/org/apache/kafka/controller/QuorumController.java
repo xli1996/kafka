@@ -838,6 +838,9 @@ public final class QuorumController implements Controller {
                 if (movingLeadersForShutDown && !result.response().shouldShutDown()) {
                     updateShutdownOffset = true;
                 }
+                if (result.response().isFenced()) {
+                    replicationControl.removeFromIsr(request.brokerId(), records);
+                }
                 rescheduleMaybeFenceReplicas();
                 records.addAll(result.records());
                 return new ControllerResult<>(records, result.response());

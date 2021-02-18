@@ -58,7 +58,7 @@ versions += [
   gradle: "5.4.1",
   gradleVersionsPlugin: "0.21.0",
   grgit: "3.1.1",
-  httpcomponents: "4.5.7",
+  httpcomponents: "4.5.13",
   httpclient: "4.5.8",
   httpmime: "4.5.2",
   easymock: "4.0.2",

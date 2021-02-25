@@ -24,8 +24,9 @@ def config = jobConfig {
     slackChannel = '#kafka-warn'
     timeoutHours = 4
     runMergeCheck = false
-    downStreamValidate = false
+    downStreamValidate = true
     downStreamRepos = ["common",]
+    nanoVersion = true
     disableConcurrentBuilds = true
 }
 
@@ -53,8 +54,8 @@ def job = {
             "master": "master"
     ]
 
-    if (!config.isReleaseJob) {
-        ciTool("ci-update-version ${env.WORKSPACE} kafka")
+    if (config.nanoVersion && !config.isReleaseJob) {
+        ciTool("ci-update-version ${env.WORKSPACE} kafka", config.isPrJob)
     }
 
     stage("Check compilation compatibility with Scala 2.12") {
@@ -123,7 +124,7 @@ def job = {
             echo "Building cp-downstream-builds"
             stage('Downstream validation') {
                 if (config.isPrJob && config.downStreamValidate) {
-                    downStreamValidation(true, true)
+                    downStreamValidation(config.nanoVersion, true, true)
                 } else {
                     return "skip downStreamValidation"
                 }

@@ -57,6 +57,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -86,6 +87,9 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
     private final RecordCollector recordCollector;
     private final PartitionGroup.RecordInfo recordInfo;
     private final Map<TopicPartition, Long> consumedOffsets;
+    private final Map<TopicPartition, Long> committedOffsets;
+    private final Map<TopicPartition, Long> highWatermark;
+    private Optional<Long> timeCurrentIdlingStarted;
     private final PunctuationQueue streamTimePunctuationQueue;
     private final PunctuationQueue systemTimePunctuationQueue;
     private final StreamsMetricsImpl streamsMetrics;
@@ -184,6 +188,8 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
                 TaskMetrics.recordLatenessSensor(threadId, taskId, streamsMetrics));
 
         stateMgr.registerGlobalStateStores(topology.globalStateStores());
+        this.committedOffsets = new HashMap<>();
+        this.highWatermark = new HashMap<>();
     }
 
     // create queues for each assigned partition and associate them
@@ -259,15 +265,11 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
     public void suspend() {
         switch (state()) {
             case CREATED:
-                log.info("Suspended created");
-                transitionTo(State.SUSPENDED);
-
+                transitToSuspend();
                 break;
 
             case RESTORING:
-                log.info("Suspended restoring");
-                transitionTo(State.SUSPENDED);
-
+                transitToSuspend();
                 break;
 
             case RUNNING:
@@ -279,7 +281,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
                     // re-fetch those records starting from the committed position
                     partitionGroup.clear();
                 } finally {
-                    transitionTo(State.SUSPENDED);
+                    transitToSuspend();
                     log.info("Suspended running");
                 }
 
@@ -358,6 +360,7 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
             default:
                 throw new IllegalStateException("Unknown state " + state() + " while resuming active task " + id);
         }
+        timeCurrentIdlingStarted = Optional.empty();
     }
 
     /**
@@ -1138,6 +1141,33 @@ public class StreamTask extends AbstractTask implements ProcessorNodePunctuator,
         } else {
             return Collections.unmodifiableMap(stateMgr.changelogOffsets());
         }
+    }
+
+    @Override
+    public Map<TopicPartition, Long> committedOffsets() {
+        return Collections.unmodifiableMap(committedOffsets);
+    }
+
+    @Override
+    public Map<TopicPartition, Long> highWaterMark() {
+        highWatermark.putAll(recordCollector.offsets());
+        return Collections.unmodifiableMap(highWatermark);
+    }
+
+    private void transitToSuspend() {
+        log.info("Suspended {}", state());
+        transitionTo(State.SUSPENDED);
+        timeCurrentIdlingStarted = Optional.of(System.currentTimeMillis());
+    }
+
+    @Override
+    public Optional<Long> timeCurrentIdlingStarted() {
+        return timeCurrentIdlingStarted;
+    }
+
+    @Override
+    public void updateCommittedOffsets(final TopicPartition topicPartition, final Long offset) {
+        committedOffsets.put(topicPartition, offset);
     }
 
     public boolean hasRecordsQueued() {

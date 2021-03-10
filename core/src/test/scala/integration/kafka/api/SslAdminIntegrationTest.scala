@@ -16,6 +16,7 @@ import java.io.File
 import java.util
 import java.util.Collections
 import java.util.concurrent._
+import java.util.function.BiConsumer
 
 import com.yammer.metrics.Metrics
 import com.yammer.metrics.core.Gauge
@@ -23,7 +24,7 @@ import kafka.security.authorizer.AclAuthorizer
 import kafka.security.authorizer.AclEntry.{WildcardHost, WildcardPrincipalString}
 import kafka.server.KafkaConfig
 import kafka.utils.{CoreUtils, TestUtils}
-import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, CreateAclsResult}
+import org.apache.kafka.clients.admin.{AdminClient, AdminClientConfig, CreateAclsResult}
 import org.apache.kafka.common.acl._
 import org.apache.kafka.common.acl.AclOperation._
 import org.apache.kafka.common.acl.AclPermissionType._
@@ -63,12 +64,14 @@ object SslAdminIntegrationTest {
           semaphore.foreach(_.acquire())
           try {
             action.apply().asScala.zip(futures).foreach { case (baseFuture, resultFuture) =>
-              baseFuture.whenComplete { (result, exception) =>
-                if (exception != null)
-                  resultFuture.completeExceptionally(exception)
-                else
-                  resultFuture.complete(result)
-              }
+              baseFuture.whenComplete(new BiConsumer[T, Throwable]() {
+                override def accept(result: T, exception: Throwable): Unit = {
+                  if (exception != null)
+                    resultFuture.completeExceptionally(exception)
+                  else
+                    resultFuture.complete(result)
+                }
+              })
             }
           } finally {
             semaphore.foreach(_.release())
@@ -92,7 +95,7 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
 
   override protected def securityProtocol = SecurityProtocol.SSL
   override protected lazy val trustStoreFile = Some(File.createTempFile("truststore", ".jks"))
-  private val adminClients = mutable.Buffer.empty[Admin]
+  private val adminClients = mutable.Buffer.empty[AdminClient]
 
   override def setUpSasl(): Unit = {
     SslAdminIntegrationTest.semaphore = None
@@ -214,7 +217,7 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
     val testSemaphore = new Semaphore(0)
     SslAdminIntegrationTest.semaphore = Some(testSemaphore)
 
-    client = Admin.create(createConfig())
+    client = AdminClient.create(createConfig())
     val results = client.createAcls(List(acl2, acl3).asJava).values
     assertEquals(Set(acl2, acl3), results.keySet().asScala)
     assertFalse(results.values().asScala.exists(_.isDone))
@@ -236,10 +239,11 @@ class SslAdminIntegrationTest extends SaslSslAdminIntegrationTest {
     validateRequestContext(SslAdminIntegrationTest.lastUpdateRequestContext.get, ApiKeys.DELETE_ACLS)
   }
 
-  private def createAdminClient: Admin = {
+  private def createAdminClient: AdminClient = {
     val config = createConfig()
     config.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, "40000")
-    val client = Admin.create(config)
+    config.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, "40000")
+    val client = AdminClient.create(config)
     adminClients += client
     client
   }

@@ -233,8 +233,9 @@ public class StreamThread extends Thread {
             state = newState;
             if (newState == State.RUNNING) {
                 updateThreadMetadata(taskManager.activeTaskMap(), taskManager.standbyTaskMap());
+            } else {
+                updateThreadMetadata(Collections.emptyMap(), Collections.emptyMap());
             }
-
             stateLock.notifyAll();
         }
 
@@ -1128,23 +1129,11 @@ public class StreamThread extends Thread {
                                       final Map<TaskId, Task> standbyTasks) {
         final Set<TaskMetadata> activeTasksMetadata = new HashSet<>();
         for (final Map.Entry<TaskId, Task> task : activeTasks.entrySet()) {
-            activeTasksMetadata.add(new TaskMetadata(
-                task.getValue().id().toString(),
-                task.getValue().inputPartitions(),
-                task.getValue().committedOffsets(),
-                task.getValue().highWaterMark(),
-                task.getValue().timeCurrentIdlingStarted()
-            ));
+            activeTasksMetadata.add(new TaskMetadata(task.getKey().toString(), task.getValue().inputPartitions()));
         }
         final Set<TaskMetadata> standbyTasksMetadata = new HashSet<>();
         for (final Map.Entry<TaskId, Task> task : standbyTasks.entrySet()) {
-            standbyTasksMetadata.add(new TaskMetadata(
-                task.getValue().id().toString(),
-                task.getValue().inputPartitions(),
-                task.getValue().committedOffsets(),
-                task.getValue().highWaterMark(),
-                task.getValue().timeCurrentIdlingStarted()
-            ));
+            standbyTasksMetadata.add(new TaskMetadata(task.getKey().toString(), task.getValue().inputPartitions()));
         }
 
         final String adminClientId = threadMetadata.adminClientId();
@@ -1156,8 +1145,7 @@ public class StreamThread extends Thread {
             taskManager.producerClientIds(),
             adminClientId,
             activeTasksMetadata,
-            standbyTasksMetadata
-        );
+            standbyTasksMetadata);
     }
 
     public Map<TaskId, Task> activeTaskMap() {

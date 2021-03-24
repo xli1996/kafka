@@ -645,7 +645,7 @@ class KafkaConfigTest {
         case KafkaConfig.ConnectionSetupTimeoutMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
         case KafkaConfig.ConnectionSetupTimeoutMaxMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
 
-          // KIP-500 Configurations
+          // Self-managed mode configs
         case KafkaConfig.ProcessRolesProp => // ignore
         case KafkaConfig.InitialBrokerRegistrationTimeoutMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
         case KafkaConfig.BrokerHeartbeatIntervalMsProp => assertPropertyInvalid(baseProperties, name, "not_a_number")
@@ -779,6 +779,7 @@ class KafkaConfigTest {
         case KafkaConfig.SslPrincipalMappingRulesProp => // ignore string
 
         //Sasl Configs
+        case KafkaConfig.SaslMechanismControllerProtocolProp => // ignore
         case KafkaConfig.SaslMechanismInterBrokerProtocolProp => // ignore
         case KafkaConfig.SaslEnabledMechanismsProp =>
         case KafkaConfig.SaslClientCallbackHandlerClassProp =>

@@ -45,7 +45,7 @@ import org.apache.kafka.server.authorizer.Authorizer
 import scala.jdk.CollectionConverters._
 
 /**
- * A KIP-500 Kafka controller.
+ * A self-managed Kafka controller.
  */
 class ControllerServer(
                         val metaProperties: MetaProperties,
@@ -168,7 +168,8 @@ class ControllerServer(
         raftManager,
         config,
         metaProperties,
-        controllerNodes.toSeq)
+        controllerNodes.toSeq,
+        apiVersionManager)
       controllerApisHandlerPool = new KafkaRequestHandlerPool(config.nodeId,
         socketServer.dataPlaneRequestChannel,
         controllerApis,

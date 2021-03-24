@@ -1232,7 +1232,7 @@ public class StreamTaskTest {
         // max idle time is 100ms
         task = createStatelessTask(createConfig("100"), StreamsConfig.METRICS_LATEST);
         task.initializeIfNeeded();
-        task.completeRestoration();
+        task.completeRestoration(noOpResetter -> { });
 
         final MetricName enforcedProcessMetric = metrics.metricName(
             "enforced-processing-total",
@@ -1285,7 +1285,7 @@ public class StreamTaskTest {
     public void shouldNotBeProcessableIfNoDataAvailable() {
         task = createStatelessTask(createConfig("100"), StreamsConfig.METRICS_LATEST);
         task.initializeIfNeeded();
-        task.completeRestoration();
+        task.completeRestoration(noOpResetter -> { });
 
         final MetricName enforcedProcessMetric = metrics.metricName(
             "enforced-processing-total",

@@ -100,17 +100,14 @@ allprojects {
       if (name != "zinc") {
         resolutionStrategy {
           force(
-            // ensure we have a single version of scala jars in the classpath, we enable inlining
-            // in the scala compiler for the `core` module so binary compatibility is only
-            // guaranteed if the exact same version of the scala jars is used for compilation
-            // and at runtime
+            // be explicit about the javassist dependency version instead of relying on the transitive version
+            libs.javassist,
+            // ensure we have a single version in the classpath despite transitive dependencies
             libs.scalaLibrary,
             libs.scalaReflect,
-            // ensures we have a single version of jackson-annotations in the classpath even if
-            // some modules only have a transitive reference to an older version
             libs.jacksonAnnotations,
-            // be explicit about the Netty dependency version instead of relying on the version
-            // set by ZooKeeper (potentially older and containing CVEs)
+            // be explicit about the Netty dependency version instead of relying on the version set by
+            // ZooKeeper (potentially older and containing CVEs)
             libs.nettyHandler,
             libs.nettyTransportNativeEpoll
           )
@@ -120,12 +117,6 @@ allprojects {
         }
       }
     }
-  }
-
-  tasks.withType(Javadoc) {
-    // disable the crazy super-strict doclint tool in Java 8
-    // noinspection SpellCheckingInspection
-    options.addStringOption('Xdoclint:none', '-quiet')
   }
 
 }
@@ -186,6 +177,7 @@ if (file('.git').exists()) {
         'gradlew',
         'gradlew.bat',
         'gradle/wrapper/gradle-wrapper.properties',
+        'config/self-managed/README.md',
         'TROGDOR.md',
         '**/*README.md',
         '**/id_rsa',
@@ -473,6 +465,14 @@ subprojects {
     options.charSet = 'UTF-8'
     options.docEncoding = 'UTF-8'
     options.encoding = 'UTF-8'
+    // Turn off doclint for now, see https://blog.joda.org/2014/02/turning-off-doclint-in-jdk-8-javadoc.html for rationale
+    options.addStringOption('Xdoclint:none', '-quiet')
+
+    // The URL structure was changed to include the locale after Java 8
+    if (JavaVersion.current().isJava11Compatible())
+      options.links "https://docs.oracle.com/en/java/javase/${JavaVersion.current().majorVersion}/docs/api/"
+    else
+      options.links "https://docs.oracle.com/javase/8/docs/api/"
   }
 
   task systemTestLibs(dependsOn: jar)
@@ -1486,7 +1486,7 @@ project(':streams') {
 
   javadoc {
     include "**/org/apache/kafka/streams/**"
-    exclude "**/internals/**"
+    exclude "**/org/apache/kafka/streams/internals/**", "**/org/apache/kafka/streams/**/internals/**"
   }
 
   tasks.create(name: "copyDependantLibs", type: Copy) {
@@ -1626,7 +1626,7 @@ project(':streams:test-utils') {
 
   javadoc {
     include "**/org/apache/kafka/streams/test/**"
-    exclude "**/internals/**"
+    exclude "**/org/apache/kafka/streams/internals/**", "**/org/apache/kafka/streams/**/internals/**"
   }
 
   tasks.create(name: "copyDependantLibs", type: Copy) {
@@ -1950,11 +1950,6 @@ project(':connect:api') {
 
   javadoc {
     include "**/org/apache/kafka/connect/**" // needed for the `aggregatedJavadoc` task
-    // The URL structure was changed to include the locale after Java 8
-    if (JavaVersion.current().isJava11Compatible())
-      options.links "https://docs.oracle.com/en/java/javase/${JavaVersion.current().majorVersion}/docs/api/"
-    else
-      options.links "https://docs.oracle.com/javase/8/docs/api/"
   }
 
   tasks.create(name: "copyDependantLibs", type: Copy) {
@@ -2308,12 +2303,19 @@ project(':connect:mirror-client') {
   }
 }
 
-task aggregatedJavadoc(type: Javadoc) {
+task aggregatedJavadoc(type: Javadoc, dependsOn: compileJava) {
   def projectsWithJavadoc = subprojects.findAll { it.javadoc.enabled }
   source = projectsWithJavadoc.collect { it.sourceSets.main.allJava }
   classpath = files(projectsWithJavadoc.collect { it.sourceSets.main.compileClasspath })
   includes = projectsWithJavadoc.collectMany { it.javadoc.getIncludes() }
   excludes = projectsWithJavadoc.collectMany { it.javadoc.getExcludes() }
+
+  options.charSet = 'UTF-8'
+  options.docEncoding = 'UTF-8'
+  options.encoding = 'UTF-8'
+  // Turn off doclint for now, see https://blog.joda.org/2014/02/turning-off-doclint-in-jdk-8-javadoc.html for rationale
+  options.addStringOption('Xdoclint:none', '-quiet')
+
   // The URL structure was changed to include the locale after Java 8
   if (JavaVersion.current().isJava11Compatible())
     options.links "https://docs.oracle.com/en/java/javase/${JavaVersion.current().majorVersion}/docs/api/"

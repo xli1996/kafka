@@ -112,8 +112,12 @@ class GssapiAuthenticationTest extends IntegrationTestHarness with SaslSetup {
       val login = TestableKerberosLogin.instance
       assertNotNull(login)
       login.loginException = Some(new RuntimeException("Test exception to fail login"))
-      executor.submit(() => login.reLogin(), 0)
-      executor.submit(() => login.reLogin(), 0)
+      executor.submit(new Runnable {
+        override def run(): Unit = login.reLogin()
+      })
+      executor.submit(new Runnable {
+        override def run(): Unit = login.reLogin()
+      })
 
       verifyRelogin(selector, login)
       assertEquals(2, login.loginAttempts)
@@ -134,7 +138,9 @@ class GssapiAuthenticationTest extends IntegrationTestHarness with SaslSetup {
     try {
       val login = TestableKerberosLogin.instance
       assertNotNull(login)
-      executor.submit(() => login.reLogin(), 0)
+      executor.submit(new Runnable {
+        override def run(): Unit = login.reLogin()
+      })
       verifyRelogin(selector, login)
     } finally {
       selector.close()
